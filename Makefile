@@ -1,0 +1,10 @@
+init: modules
+
+modules:
+	go mod tidy
+
+test:
+	gosec ./...
+	go fmt ./...
+	go test ./... -timeout 5s --cover
+	go vet ./...
