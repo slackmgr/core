@@ -10,13 +10,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/eko/gocache/lib/v4/cache"
+	cachestore "github.com/eko/gocache/lib/v4/store"
+	"github.com/peteraglen/slack-manager/common"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 )
 
 const (
 	slackRequestMetric   = "slack_request"
-	slackCacheHitMetric  = "slack_cache_hit"
+	slackhitMetric       = "slack_cache_hit"
 	slackAPICallMetric   = "slack_api_call"
 	slackAPIErrorMetric  = "slack_api_error"
 	ChannelNotFoundError = "channel_not_found"
@@ -49,16 +52,18 @@ type Client interface {
 
 type client struct {
 	api       *slack.Client
-	logger    Logger
-	cache     Cache
-	metrics   Metrics
+	logger    common.Logger
+	cache     *common.Cache[string]
+	metrics   common.Metrics
 	options   *Options
 	connected bool
 	botUserID string
 }
 
-func New(logger Logger, cache Cache, metrics Metrics, options *Options) Client {
+func New(logger common.Logger, cacheStore cachestore.StoreInterface, metrics common.Metrics, options *Options) Client {
 	options.SetDefaults()
+
+	cache := common.NewCache(cache.New[string](cacheStore), logger)
 
 	return &client{
 		logger:  logger,
@@ -94,7 +99,7 @@ func (c *client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
 	}
 
 	c.metrics.RegisterCounter(slackRequestMetric, "Total number of Slack client requests", "slack_action")
-	c.metrics.RegisterCounter(slackCacheHitMetric, "Total number of Slack client cache hits", "slack_action")
+	c.metrics.RegisterCounter(slackhitMetric, "Total number of Slack client cache hits", "slack_action")
 	c.metrics.RegisterCounter(slackAPICallMetric, "Total number of Slack API calls", "slack_action")
 	c.metrics.RegisterCounter(slackAPIErrorMetric, "Total number of Slack API call errors", "slack_action")
 
@@ -318,17 +323,12 @@ func (c *client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 
 	cacheKey := fmt.Sprintf("%s-channelInfo-%s", c.options.CachePrefix, channelID)
 
-	cachedValue, cacheHit, err := c.readCacheString(ctx, cacheKey)
-	if err != nil {
-		return nil, err
-	}
-
-	if cacheHit {
-		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
+	if val, hit := c.cache.Get(ctx, cacheKey); hit {
+		c.metrics.AddToCounter(slackhitMetric, 1, action)
 
 		info := slack.Channel{}
 
-		if err := json.Unmarshal([]byte(cachedValue), &info); err != nil {
+		if err := json.Unmarshal([]byte(val), &info); err != nil {
 			c.logger.WithField("slack_channel_id", channelID).Errorf("failed to json unmarshal channel value: %s", err)
 		} else {
 			return &info, nil
@@ -364,7 +364,7 @@ func (c *client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 	if err != nil {
 		c.logger.WithField("slack_channel_id", channelID).Errorf("failed to json marshal channel value: %w", err)
 	} else {
-		c.addToCacheWithRandomExpiration(ctx, cacheKey, resultJSON, 2*time.Minute, time.Minute)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 2*time.Minute, time.Minute)
 	}
 
 	return channel, nil
@@ -377,17 +377,12 @@ func (c *client) ListAllChannels(ctx context.Context) ([]*ChannelSummary, error)
 
 	cacheKey := fmt.Sprintf("%s-listAllChannels", c.options.CachePrefix)
 
-	cachedValue, cacheHit, err := c.readCacheString(ctx, cacheKey)
-	if err != nil {
-		return nil, err
-	}
-
-	if cacheHit {
-		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
+	if val, hit := c.cache.Get(ctx, cacheKey); hit {
+		c.metrics.AddToCounter(slackhitMetric, 1, action)
 
 		channels := []*ChannelSummary{}
 
-		if err := json.Unmarshal([]byte(cachedValue), &channels); err != nil {
+		if err := json.Unmarshal([]byte(val), &channels); err != nil {
 			c.logger.Errorf("failed to json unmarshal channel list: %s", err)
 		} else {
 			return channels, nil
@@ -431,7 +426,7 @@ func (c *client) ListAllChannels(ctx context.Context) ([]*ChannelSummary, error)
 	if err != nil {
 		c.logger.Errorf("failed to json marshal channel list: %w", err)
 	} else {
-		c.addToCacheWithRandomExpiration(ctx, cacheKey, resultJSON, 2*time.Minute, time.Minute)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 2*time.Minute, time.Minute)
 	}
 
 	return channels, nil
@@ -444,17 +439,12 @@ func (c *client) ListBotChannels(ctx context.Context) ([]*ChannelSummary, error)
 
 	cacheKey := fmt.Sprintf("%s-listBotChannel", c.options.CachePrefix)
 
-	cachedValue, cacheHit, err := c.readCacheString(ctx, cacheKey)
-	if err != nil {
-		return nil, err
-	}
-
-	if cacheHit {
-		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
+	if val, hit := c.cache.Get(ctx, cacheKey); hit {
+		c.metrics.AddToCounter(slackhitMetric, 1, action)
 
 		channels := []*ChannelSummary{}
 
-		if err := json.Unmarshal([]byte(cachedValue), &channels); err != nil {
+		if err := json.Unmarshal([]byte(val), &channels); err != nil {
 			c.logger.Errorf("failed to json unmarshal channel list: %s", err)
 		} else {
 			return channels, nil
@@ -498,7 +488,7 @@ func (c *client) ListBotChannels(ctx context.Context) ([]*ChannelSummary, error)
 	if err != nil {
 		c.logger.Errorf("failed to json marshal bot channel list: %w", err)
 	} else {
-		c.addToCacheWithRandomExpiration(ctx, cacheKey, resultJSON, 2*time.Minute, time.Minute)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 2*time.Minute, time.Minute)
 	}
 
 	return channels, nil
@@ -515,17 +505,12 @@ func (c *client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 
 	cacheKey := fmt.Sprintf("%s-userInfo-%s", c.options.CachePrefix, userID)
 
-	cachedValue, cacheHit, err := c.readCacheString(ctx, cacheKey)
-	if err != nil {
-		return nil, err
-	}
-
-	if cacheHit {
-		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
+	if val, hit := c.cache.Get(ctx, cacheKey); hit {
+		c.metrics.AddToCounter(slackhitMetric, 1, action)
 
 		user := slack.User{}
 
-		if err := json.Unmarshal([]byte(cachedValue), &user); err != nil {
+		if err := json.Unmarshal([]byte(val), &user); err != nil {
 			c.logger.Errorf("failed to json unmarshal userInfo value: %s", err)
 		} else {
 			return &user, nil
@@ -546,7 +531,7 @@ func (c *client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 	if err != nil {
 		c.logger.Errorf("failed to json marshal userInfo value: %s", err)
 	} else {
-		c.addToCacheWithRandomExpiration(ctx, cacheKey, resultJSON, 10*time.Hour, 5*time.Hour)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 10*time.Hour, 5*time.Hour)
 	}
 
 	return user, nil
@@ -563,17 +548,12 @@ func (c *client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 
 	cacheKey := fmt.Sprintf("%s-userGroupMembers-%s", c.options.CachePrefix, groupID)
 
-	cachedValue, cacheHit, err := c.readCacheString(ctx, cacheKey)
-	if err != nil {
-		return nil, err
-	}
-
-	if cacheHit {
-		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
+	if val, hit := c.cache.Get(ctx, cacheKey); hit {
+		c.metrics.AddToCounter(slackhitMetric, 1, action)
 
 		var result map[string]struct{}
 
-		if err := json.Unmarshal([]byte(cachedValue), &result); err != nil {
+		if err := json.Unmarshal([]byte(val), &result); err != nil {
 			c.logger.Errorf("failed to json unmarshal group user IDs value: %s", err)
 		} else {
 			return result, nil
@@ -603,7 +583,7 @@ func (c *client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 	if err != nil {
 		c.logger.Errorf("failed to json marshal user IDs: %s", err)
 	} else {
-		c.addToCacheWithRandomExpiration(ctx, cacheKey, resultJSON, 3*time.Minute, 2*time.Minute)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 3*time.Minute, 2*time.Minute)
 	}
 
 	return result, nil
@@ -620,17 +600,12 @@ func (c *client) GetUserByEmail(ctx context.Context, email string) (*slack.User,
 
 	cacheKey := fmt.Sprintf("%s-userByEmail-%s", c.options.CachePrefix, email)
 
-	cachedValue, cacheHit, err := c.readCacheString(ctx, cacheKey)
-	if err != nil {
-		return nil, err
-	}
-
-	if cacheHit {
-		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
+	if val, hit := c.cache.Get(ctx, cacheKey); hit {
+		c.metrics.AddToCounter(slackhitMetric, 1, action)
 
 		user := slack.User{}
 
-		if err := json.Unmarshal([]byte(cachedValue), &user); err != nil {
+		if err := json.Unmarshal([]byte(val), &user); err != nil {
 			c.logger.Errorf("failed to json unmarshal userInfo value: %s", err)
 		} else {
 			return &user, nil
@@ -654,7 +629,7 @@ func (c *client) GetUserByEmail(ctx context.Context, email string) (*slack.User,
 	if err != nil {
 		c.logger.Errorf("failed to json marshal userInfo value: %s", err)
 	} else {
-		c.addToCacheWithRandomExpiration(ctx, cacheKey, resultJSON, 10*time.Hour, 5*time.Hour)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 10*time.Hour, 5*time.Hour)
 	}
 
 	return user, nil
@@ -696,17 +671,12 @@ func (c *client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 
 	cacheKey := fmt.Sprintf("%s-userIdsInChannel-%s", c.options.CachePrefix, channelID)
 
-	cachedValue, cacheHit, err := c.readCacheString(ctx, cacheKey)
-	if err != nil {
-		return nil, err
-	}
-
-	if cacheHit {
-		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
+	if val, hit := c.cache.Get(ctx, cacheKey); hit {
+		c.metrics.AddToCounter(slackhitMetric, 1, action)
 
 		var result map[string]struct{}
 
-		if err := json.Unmarshal([]byte(cachedValue), &result); err != nil {
+		if err := json.Unmarshal([]byte(val), &result); err != nil {
 			c.logger.WithField("slack_channel_id", channelID).Errorf("failed to json unmarshal userIdsInChannel value: %s", err)
 		} else {
 			return result, nil
@@ -750,7 +720,7 @@ func (c *client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 	if err != nil {
 		c.logger.WithField("slack_channel_id", channelID).Errorf("failed to json marshal userIdsInChannel result: %s", err)
 	} else {
-		c.addToCacheWithRandomExpiration(ctx, cacheKey, resultJSON, time.Minute, time.Minute)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), time.Minute, time.Minute)
 	}
 
 	return result, nil
@@ -763,13 +733,8 @@ func (c *client) BotIsInChannel(ctx context.Context, channelID string) (bool, er
 
 	cacheKey := fmt.Sprintf("%s-botIsInChannel-%s", c.options.CachePrefix, channelID)
 
-	cachedValue, cacheHit, err := c.readCacheBool(ctx, cacheKey)
-	if err != nil {
-		return false, err
-	}
-
-	if cacheHit {
-		return cachedValue, nil
+	if val, hit := c.cache.Get(ctx, cacheKey); hit {
+		return val == "true", nil
 	}
 
 	userIDs, err := c.GetUserIDsInChannel(ctx, channelID)
@@ -780,9 +745,9 @@ func (c *client) BotIsInChannel(ctx context.Context, channelID string) (bool, er
 	_, found := userIDs[c.botUserID]
 
 	if found {
-		c.addToCacheWithRandomExpiration(ctx, cacheKey, found, time.Hour, 30*time.Minute)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, "true", time.Hour, 30*time.Minute)
 	} else {
-		c.addToCacheWithRandomExpiration(ctx, cacheKey, found, time.Minute, time.Minute)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, "false", time.Minute, time.Minute)
 	}
 
 	return found, nil
@@ -814,7 +779,7 @@ func (c *client) AddUserToChannel(ctx context.Context, user *slack.User, channel
 	return nil
 }
 
-func callAPI[V any, W any](ctx context.Context, logger Logger, options *Options, metrics Metrics, action string, f func(ctx context.Context) (V, W, error), expectedErrors ...string) (V, W, error) {
+func callAPI[V any, W any](ctx context.Context, logger common.Logger, options *Options, metrics common.Metrics, action string, f func(ctx context.Context) (V, W, error), expectedErrors ...string) (V, W, error) {
 	attempt := 1
 	started := time.Now()
 
@@ -832,7 +797,7 @@ func callAPI[V any, W any](ctx context.Context, logger Logger, options *Options,
 		var result1 V
 		var result2 W
 
-		if isCtxCanceledErr(err) {
+		if common.IsCtxCanceledErr(err) {
 			return result1, result2, err
 		}
 
@@ -854,7 +819,7 @@ func callAPI[V any, W any](ctx context.Context, logger Logger, options *Options,
 	}
 }
 
-func waitForAPIError(ctx context.Context, started time.Time, logger Logger, attempt int, action string, options *Options, err error) error {
+func waitForAPIError(ctx context.Context, started time.Time, logger common.Logger, attempt int, action string, options *Options, err error) error {
 	var rateLimitError *slack.RateLimitedError
 
 	if errors.As(err, &rateLimitError) {
@@ -895,7 +860,7 @@ func inSlice(s string, slice []string) bool {
 	return false
 }
 
-func waitForRateLimit(ctx context.Context, logger Logger, err *slack.RateLimitedError, attempt int, action string, remainingWaitTime time.Duration) error {
+func waitForRateLimit(ctx context.Context, logger common.Logger, err *slack.RateLimitedError, attempt int, action string, remainingWaitTime time.Duration) error {
 	wait := err.RetryAfter + 2*time.Second
 
 	if wait > remainingWaitTime {
@@ -907,7 +872,7 @@ func waitForRateLimit(ctx context.Context, logger Logger, err *slack.RateLimited
 	return sleep(ctx, wait)
 }
 
-func waitForTransientError(ctx context.Context, logger Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
+func waitForTransientError(ctx context.Context, logger common.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
 	wait := time.Duration(attempt) * time.Second
 
 	if wait > remainingWaitTime {
@@ -919,7 +884,7 @@ func waitForTransientError(ctx context.Context, logger Logger, err error, attemp
 	return sleep(ctx, wait)
 }
 
-func waitForFatalError(ctx context.Context, logger Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
+func waitForFatalError(ctx context.Context, logger common.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
 	wait := time.Duration(attempt) * time.Second * 2
 
 	if wait > remainingWaitTime {
@@ -963,70 +928,5 @@ func isNonRetryableError(err error) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func isCtxCanceledErr(args ...any) bool {
-	for _, arg := range args {
-		switch t := arg.(type) {
-		case error:
-			if errors.Is(t, context.Canceled) {
-				return true
-			}
-
-			if strings.Contains(t.Error(), context.Canceled.Error()) {
-				return true
-			}
-		case string:
-			if strings.Contains(t, context.Canceled.Error()) {
-				return true
-			}
-		default:
-			continue
-		}
-	}
-
-	return false
-}
-
-func (c *client) readCacheString(ctx context.Context, cacheKey string) (string, bool, error) {
-	cachedValue, cacheHit, err := c.cache.Get(ctx, cacheKey)
-
-	if err == nil {
-		return cachedValue, cacheHit, nil
-	}
-
-	if !c.options.IgnoreCacheReadErrors {
-		return "", false, err
-	}
-
-	if !isCtxCanceledErr(err) {
-		c.logger.Errorf("Cache read failed: %s", err)
-	}
-
-	return "", false, nil
-}
-
-func (c *client) readCacheBool(ctx context.Context, cacheKey string) (bool, bool, error) {
-	cachedValue, cacheHit, err := c.cache.GetBool(ctx, cacheKey)
-
-	if err == nil {
-		return cachedValue, cacheHit, nil
-	}
-
-	if !c.options.IgnoreCacheReadErrors {
-		return false, false, err
-	}
-
-	if !isCtxCanceledErr(err) {
-		c.logger.Errorf("Cache read failed: %s", err)
-	}
-
-	return false, false, nil
-}
-
-func (c *client) addToCacheWithRandomExpiration(ctx context.Context, cacheKey string, value any, minExpiration time.Duration, variation time.Duration) {
-	if err := c.cache.SetWithRandomExpiration(ctx, cacheKey, value, minExpiration, variation); err != nil && !isCtxCanceledErr(err) {
-		c.logger.Errorf("Cache write failed: %s", err)
 	}
 }

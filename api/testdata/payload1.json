@@ -1,0 +1,30 @@
+{
+  "correlationId": "asdfadsfadfbsddzv",
+  "header": ":status: App error",
+  "text": "TESTING TESTING!\nApp `foo` is failing\nThis is a link: <https://deploy.sudo.gcp.tv2.no/applications/progpub-stage-di-ott-common|klikk her>",
+  "severity": "warning",
+  "issueFollowUpEnabled": true,
+  "autoResolveSeconds": 2600,
+  "autoResolveAsInconclusive": true,
+  "slackChannelId": "",
+  "routeKey": "sudo",
+  "host": "10.34.23.54",
+  "username": "Team A Apps",
+  "iconEmoji": ":covfefe:",
+  "fallbackText": "App foo is failing",
+  "notificationDelaySeconds": 0,
+  "archivingDelaySeconds": 3600,
+  "ignoreIfTextContains": [
+    "bar"
+  ],
+  "escalation": [
+    {
+      "severity": "error",
+      "delaySeconds": 30,
+      "slackMentions": [
+        "<@UC7J3GDPE>"
+      ],
+      "moveToChannel": "C0650FV85P0"
+    }
+  ]
+}

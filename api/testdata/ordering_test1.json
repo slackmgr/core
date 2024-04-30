@@ -1,0 +1,13 @@
+{
+  "correlationId": "ordering-test-1",
+  "header": ":status: App error 1",
+  "text": "TESTING TESTING!\nApp `foo` is failing",
+  "severity": "warning",
+  "issueFollowUpEnabled": true,
+  "autoResolveSeconds": 2600,
+  "autoResolveAsInconclusive": false,
+  "slackChannelId": "C03AKS26HHA",
+  "routeKey": "",
+  "username": "Team X",
+  "fallbackText": "App foo is failing"
+}
