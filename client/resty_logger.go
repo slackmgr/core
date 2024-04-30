@@ -1,13 +1,9 @@
 package client
 
-type Logger interface {
-	Debugf(format string, args ...interface{})
-	Infof(format string, args ...interface{})
-	Errorf(format string, args ...interface{})
-}
+import "github.com/peteraglen/slack-manager/common"
 
 type restyLogger struct {
-	logger Logger
+	logger common.Logger
 }
 
 func (l *restyLogger) Debugf(format string, args ...interface{}) {
