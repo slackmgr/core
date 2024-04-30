@@ -1,8 +1,6 @@
 package models
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
 	"regexp"
 	"strings"
 	"time"
@@ -61,7 +59,7 @@ func NewIssue(alert *Alert, logger common.Logger) *Issue {
 	now := time.Now()
 
 	issue := Issue{
-		ID:                   hash(alert.CorrelationID, alert.SlackChannelID, now.Format(time.RFC3339Nano)),
+		ID:                   common.Hash(alert.CorrelationID, alert.SlackChannelID, now.Format(time.RFC3339Nano)),
 		CorrelationID:        alert.CorrelationID,
 		AlertCount:           1,
 		Created:              now,
@@ -577,16 +575,4 @@ func (issue *Issue) sanitizeSlackMentions(skipMuting bool) {
 	} else {
 		issue.LastAlert.Text = slackMentionRegex.ReplaceAllString(issue.LastAlert.Text, "*$1*")
 	}
-}
-
-func hash(input ...string) string {
-	h := sha256.New()
-
-	for _, s := range input {
-		h.Write([]byte(s))
-	}
-
-	bs := h.Sum(nil)
-
-	return base64.URLEncoding.EncodeToString(bs)
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/peteraglen/slack-manager/client"
+	"github.com/peteraglen/slack-manager/common"
 	"github.com/peteraglen/slack-manager/core/config"
 )
 
@@ -39,7 +40,7 @@ func NewAlert(messageID, groupID, receiptHandle string, receiveTimestamp time.Ti
 	}
 
 	return &Alert{
-		ID:          hash(alert.SlackChannelID, alert.CorrelationID, alert.Timestamp.Format(time.RFC3339Nano)),
+		ID:          common.Hash(alert.SlackChannelID, alert.CorrelationID, alert.Timestamp.Format(time.RFC3339Nano)),
 		DBTimestamp: alert.Timestamp,
 		Alert:       alert,
 		message:     newMessage(messageID, groupID, receiptHandle, receiveTimestamp, visibilityTimeout),

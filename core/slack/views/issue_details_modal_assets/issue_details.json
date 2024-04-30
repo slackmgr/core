@@ -1,0 +1,53 @@
+{
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Correlation ID*: `{{ .CorrelationID }}`"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Database ID*: `{{ .DatabaseID }}`"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Created*: `{{ .Created }}`\n*Last updated*: `{{ .LastUpdated }}`\n*Alerts*: `{{ .AlertCount }}`\n*Status*: `{{ .Status }}`"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Auto resolve*: `{{ .AutoResolve }}`\n*Auto resolve as inconclusive*: `{{ .AutoResolveAsInconclusive }}`\n*Resolved*: `{{ .Resolved }}`"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Archived*: `{{ .Archived }}`\n*Archive delay*: `{{ .ArchiveDelay }}`\n*Archive time*: `{{ .ArchiveTime }}`"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Current channel*: `{{ .CurrentChannel }}`\n*Original channel*: `{{ .OriginalChannel }}`\n*Route key*: `{{ .RouteKey }}`"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Escalated*: `{{ .Escalated }}`\n*Moved*: `{{ .Moved }}`"
+      }
+    }
+  ]
+}

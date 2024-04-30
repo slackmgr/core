@@ -1,8 +1,6 @@
 package api
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +11,7 @@ import (
 	"time"
 
 	"github.com/peteraglen/slack-manager/client"
+	"github.com/peteraglen/slack-manager/common"
 )
 
 const True = "true"
@@ -130,7 +129,7 @@ func (s *Server) mapPrometheusAlert(webhook *client.PrometheusWebhook) []*client
 
 		// If no correlation ID is specified AND no labels were found to generate a correlation ID, generate one based on the group key and the alert start time
 		if correlationID == "" {
-			correlationID = fmt.Sprintf("%s-%s", hash(webhook.GroupKey), promAlert.StartsAt.Format(time.RFC3339Nano))
+			correlationID = fmt.Sprintf("%s-%s", common.Hash(webhook.GroupKey), promAlert.StartsAt.Format(time.RFC3339Nano))
 		}
 
 		// Add some metadata to the alert, for debug purposes only
@@ -215,19 +214,7 @@ func correlationIDFromLabels(labels map[string]string) string {
 		return ""
 	}
 
-	return hash(values...)
-}
-
-func hash(input ...string) string {
-	h := sha256.New()
-
-	for _, s := range input {
-		h.Write([]byte(s))
-	}
-
-	bs := h.Sum(nil)
-
-	return base64.URLEncoding.EncodeToString(bs)
+	return common.Hash(values...)
 }
 
 func find(map1, map2 map[string]string, keys ...string) string {
