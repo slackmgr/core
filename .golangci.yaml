@@ -2,9 +2,6 @@
 run:
   tests: true
   timeout: 1m
-  skip-dirs:
-    - testdata
-    - bin
 linters:
   disable-all: false
   enable-all: false
@@ -93,9 +90,16 @@ linters-settings:
   asasalint:
     use-builtin-exclusions: true
     ignore-test: true
+    exclude:
+      - ^(logrus)\.(Fatal|Error|Warn|Warning|Info|Debug)(|f|ln)$
   goconst:
     ignore-tests: true
 issues:
+  exclude-dirs:
+    - testdata
+    - bin
+  exclude:
+    - NewSensibleSaramaConfig is deprecated
   exclude-rules:
     - path: _test\.go # Skip certain linters in test files
       linters:

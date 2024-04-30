@@ -1,17 +1,13 @@
-package slackapi
+package common
+
+import "io"
 
 type Logger interface {
+	Debug(msg string)
 	Debugf(format string, args ...interface{})
+	Info(msg string)
 	Infof(format string, args ...interface{})
 	Errorf(format string, args ...interface{})
 	WithField(key string, value interface{}) Logger
-}
-
-type slackApilogger struct {
-	logger Logger
-}
-
-func (l *slackApilogger) Output(_ int, msg string) error {
-	l.logger.Debugf(msg)
-	return nil
+	HttpLoggingHandler() io.Writer
 }
