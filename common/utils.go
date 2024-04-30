@@ -2,6 +2,8 @@ package common
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"strings"
 )
@@ -25,4 +27,16 @@ func IsCtxCanceledErr(err error) bool {
 	}
 
 	return false
+}
+
+func Hash(input ...string) string {
+	h := sha256.New()
+
+	for _, s := range input {
+		h.Write([]byte(s))
+	}
+
+	bs := h.Sum(nil)
+
+	return base64.URLEncoding.EncodeToString(bs)
 }

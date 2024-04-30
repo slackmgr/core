@@ -15,9 +15,16 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/peteraglen/slack-manager/client"
 	"github.com/peteraglen/slack-manager/common"
-	"github.com/peteraglen/slack-manager/slackapi"
+	"github.com/slack-go/slack"
 	"golang.org/x/time/rate"
 )
+
+type SlackAPI interface {
+	GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error)
+	ListBotChannels(ctx context.Context) ([]*common.ChannelSummary, error)
+	GetUserIDsInChannel(ctx context.Context, channelID string) (map[string]struct{}, error)
+	BotIsInChannel(ctx context.Context, channelID string) (bool, error)
+}
 
 type Server struct {
 	alertQueue         common.FifoQueue
@@ -30,8 +37,8 @@ type Server struct {
 	logger             common.Logger
 }
 
-func New(ctx context.Context, slackClient slackapi.Client, alertQueue common.FifoQueue, cacheStore cachestore.StoreInterface, metrics common.Metrics, logger common.Logger, config *Config) (*Server, error) {
-	channelInfoManager := newChannelInfoManager(slackClient, logger)
+func New(ctx context.Context, slackAPI SlackAPI, alertQueue common.FifoQueue, cacheStore cachestore.StoreInterface, metrics common.Metrics, logger common.Logger, config *Config) (*Server, error) {
+	channelInfoManager := newChannelInfoManager(slackAPI, logger)
 
 	if err := channelInfoManager.Init(ctx); err != nil {
 		return nil, fmt.Errorf("failed to initialize channel info manager: %w", err)

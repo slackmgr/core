@@ -27,30 +27,7 @@ const (
 
 type retryable interface{ Retryable() bool }
 
-type Client interface {
-	Connect(ctx context.Context) (*slack.AuthTestResponse, error)
-	NewSocketModeClient() *socketmode.Client
-	BotUserID() string
-	ChatPostMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error)
-	ChatUpdateMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error)
-	ChatDeleteMessage(ctx context.Context, channelID string, ts string) error
-	SendResponse(ctx context.Context, channelID, responseURL, responseType, text string) error
-	PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error)
-	OpenModal(ctx context.Context, triggerID string, request slack.ModalViewRequest) error
-	GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error)
-	ListAllChannels(ctx context.Context) ([]*ChannelSummary, error)
-	ListBotChannels(ctx context.Context) ([]*ChannelSummary, error)
-	GetUserInfo(ctx context.Context, userID string) (*slack.User, error)
-	ListUserGroupMembers(ctx context.Context, groupID string) (map[string]struct{}, error)
-	GetUserByEmail(ctx context.Context, email string) (*slack.User, error)
-	ListAllUsers(ctx context.Context) (map[string]*slack.User, error)
-	GetUserIDsInChannel(ctx context.Context, channelID string) (map[string]struct{}, error)
-	BotIsInChannel(ctx context.Context, channelID string) (bool, error)
-	MessageHasReplies(ctx context.Context, channelID, ts string) (bool, error)
-	AddUserToChannel(ctx context.Context, user *slack.User, channelID string) error
-}
-
-type client struct {
+type Client struct {
 	api       *slack.Client
 	logger    common.Logger
 	cache     *common.Cache[string]
@@ -60,12 +37,12 @@ type client struct {
 	botUserID string
 }
 
-func New(logger common.Logger, cacheStore cachestore.StoreInterface, metrics common.Metrics, options *Options) Client {
+func New(logger common.Logger, cacheStore cachestore.StoreInterface, metrics common.Metrics, options *Options) *Client {
 	options.SetDefaults()
 
 	cache := common.NewCache(cache.New[string](cacheStore), logger)
 
-	return &client{
+	return &Client{
 		logger:  logger,
 		cache:   cache,
 		metrics: metrics,
@@ -73,7 +50,7 @@ func New(logger common.Logger, cacheStore cachestore.StoreInterface, metrics com
 	}
 }
 
-func (c *client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
+func (c *Client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
 	if c.metrics == nil {
 		return nil, fmt.Errorf("client metrics cannot be nil")
 	}
@@ -133,19 +110,19 @@ func (c *client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
 	return response, nil
 }
 
-func (c *client) API() *slack.Client {
+func (c *Client) API() *slack.Client {
 	return c.api
 }
 
-func (c *client) NewSocketModeClient() *socketmode.Client {
+func (c *Client) NewSocketModeClient() *socketmode.Client {
 	return socketmode.New(c.api, socketmode.OptionDebug(c.options.DebugMode), socketmode.OptionLog(&slackApilogger{logger: c.logger}))
 }
 
-func (c *client) BotUserID() string {
+func (c *Client) BotUserID() string {
 	return c.botUserID
 }
 
-func (c *client) ChatPostMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
+func (c *Client) ChatPostMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
 	action := "chat.post"
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
@@ -163,7 +140,7 @@ func (c *client) ChatPostMessage(ctx context.Context, channelID string, options 
 	return ts, nil
 }
 
-func (c *client) ChatUpdateMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
+func (c *Client) ChatUpdateMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
 	action := "chat.update"
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
@@ -181,7 +158,7 @@ func (c *client) ChatUpdateMessage(ctx context.Context, channelID string, option
 	return ts, nil
 }
 
-func (c *client) ChatDeleteMessage(ctx context.Context, channelID string, ts string) error {
+func (c *Client) ChatDeleteMessage(ctx context.Context, channelID string, ts string) error {
 	action := "chat.delete"
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
@@ -198,7 +175,7 @@ func (c *client) ChatDeleteMessage(ctx context.Context, channelID string, ts str
 	return nil
 }
 
-func (c *client) SendResponse(ctx context.Context, channelID, responseURL, responseType, text string) error {
+func (c *Client) SendResponse(ctx context.Context, channelID, responseURL, responseType, text string) error {
 	if channelID == "" {
 		return errors.New("channelID cannot be empty")
 	}
@@ -233,7 +210,7 @@ func (c *client) SendResponse(ctx context.Context, channelID, responseURL, respo
 	return nil
 }
 
-func (c *client) PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error) {
+func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error) {
 	if channelID == "" {
 		return "", errors.New("channelID cannot be empty")
 	}
@@ -259,7 +236,7 @@ func (c *client) PostEphemeral(ctx context.Context, channelID, userID string, op
 	return ts, nil
 }
 
-func (c *client) OpenModal(ctx context.Context, triggerID string, request slack.ModalViewRequest) error {
+func (c *Client) OpenModal(ctx context.Context, triggerID string, request slack.ModalViewRequest) error {
 	if triggerID == "" {
 		return errors.New("triggerID cannot be empty")
 	}
@@ -276,7 +253,7 @@ func (c *client) OpenModal(ctx context.Context, triggerID string, request slack.
 	return nil
 }
 
-func (c *client) MessageHasReplies(ctx context.Context, channelID, ts string) (bool, error) {
+func (c *Client) MessageHasReplies(ctx context.Context, channelID, ts string) (bool, error) {
 	if channelID == "" {
 		return false, errors.New("channelID cannot be empty")
 	}
@@ -312,7 +289,7 @@ func (c *client) MessageHasReplies(ctx context.Context, channelID, ts string) (b
 	return len(msgs) > 1, nil
 }
 
-func (c *client) GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error) {
+func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error) {
 	if channelID == "" {
 		return nil, errors.New("channelID cannot be empty")
 	}
@@ -370,7 +347,7 @@ func (c *client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 	return channel, nil
 }
 
-func (c *client) ListAllChannels(ctx context.Context) ([]*ChannelSummary, error) {
+func (c *Client) ListAllChannels(ctx context.Context) ([]*common.ChannelSummary, error) {
 	action := "conversations.list"
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
@@ -380,7 +357,7 @@ func (c *client) ListAllChannels(ctx context.Context) ([]*ChannelSummary, error)
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackhitMetric, 1, action)
 
-		channels := []*ChannelSummary{}
+		channels := []*common.ChannelSummary{}
 
 		if err := json.Unmarshal([]byte(val), &channels); err != nil {
 			c.logger.Errorf("failed to json unmarshal channel list: %s", err)
@@ -399,7 +376,7 @@ func (c *client) ListAllChannels(ctx context.Context) ([]*ChannelSummary, error)
 		return c.api.GetConversationsContext(ctx, params)
 	}
 
-	channels := []*ChannelSummary{}
+	channels := []*common.ChannelSummary{}
 
 	for {
 		chs, nextCursor, err := callAPI(ctx, c.logger, c.options, c.metrics, action, f)
@@ -408,7 +385,7 @@ func (c *client) ListAllChannels(ctx context.Context) ([]*ChannelSummary, error)
 		}
 
 		for _, ch := range chs {
-			channels = append(channels, NewChannelSummary(ch))
+			channels = append(channels, common.NewChannelSummary(ch))
 		}
 
 		if nextCursor == "" {
@@ -418,7 +395,7 @@ func (c *client) ListAllChannels(ctx context.Context) ([]*ChannelSummary, error)
 		params.Cursor = nextCursor
 	}
 
-	slices.SortFunc(channels, func(a, b *ChannelSummary) int {
+	slices.SortFunc(channels, func(a, b *common.ChannelSummary) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 
@@ -432,7 +409,7 @@ func (c *client) ListAllChannels(ctx context.Context) ([]*ChannelSummary, error)
 	return channels, nil
 }
 
-func (c *client) ListBotChannels(ctx context.Context) ([]*ChannelSummary, error) {
+func (c *Client) ListBotChannels(ctx context.Context) ([]*common.ChannelSummary, error) {
 	action := "users.conversations"
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
@@ -442,7 +419,7 @@ func (c *client) ListBotChannels(ctx context.Context) ([]*ChannelSummary, error)
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackhitMetric, 1, action)
 
-		channels := []*ChannelSummary{}
+		channels := []*common.ChannelSummary{}
 
 		if err := json.Unmarshal([]byte(val), &channels); err != nil {
 			c.logger.Errorf("failed to json unmarshal channel list: %s", err)
@@ -461,7 +438,7 @@ func (c *client) ListBotChannels(ctx context.Context) ([]*ChannelSummary, error)
 		return c.api.GetConversationsForUserContext(ctx, params)
 	}
 
-	channels := []*ChannelSummary{}
+	channels := []*common.ChannelSummary{}
 
 	for {
 		chs, nextCursor, err := callAPI(ctx, c.logger, c.options, c.metrics, action, f)
@@ -470,7 +447,7 @@ func (c *client) ListBotChannels(ctx context.Context) ([]*ChannelSummary, error)
 		}
 
 		for _, ch := range chs {
-			channels = append(channels, NewChannelSummary(ch))
+			channels = append(channels, common.NewChannelSummary(ch))
 		}
 
 		if nextCursor == "" {
@@ -480,7 +457,7 @@ func (c *client) ListBotChannels(ctx context.Context) ([]*ChannelSummary, error)
 		params.Cursor = nextCursor
 	}
 
-	slices.SortFunc(channels, func(a, b *ChannelSummary) int {
+	slices.SortFunc(channels, func(a, b *common.ChannelSummary) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 
@@ -494,7 +471,7 @@ func (c *client) ListBotChannels(ctx context.Context) ([]*ChannelSummary, error)
 	return channels, nil
 }
 
-func (c *client) GetUserInfo(ctx context.Context, userID string) (*slack.User, error) {
+func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, error) {
 	if userID == "" {
 		return nil, errors.New("userID cannot be empty")
 	}
@@ -537,7 +514,7 @@ func (c *client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 	return user, nil
 }
 
-func (c *client) ListUserGroupMembers(ctx context.Context, groupID string) (map[string]struct{}, error) {
+func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[string]struct{}, error) {
 	if groupID == "" {
 		return nil, errors.New("groupID cannot be empty")
 	}
@@ -589,7 +566,7 @@ func (c *client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 	return result, nil
 }
 
-func (c *client) GetUserByEmail(ctx context.Context, email string) (*slack.User, error) {
+func (c *Client) GetUserByEmail(ctx context.Context, email string) (*slack.User, error) {
 	if email == "" {
 		return nil, errors.New("email cannot be empty")
 	}
@@ -635,7 +612,7 @@ func (c *client) GetUserByEmail(ctx context.Context, email string) (*slack.User,
 	return user, nil
 }
 
-func (c *client) ListAllUsers(ctx context.Context) (map[string]*slack.User, error) {
+func (c *Client) ListAllUsers(ctx context.Context) (map[string]*slack.User, error) {
 	action := "users.list"
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
@@ -660,7 +637,7 @@ func (c *client) ListAllUsers(ctx context.Context) (map[string]*slack.User, erro
 	return result, nil
 }
 
-func (c *client) GetUserIDsInChannel(ctx context.Context, channelID string) (map[string]struct{}, error) {
+func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map[string]struct{}, error) {
 	if channelID == "" {
 		return nil, errors.New("channelID cannot be empty")
 	}
@@ -726,7 +703,7 @@ func (c *client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 	return result, nil
 }
 
-func (c *client) BotIsInChannel(ctx context.Context, channelID string) (bool, error) {
+func (c *Client) BotIsInChannel(ctx context.Context, channelID string) (bool, error) {
 	if channelID == "" {
 		return false, errors.New("channelID cannot be empty")
 	}
@@ -753,7 +730,7 @@ func (c *client) BotIsInChannel(ctx context.Context, channelID string) (bool, er
 	return found, nil
 }
 
-func (c *client) AddUserToChannel(ctx context.Context, user *slack.User, channelID string) error {
+func (c *Client) AddUserToChannel(ctx context.Context, user *slack.User, channelID string) error {
 	if user == nil {
 		return fmt.Errorf("user cannot be nil")
 	}

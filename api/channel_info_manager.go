@@ -7,18 +7,17 @@ import (
 	"time"
 
 	"github.com/peteraglen/slack-manager/common"
-	"github.com/peteraglen/slack-manager/slackapi"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
 
 type channelInfoManager struct {
-	slackClient           slackapi.Client
+	slackClient           SlackAPI
 	channelsLastSeen      map[string]time.Time
 	detectedChannels      chan string
 	channelInfoCache      map[string]*channelInfo
-	allManagerChannels    []*slackapi.ChannelSummary
-	allManagerChannelsMap map[string]*slackapi.ChannelSummary
+	allManagerChannels    []*common.ChannelSummary
+	allManagerChannelsMap map[string]*common.ChannelSummary
 	cacheLock             *sync.RWMutex
 	logger                common.Logger
 }
@@ -31,7 +30,7 @@ type channelInfo struct {
 	UserCount          int
 }
 
-func newChannelInfoManager(slackClient slackapi.Client, logger common.Logger) *channelInfoManager {
+func newChannelInfoManager(slackClient SlackAPI, logger common.Logger) *channelInfoManager {
 	return &channelInfoManager{
 		slackClient:      slackClient,
 		channelsLastSeen: make(map[string]time.Time),
@@ -115,7 +114,7 @@ func (c *channelInfoManager) GetChannelInfo(ctx context.Context, channel string)
 	return info, err
 }
 
-func (c *channelInfoManager) ManagedChannels() []*slackapi.ChannelSummary {
+func (c *channelInfoManager) ManagedChannels() []*common.ChannelSummary {
 	return c.allManagerChannels
 }
 
@@ -212,7 +211,7 @@ func (c *channelInfoManager) refreshAllManagerChannelsMap(ctx context.Context) e
 		return err
 	}
 
-	allManagerChannelsMap := make(map[string]*slackapi.ChannelSummary)
+	allManagerChannelsMap := make(map[string]*common.ChannelSummary)
 
 	for _, channel := range allManagerChannels {
 		allManagerChannelsMap[channel.ID] = channel
