@@ -7,6 +7,7 @@ require (
 	github.com/go-resty/resty/v2 v2.12.0
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
+	github.com/segmentio/ksuid v1.0.4
 	github.com/slack-go/slack v0.12.5
 	github.com/stretchr/testify v1.9.0
 	golang.org/x/sync v0.3.0
