@@ -6,15 +6,16 @@ import (
 	"fmt"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/peteraglen/slack-manager/common"
 )
 
 type restClient struct {
 	client  *resty.Client
-	options *options
-	logger  Logger
+	options *Options
+	logger  common.Logger
 }
 
-func newRestClient(baseURL string, logger Logger, options *options) (*restClient, error) {
+func newRestClient(baseURL string, logger common.Logger, options *Options) (*restClient, error) {
 	if baseURL == "" {
 		return nil, errors.New("base URL must be set")
 	}

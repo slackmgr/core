@@ -2,36 +2,36 @@ package client
 
 import "time"
 
-type Options func(*options)
+type Option func(*Options)
 
-type options struct {
+type Options struct {
 	retryCount       int
 	retryWaitTime    time.Duration
 	retryMaxWaitTime time.Duration
 }
 
-func newClientOptions() *options {
-	return &options{
+func newClientOptions() *Options {
+	return &Options{
 		retryCount:       8,
 		retryWaitTime:    500 * time.Millisecond,
 		retryMaxWaitTime: 3 * time.Second,
 	}
 }
 
-func RetryCount(count int) Options {
-	return func(conf *options) {
+func RetryCount(count int) Option {
+	return func(conf *Options) {
 		conf.retryCount = count
 	}
 }
 
-func RetryWaitTime(duration time.Duration) Options {
-	return func(conf *options) {
+func RetryWaitTime(duration time.Duration) Option {
+	return func(conf *Options) {
 		conf.retryWaitTime = duration
 	}
 }
 
-func RetryMaxWaitTime(duration time.Duration) Options {
-	return func(conf *options) {
+func RetryMaxWaitTime(duration time.Duration) Option {
+	return func(conf *Options) {
 		conf.retryMaxWaitTime = duration
 	}
 }
