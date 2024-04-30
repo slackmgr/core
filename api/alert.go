@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/peteraglen/slack-manager/client"
+	"github.com/peteraglen/slack-manager/common"
 )
 
 const NA = "N/A"
@@ -294,7 +295,7 @@ func (s *Server) createClientErrorAlert(err error, statusCode int, debugText map
 
 	alert := client.NewAlert(severity)
 
-	alert.CorrelationID = fmt.Sprintf("__client_error_%s_%s", targetChannel, hash(err.Error()))
+	alert.CorrelationID = fmt.Sprintf("__client_error_%s_%s", targetChannel, common.Hash(err.Error()))
 	alert.Header = fmt.Sprintf(":status: Client error %d", statusCode)
 	alert.FallbackText = fmt.Sprintf("Client error %d", statusCode)
 	alert.SlackChannelID = s.config.ErrorReportChannelID

@@ -236,7 +236,7 @@ func (s *Server) queueAlert(ctx context.Context, alert *client.Alert) error {
 	}
 
 	groupID := alert.SlackChannelID
-	dedupID := hash("alert", alert.SlackChannelID, alert.CorrelationID, alert.Timestamp.Format(time.RFC3339Nano))
+	dedupID := common.Hash("alert", alert.SlackChannelID, alert.CorrelationID, alert.Timestamp.Format(time.RFC3339Nano))
 
 	if err := s.alertQueue.Send(ctx, groupID, dedupID, string(body)); err != nil {
 		return fmt.Errorf("failed to send alert to SQS queue: %w", err)

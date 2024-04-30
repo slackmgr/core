@@ -1,0 +1,25 @@
+{
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "Hi {{ .User }}! :wave:"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "You need to be Slack Manager channel admin in order to use emojis for issue management. See {{ .DocsURL }} for more details."
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "You may also be interested in the status dashboard at {{ .StatusDashboardURL }}, and perhaps the logs dashboard at {{ .LogsDashboardURL }}."
+      }
+    }
+  ]
+}
