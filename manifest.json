@@ -1,0 +1,77 @@
+{
+    "display_information": {
+        "name": "Slack Manager"
+    },
+    "features": {
+        "bot_user": {
+            "display_name": "Slack Manager",
+            "always_online": true
+        },
+        "shortcuts": [
+            {
+                "name": "Move issue...",
+                "type": "message",
+                "callback_id": "issue_move",
+                "description": "Move the issue to another Slack channel"
+            },
+            {
+                "name": "Issue details",
+                "type": "message",
+                "callback_id": "view_issue_details",
+                "description": "View issue details"
+            },
+            {
+                "name": "Create issue...",
+                "type": "global",
+                "callback_id": "issue_create",
+                "description": "Create a new Slack Manager issue"
+            }
+        ]
+    },
+    "oauth_config": {
+        "scopes": {
+            "user": [
+                "reactions:read"
+            ],
+            "bot": [
+                "app_mentions:read",
+                "channels:history",
+                "channels:join",
+                "channels:manage",
+                "channels:read",
+                "chat:write",
+                "chat:write.customize",
+                "commands",
+                "emoji:read",
+                "groups:history",
+                "groups:read",
+                "groups:write",
+                "incoming-webhook",
+                "reactions:read",
+                "reactions:write",
+                "users:read",
+                "users:read.email",
+                "usergroups:read"
+            ]
+        }
+    },
+    "settings": {
+        "event_subscriptions": {
+            "user_events": [
+                "reaction_added",
+                "reaction_removed"
+            ],
+            "bot_events": [
+                "app_mention",
+                "member_joined_channel",
+                "member_left_channel"
+            ]
+        },
+        "interactivity": {
+            "is_enabled": true
+        },
+        "org_deploy_enabled": false,
+        "socket_mode_enabled": true,
+        "token_rotation_enabled": false
+    }
+}
