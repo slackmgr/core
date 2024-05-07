@@ -27,7 +27,7 @@ type SlackAPI interface {
 }
 
 type Server struct {
-	alertQueue         common.FifoQueue
+	alertQueue         common.FifoQueueProducer
 	limitersByChannel  map[string]*rate.Limiter
 	limitersLock       *sync.Mutex
 	config             *Config
@@ -37,7 +37,7 @@ type Server struct {
 	logger             common.Logger
 }
 
-func New(ctx context.Context, slackAPI SlackAPI, alertQueue common.FifoQueue, cacheStore cachestore.StoreInterface, metrics common.Metrics, logger common.Logger, config *Config) (*Server, error) {
+func New(ctx context.Context, slackAPI SlackAPI, alertQueue common.FifoQueueProducer, cacheStore cachestore.StoreInterface, metrics common.Metrics, logger common.Logger, config *Config) (*Server, error) {
 	channelInfoManager := newChannelInfoManager(slackAPI, logger)
 
 	if err := channelInfoManager.Init(ctx); err != nil {

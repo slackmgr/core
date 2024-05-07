@@ -8,14 +8,13 @@ import (
 	"github.com/peteraglen/slack-manager/common"
 )
 
-type UnmarshalFunc func(messageID, groupID, receiptHandle string, receiveTimestamp time.Time, visibilityTimeout time.Duration, body string) (Message, error)
+type UnmarshalFunc func(queueItem *common.QueueItem) (Message, error)
 
 type Message interface {
 	MessageID() string
-	ReceiptHandle() string
-	SetAckFunc(f func(ctx context.Context, messageID, groupID, receiptHandle string))
+	SetAckFunc(f func(ctx context.Context))
 	IsAcked() bool
-	SetExtendFunc(f func(ctx context.Context, messageID, groupID, receiptHandle string))
+	SetExtendFunc(f func(ctx context.Context))
 	NeedsExtension() bool
 	Extend(context.Context, common.Logger)
 }
@@ -23,28 +22,26 @@ type Message interface {
 type message struct {
 	messageID         string
 	groupID           string
-	receiptHandle     string
 	receiveTimestamp  time.Time
 	visibilityTimeout time.Duration
 
 	// ack is used to delete the SQS message, i.e. ack it and declare it as processed.
-	ack func(ctx context.Context, messageID, groupID, receiptHandle string)
+	ack func(ctx context.Context)
 
 	// extend is used to extend the visibility timeout of the SQS message. This is to prevent the ack from failing due to the visibilty timeout expiring.
-	extend      func(ctx context.Context, messageID, groupID, receiptHandle string)
+	extend      func(ctx context.Context)
 	extendCount int
 
 	// processingLock is used to prevent the ack and extend functions from being called at the same time.
 	processingLock *sync.Mutex
 }
 
-func newMessage(messageID, groupID, receiptHandle string, receiveTimestamp time.Time, visibilityTimeout time.Duration) message {
+func newMessage(queueItem *common.QueueItem) message {
 	return message{
-		messageID:         messageID,
-		groupID:           groupID,
-		receiptHandle:     receiptHandle,
-		receiveTimestamp:  receiveTimestamp,
-		visibilityTimeout: visibilityTimeout,
+		messageID:         queueItem.MessageID,
+		groupID:           queueItem.GroupID,
+		receiveTimestamp:  queueItem.ReceiveTimestamp,
+		visibilityTimeout: queueItem.VisibilityTimeout,
 		processingLock:    &sync.Mutex{},
 	}
 }
@@ -53,11 +50,7 @@ func (m *message) MessageID() string {
 	return m.messageID
 }
 
-func (m *message) ReceiptHandle() string {
-	return m.receiptHandle
-}
-
-func (m *message) SetAckFunc(f func(ctx context.Context, messageID, groupID, receiptHandle string)) {
+func (m *message) SetAckFunc(f func(ctx context.Context)) {
 	m.ack = f
 }
 
@@ -70,7 +63,7 @@ func (m *message) Ack(ctx context.Context) {
 		panic("Ack function has not been set, or has already been called")
 	}
 
-	m.ack(ctx, m.messageID, m.groupID, m.receiptHandle)
+	m.ack(ctx)
 
 	// Clear the ack and extend functions to prevent them from being called again.
 	m.ack = nil
@@ -81,7 +74,7 @@ func (m *message) IsAcked() bool {
 	return m.ack == nil
 }
 
-func (m *message) SetExtendFunc(f func(ctx context.Context, messageID, groupID, receiptHandle string)) {
+func (m *message) SetExtendFunc(f func(ctx context.Context)) {
 	m.extend = f
 }
 
@@ -107,7 +100,7 @@ func (m *message) Extend(ctx context.Context, logger common.Logger) {
 	// Reset the receive timestamp to prevent the message from being extended again too soon.
 	m.receiveTimestamp = time.Now()
 
-	m.extend(ctx, m.messageID, m.groupID, m.receiptHandle)
+	m.extend(ctx)
 
 	m.extendCount++
 }

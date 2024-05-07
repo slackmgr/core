@@ -37,7 +37,6 @@ func NewsSocketModeHandler(client *socketmode.Client, logger common.Logger) *Soc
 		InteractionEventMap:            interactionEventMap,
 		InteractionBlockActionEventMap: interactionBlockActionEventMap,
 		SlashCommandMap:                slackCommandMap,
-		Default:                        defaultHandler,
 		logger:                         logger,
 	}
 }
@@ -64,11 +63,12 @@ func (r *SocketModeHandler) HandleInteractionBlockAction(actionID string, f Sock
 	r.InteractionBlockActionEventMap[actionID] = append(r.InteractionBlockActionEventMap[actionID], f)
 }
 
-// Register a middleware function to use to handle an Event (from slackevents)
+// Register a middleware function to use to handle an EventAPI event
 func (r *SocketModeHandler) HandleEventsAPI(et string, f SocketModeHandlerFunc) {
 	r.EventAPIMap[et] = append(r.EventAPIMap[et], f)
 }
 
+// Register a middleware function to use to handle a SlashCommand
 func (r *SocketModeHandler) HandleSlashCommand(command string, f SocketModeHandlerFunc) {
 	r.SlashCommandMap[command] = append(r.SlashCommandMap[command], f)
 }
@@ -105,7 +105,7 @@ func (r *SocketModeHandler) dispatcher(ctx context.Context, evt socketmode.Event
 		ishandled = r.socketmodeDispatcher(ctx, &evt)
 	}
 
-	if !ishandled {
+	if !ishandled && r.Default != nil {
 		go r.Default(ctx, &evt, r.Client)
 	}
 }
@@ -207,8 +207,4 @@ func (r *SocketModeHandler) slashCommandDispatcher(ctx context.Context, evt *soc
 	}
 
 	return ishandled
-}
-
-func defaultHandler(_ context.Context, e *socketmode.Event, _ *socketmode.Client) {
-	// TODO: r.logger.WithField("event_type", e.Type).Info("Unhandled Slack event type received")
 }

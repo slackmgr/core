@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/peteraglen/slack-manager/common"
 )
 
 type CommandAction string
@@ -43,18 +45,18 @@ type WebhookCommandParams struct {
 	CheckboxInput map[string][]string `json:"checkboxInput,omitempty"`
 }
 
-func NewCommandFromSqsMsg(messageID, groupID, receiptHandle string, receiveTimestamp time.Time, visibilityTimeout time.Duration, body string) (Message, error) {
-	if len(body) == 0 {
+func NewCommandFromQueue(queueItem *common.QueueItem) (Message, error) {
+	if len(queueItem.Body) == 0 {
 		return nil, fmt.Errorf("alert body is empty")
 	}
 
 	var cmd Command
 
-	if err := json.Unmarshal([]byte(body), &cmd); err != nil {
+	if err := json.Unmarshal([]byte(queueItem.Body), &cmd); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal SQS message body: %w", err)
 	}
 
-	cmd.message = newMessage(messageID, groupID, receiptHandle, receiveTimestamp, visibilityTimeout)
+	cmd.message = newMessage(queueItem)
 
 	return &cmd, nil
 }

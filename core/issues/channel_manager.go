@@ -21,6 +21,7 @@ type channelManager struct {
 	issueCollection *issueCollection
 	slackClient     Slack
 	db              DB
+	webhookClient   *resty.Client
 	logger          common.Logger
 	metrics         common.Metrics
 	conf            *config.Config
@@ -33,10 +34,14 @@ type channelManager struct {
 }
 
 func newChannelManager(channelID string, slackClient Slack, db DB, moveRequestCh chan<- *moveRequest, logger common.Logger, metrics common.Metrics, conf *config.Config) *channelManager {
+	restyLogger := newRestyLogger(logger)
+	webhookClient := resty.New().SetRetryCount(2).SetRetryWaitTime(time.Second).AddRetryCondition(webhookRetryPolicy).SetLogger(restyLogger).SetTimeout(conf.WebhookTimeout)
+
 	c := &channelManager{
 		channelID:     channelID,
 		slackClient:   slackClient,
 		db:            db,
+		webhookClient: webhookClient,
 		moveRequestCh: moveRequestCh,
 		logger:        logger,
 		metrics:       metrics,
@@ -532,10 +537,7 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 }
 
 func (c *channelManager) postWebhook(ctx context.Context, url string, data *client.WebhookCallback, logger common.Logger) {
-	restyLogger := common.NewRestyLogger(logger)
-	client := resty.New().SetRetryCount(2).SetRetryWaitTime(time.Second).AddRetryCondition(webhookRetryPolicy).SetLogger(restyLogger).SetTimeout(c.conf.WebhookTimeout)
-
-	response, err := client.R().SetContext(ctx).SetBody(data).Post(url)
+	response, err := c.webhookClient.R().SetContext(ctx).SetBody(data).Post(url)
 	if err != nil {
 		c.logger.ErrorfUnlessContextCanceled("POST %s failed: %w", response.Request.URL, err)
 		return

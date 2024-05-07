@@ -28,14 +28,14 @@ type Alert struct {
 }
 
 // NewAlert creates a new alert message from an SQS consumer message
-func NewAlert(messageID, groupID, receiptHandle string, receiveTimestamp time.Time, visibilityTimeout time.Duration, body string) (Message, error) {
-	if len(body) == 0 {
+func NewAlert(queueItem *common.QueueItem) (Message, error) {
+	if len(queueItem.Body) == 0 {
 		return nil, fmt.Errorf("alert body is empty")
 	}
 
 	var alert client.Alert
 
-	if err := json.Unmarshal([]byte(body), &alert); err != nil {
+	if err := json.Unmarshal([]byte(queueItem.Body), &alert); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal SQS message body: %w", err)
 	}
 
@@ -43,7 +43,7 @@ func NewAlert(messageID, groupID, receiptHandle string, receiveTimestamp time.Ti
 		ID:          common.Hash(alert.SlackChannelID, alert.CorrelationID, alert.Timestamp.Format(time.RFC3339Nano)),
 		DBTimestamp: alert.Timestamp,
 		Alert:       alert,
-		message:     newMessage(messageID, groupID, receiptHandle, receiveTimestamp, visibilityTimeout),
+		message:     newMessage(queueItem),
 	}, nil
 }
 
