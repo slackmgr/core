@@ -29,7 +29,7 @@ func ackWithFieldErrorMsg(evt *socketmode.Event, clt *socketmode.Client, fieldNa
 	ackWithPayload(evt, clt, slack.NewErrorsViewSubmissionResponse(errors))
 }
 
-func sendCommand(ctx context.Context, fifoQueue common.FifoQueue, cmd *models.Command) error {
+func sendCommand(ctx context.Context, fifoQueue common.FifoQueueProducer, cmd *models.Command) error {
 	body, err := json.Marshal(cmd)
 	if err != nil {
 		return fmt.Errorf("failed to marshal command: %w", err)

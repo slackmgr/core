@@ -26,12 +26,25 @@ type Slack interface {
 	Delete(ctx context.Context, issue *models.Issue, updateIfMessageHasReplies bool, sem *semaphore.Weighted) error
 }
 
+type DB interface {
+	LoadAllActiveIssues(ctx context.Context) (map[string][]*models.Issue, error)
+	CreateOrUpdateIssue(ctx context.Context, issue *models.Issue) error
+	UpdateIssues(ctx context.Context, issues []*models.Issue) (int, error)
+	GetIssueBySlackPostID(ctx context.Context, channelID, slackPostID string) (*models.Issue, error)
+	AddAlert(ctx context.Context, alert *models.Alert) (models.Future, error)
+}
+
+type Settings interface {
+	GetMoveMappings(ctx context.Context, channelID string) (map[string]*models.MoveMapping, error)
+	SaveMoveMapping(ctx context.Context, mapping *models.MoveMapping) error
+}
+
 type Coordinator struct {
 	channelManagers          map[string]*channelManager
 	channelManagersWaitGroup *errgroup.Group
 	channelManagersWaitCtx   context.Context //nolint:containedctx
 	db                       DB
-	queue                    common.FifoQueue
+	queue                    common.FifoQueueProducer
 	settings                 Settings
 	slack                    Slack
 	logger                   common.Logger
@@ -44,7 +57,7 @@ type Coordinator struct {
 	initialized              bool
 }
 
-func NewCoordinator(db DB, queue common.FifoQueue, settings Settings, slack Slack, logger common.Logger, metrics common.Metrics, conf *config.Config) *Coordinator {
+func NewCoordinator(db DB, queue common.FifoQueueProducer, settings Settings, slack Slack, logger common.Logger, metrics common.Metrics, conf *config.Config) *Coordinator {
 	return &Coordinator{
 		channelManagers: make(map[string]*channelManager),
 		db:              db,

@@ -2,6 +2,6 @@ package common
 
 import "context"
 
-type FifoQueue interface {
+type FifoQueueProducer interface {
 	Send(ctx context.Context, groupID, dedupID, body string) error
 }

@@ -29,7 +29,7 @@ const (
 
 type Client struct {
 	api            *slackapi.Client
-	commandHandler common.FifoQueue
+	commandHandler common.FifoQueueProducer
 	issueFinder    handler.IssueFinder
 	cacheStore     store.StoreInterface
 	logger         common.Logger
@@ -39,7 +39,7 @@ type Client struct {
 
 var location *time.Location
 
-func New(commandHandler common.FifoQueue, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, conf *config.Config) *Client {
+func New(commandHandler common.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, conf *config.Config) *Client {
 	location = conf.Location
 
 	return &Client{
@@ -107,8 +107,11 @@ func (c *Client) RunSocketMode(ctx context.Context) error {
 	// Greeting situations (joined channel etc)
 	controllers.NewGreetingsController(handler, c, c.logger, c.conf)
 
-	// Default events
+	// Events API
 	controllers.NewEventsAPIController(handler, c.logger)
+
+	// Default controller (fallback when nothing else matches)
+	controllers.NewDefaultController(handler, c.logger)
 
 	return handler.RunEventLoop(ctx)
 }
