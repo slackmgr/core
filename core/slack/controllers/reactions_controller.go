@@ -7,7 +7,7 @@ import (
 
 	"github.com/eko/gocache/lib/v4/cache"
 	"github.com/eko/gocache/lib/v4/store"
-	"github.com/peteraglen/slack-manager/common"
+	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/core/config"
 	"github.com/peteraglen/slack-manager/core/models"
 	"github.com/peteraglen/slack-manager/core/slack/handler"
@@ -110,7 +110,7 @@ func (c *ReactionsController) sendReactionAddedCommand(ctx context.Context, evt 
 
 	userInfo, err := c.getUserInfo(ctx, evt.Item.Channel, evt.User, requireChannelAdmin, logger)
 	if err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to get user info: %w", err)
+		logger.Errorf("Failed to get user info: %w", err)
 		return
 	}
 
@@ -125,7 +125,7 @@ func (c *ReactionsController) sendReactionAddedCommand(ctx context.Context, evt 
 	}
 
 	if err := sendCommand(ctx, c.commandHandler, cmd); err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to send command '%s': %w", action, err)
+		logger.Errorf("Failed to send command '%s': %w", action, err)
 	}
 }
 
@@ -135,7 +135,7 @@ func (c *ReactionsController) sendReactionRemovedCommand(ctx context.Context, ev
 
 	userInfo, err := c.getUserInfo(ctx, evt.Item.Channel, evt.User, requireChannelAdmin, logger)
 	if err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to get user info: %w", err)
+		logger.Errorf("Failed to get user info: %w", err)
 		return
 	}
 
@@ -146,7 +146,7 @@ func (c *ReactionsController) sendReactionRemovedCommand(ctx context.Context, ev
 	cmd := models.NewCommand(evt.Item.Channel, evt.Item.Timestamp, evt.Reaction, userInfo.ID, userInfo.RealName, action, nil)
 
 	if err := sendCommand(ctx, c.commandHandler, cmd); err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to send command '%s': %w", action, err)
+		logger.Errorf("Failed to send command '%s': %w", action, err)
 	}
 }
 
@@ -192,13 +192,13 @@ func (c *ReactionsController) postNotAdminAlert(ctx context.Context, channel, us
 
 	blocks, err := views.NotAdminView(userRealName, c.conf)
 	if err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to generate view: %s", err)
+		logger.Errorf("Failed to generate view: %s", err)
 		return
 	}
 
 	_, err = c.client.PostEphemeral(ctx, channel, userID, slack.MsgOptionBlocks(blocks...))
 	if err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to post ephemeral message: %s", err)
+		logger.Errorf("Failed to post ephemeral message: %s", err)
 		return
 	}
 

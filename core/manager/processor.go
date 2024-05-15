@@ -3,7 +3,7 @@ package manager
 import (
 	"context"
 
-	"github.com/peteraglen/slack-manager/common"
+	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/core/models"
 	"github.com/peteraglen/slack-manager/internal"
 )

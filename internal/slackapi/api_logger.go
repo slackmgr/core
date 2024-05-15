@@ -1,7 +1,7 @@
 package slackapi
 
 import (
-	"github.com/peteraglen/slack-manager/common"
+	common "github.com/peteraglen/slack-manager-common"
 )
 
 type slackApilogger struct {

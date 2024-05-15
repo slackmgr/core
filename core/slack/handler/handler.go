@@ -3,7 +3,7 @@ package handler
 import (
 	"context"
 
-	"github.com/peteraglen/slack-manager/common"
+	common "github.com/peteraglen/slack-manager-common"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"

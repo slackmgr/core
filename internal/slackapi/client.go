@@ -12,7 +12,7 @@ import (
 
 	"github.com/eko/gocache/lib/v4/cache"
 	cachestore "github.com/eko/gocache/lib/v4/store"
-	"github.com/peteraglen/slack-manager/common"
+	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/internal"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"

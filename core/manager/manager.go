@@ -3,10 +3,11 @@ package manager
 import (
 	"context"
 
+	common "github.com/peteraglen/slack-manager-common"
 	commonlib "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/common"
 	"github.com/peteraglen/slack-manager/core/config"
 	"github.com/peteraglen/slack-manager/core/models"
+	"github.com/peteraglen/slack-manager/internal"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -27,7 +28,7 @@ type FifoQueue interface {
 }
 
 type App struct {
-	slack        Slack
+	slackClient  Slack
 	coordinator  *coordinator
 	alertQueue   FifoQueue
 	commandQueue FifoQueue
@@ -35,11 +36,15 @@ type App struct {
 	conf         *config.Config
 }
 
-func New(db DB, slack Slack, alertQueue FifoQueue, commandQueue FifoQueue, logger common.Logger, metrics common.Metrics, conf *config.Config) *App {
-	coordinator := newCoordinator(db, alertQueue, slack, logger, metrics, conf)
+func New(db DB, slackClient Slack, alertQueue FifoQueue, commandQueue FifoQueue, logger common.Logger, metrics common.Metrics, conf *config.Config) *App {
+	coordinator := newCoordinator(db, alertQueue, slackClient, logger, metrics, conf)
+
+	if metrics == nil {
+		metrics = &internal.NoopMetrics{}
+	}
 
 	return &App{
-		slack:        slack,
+		slackClient:  slackClient,
 		coordinator:  coordinator,
 		alertQueue:   alertQueue,
 		commandQueue: commandQueue,
@@ -85,7 +90,7 @@ func (app *App) Run(ctx context.Context) error {
 	})
 
 	errg.Go(func() error {
-		return app.slack.RunSocketMode(ctx)
+		return app.slackClient.RunSocketMode(ctx)
 	})
 
 	return errg.Wait()

@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/client"
-	"github.com/peteraglen/slack-manager/common"
 	"github.com/peteraglen/slack-manager/core/config"
 	"github.com/peteraglen/slack-manager/core/models"
 	"github.com/peteraglen/slack-manager/core/slack/handler"
@@ -141,7 +141,7 @@ func (c *InteractiveController) blockActionsHandler(ctx context.Context, evt *so
 	if strings.HasPrefix(actionID, WebhookActionID) {
 		c.handleWebhookRequest(ctx, interaction, interaction.ActionCallback.BlockActions[0], logger)
 	} else {
-		logger.ErrorfUnlessContextCanceled("Unknown action ID %s in block action event", interaction.ActionCallback.BlockActions[0].ActionID)
+		logger.Errorf("Unknown action ID %s in block action event", interaction.ActionCallback.BlockActions[0].ActionID)
 	}
 }
 
@@ -162,20 +162,20 @@ func (c *InteractiveController) handleMoveIssueRequest(ctx context.Context, inte
 
 	if !userIsGlobalAdmin {
 		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but this feature is currently only available to SUDO Slack Manager global admins."); err != nil {
-			logger.ErrorfUnlessContextCanceled("Failed to send interactive response: %s", err)
+			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
 	}
 
 	managedChannel, _, err := c.client.IsAlertChannel(ctx, interaction.Channel.ID)
 	if err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to verify if Slack manager is in channel: %s", err)
+		logger.Errorf("Failed to verify if Slack manager is in channel: %s", err)
 		return
 	}
 
 	if !managedChannel {
 		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but you can only move messages in channels managed by the SUDO Slack Manager."); err != nil {
-			logger.ErrorfUnlessContextCanceled("Failed to send interactive response: %s", err)
+			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
 	}
@@ -184,7 +184,7 @@ func (c *InteractiveController) handleMoveIssueRequest(ctx context.Context, inte
 
 	blocks, err := views.MoveIssueModal()
 	if err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to generate view: %s", err)
+		logger.Errorf("Failed to generate view: %s", err)
 		return
 	}
 
@@ -201,7 +201,7 @@ func (c *InteractiveController) handleMoveIssueRequest(ctx context.Context, inte
 	}
 
 	if err := c.client.OpenModal(ctx, interaction.TriggerID, request); err != nil {
-		logger.ErrorfUnlessContextCanceled("failed to open modal view for move issue action: %s", err)
+		logger.Errorf("failed to open modal view for move issue action: %s", err)
 	}
 }
 
@@ -225,7 +225,7 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 	isManagedChannel, _, err := c.client.IsAlertChannel(ctx, selectedConversation)
 	if err != nil {
 		ack(evt, clt)
-		logger.ErrorfUnlessContextCanceled("Failed to verify if Slack manager is in channel: %s", err)
+		logger.Errorf("Failed to verify if Slack manager is in channel: %s", err)
 		return
 	}
 
@@ -241,7 +241,7 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 	// Fetch infor about the user
 	userInfo, err := c.client.GetUserInfo(ctx, interaction.User.ID)
 	if err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to get user info: %s", err)
+		logger.Errorf("Failed to get user info: %s", err)
 		return
 	}
 
@@ -257,7 +257,7 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 	cmd := models.NewCommand(metadata.Get("channelId"), metadata.Get("messageTs"), "", userInfo.ID, userInfo.RealName, action, params)
 
 	if err := sendCommand(ctx, c.commandHandler, cmd); err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to send command '%s': %s", action, err)
+		logger.Errorf("Failed to send command '%s': %s", action, err)
 	}
 }
 
@@ -266,7 +266,7 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 func (c *InteractiveController) handleCreateIssueRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
 	blocks, err := views.CreateIssueModal()
 	if err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to generate view: %s", err)
+		logger.Errorf("Failed to generate view: %s", err)
 		return
 	}
 
@@ -282,7 +282,7 @@ func (c *InteractiveController) handleCreateIssueRequest(ctx context.Context, in
 	}
 
 	if err := c.client.OpenModal(ctx, interaction.TriggerID, request); err != nil {
-		logger.ErrorfUnlessContextCanceled("failed to open modal view for move issue action: %s", err)
+		logger.Errorf("failed to open modal view for move issue action: %s", err)
 	}
 }
 
@@ -300,7 +300,7 @@ func (c *InteractiveController) createIssueViewSubmission(ctx context.Context, e
 	managedChannel, _, err := c.client.IsAlertChannel(ctx, targetChannelID)
 	if err != nil {
 		ack(evt, clt)
-		logger.ErrorfUnlessContextCanceled("Failed to verify if Slack manager is in channel: %s", err)
+		logger.Errorf("Failed to verify if Slack manager is in channel: %s", err)
 		return
 	}
 
@@ -313,7 +313,7 @@ func (c *InteractiveController) createIssueViewSubmission(ctx context.Context, e
 	// Fetch infor about the user
 	userInfo, err := c.client.GetUserInfo(ctx, interaction.User.ID)
 	if err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to get user info: %s", err)
+		logger.Errorf("Failed to get user info: %s", err)
 		return
 	}
 
@@ -395,7 +395,7 @@ func (c *InteractiveController) createIssueViewSubmission(ctx context.Context, e
 	cmd := models.NewCommand(targetChannelID, "", "", userInfo.ID, userInfo.RealName, action, params)
 
 	if err := sendCommand(ctx, c.commandHandler, cmd); err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to send command '%s': %s", action, err)
+		logger.Errorf("Failed to send command '%s': %s", action, err)
 	}
 }
 
@@ -404,13 +404,13 @@ func (c *InteractiveController) createIssueViewSubmission(ctx context.Context, e
 func (c *InteractiveController) handleViewIssueDetailsRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
 	managedChannel, _, err := c.client.IsAlertChannel(ctx, interaction.Channel.ID)
 	if err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to verify if Slack manager is in channel: %s", err)
+		logger.Errorf("Failed to verify if Slack manager is in channel: %s", err)
 		return
 	}
 
 	if !managedChannel {
 		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but you can only view issue details in channels managed by the SUDO Slack Manager."); err != nil {
-			logger.ErrorfUnlessContextCanceled("Failed to send interactive response: %s", err)
+			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
 	}
@@ -419,14 +419,14 @@ func (c *InteractiveController) handleViewIssueDetailsRequest(ctx context.Contex
 
 	if issue == nil {
 		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but no issue was found for this Slack message."); err != nil {
-			logger.ErrorfUnlessContextCanceled("Failed to send interactive response: %s", err)
+			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
 	}
 
 	blocks, err := views.IssueDetailsAssets(issue, c.conf)
 	if err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to generate view: %s", err)
+		logger.Errorf("Failed to generate view: %s", err)
 		return
 	}
 
@@ -441,7 +441,7 @@ func (c *InteractiveController) handleViewIssueDetailsRequest(ctx context.Contex
 	}
 
 	if err := c.client.OpenModal(ctx, interaction.TriggerID, request); err != nil {
-		logger.ErrorfUnlessContextCanceled("failed to open modal view for issue details action: %s", err)
+		logger.Errorf("failed to open modal view for issue details action: %s", err)
 	}
 }
 
@@ -452,14 +452,14 @@ func (c *InteractiveController) handleWebhookRequest(ctx context.Context, intera
 
 	if issue == nil {
 		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but no active issue was found for this Slack message."); err != nil {
-			logger.ErrorfUnlessContextCanceled("Failed to send interactive response: %s", err)
+			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
 	}
 
 	if len(issue.LastAlert.Webhooks) == 0 {
 		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but the issue doesn't have any webhooks."); err != nil {
-			logger.ErrorfUnlessContextCanceled("Failed to send interactive response: %s", err)
+			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
 	}
@@ -475,7 +475,7 @@ func (c *InteractiveController) handleWebhookRequest(ctx context.Context, intera
 
 	if webhook == nil {
 		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", fmt.Sprintf("Sorry, but the issue doesn't contain a webhook with ID '%s'.", action.Value)); err != nil {
-			logger.ErrorfUnlessContextCanceled("Failed to send interactive response: %s", err)
+			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
 	}
@@ -502,7 +502,7 @@ func (c *InteractiveController) handleWebhookRequest(ctx context.Context, intera
 	}
 
 	if err := c.client.OpenModal(ctx, interaction.TriggerID, request); err != nil {
-		logger.ErrorfUnlessContextCanceled("failed to open modal view for confirm webhook action: %s", err)
+		logger.Errorf("failed to open modal view for confirm webhook action: %s", err)
 	}
 }
 
@@ -512,7 +512,7 @@ func (c *InteractiveController) verifyWebhookAccess(ctx context.Context, interac
 
 		if !userIsGlobalAdmin {
 			if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but this webhook is available only to SUDO Slack Manager global admins."); err != nil {
-				logger.ErrorfUnlessContextCanceled("Failed to send interactive response: %s", err)
+				logger.Errorf("Failed to send interactive response: %s", err)
 			}
 			return false
 		}
@@ -525,7 +525,7 @@ func (c *InteractiveController) verifyWebhookAccess(ctx context.Context, interac
 
 		if !userIsChannelAdmin {
 			if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but this webhook is available only to channel admins and above."); err != nil {
-				logger.ErrorfUnlessContextCanceled("Failed to send interactive response: %s", err)
+				logger.Errorf("Failed to send interactive response: %s", err)
 			}
 			return false
 		}
@@ -540,7 +540,7 @@ func (c *InteractiveController) webhookViewSubmission(ctx context.Context, evt *
 	// Fetch info about the user
 	userInfo, err := c.client.GetUserInfo(ctx, interaction.User.ID)
 	if err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to get user info: %s", err)
+		logger.Errorf("Failed to get user info: %s", err)
 		return
 	}
 
@@ -565,7 +565,7 @@ func (c *InteractiveController) webhookViewSubmission(ctx context.Context, evt *
 	cmd.WebhookParameters = params
 
 	if err := sendCommand(ctx, c.commandHandler, cmd); err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to send command '%s': %s", cmdAction, err)
+		logger.Errorf("Failed to send command '%s': %s", cmdAction, err)
 	}
 }
 
@@ -702,7 +702,7 @@ func (c *InteractiveController) parsePrivateModalMetadata(data string) PrivateMo
 	var p PrivateModalMetadata
 
 	if err := json.Unmarshal([]byte(data), &p); err != nil {
-		c.logger.ErrorfUnlessContextCanceled("Failed to unmarshal private modal metadata: %s", err)
+		c.logger.Errorf("Failed to unmarshal private modal metadata: %s", err)
 	}
 
 	return p

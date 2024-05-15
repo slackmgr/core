@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/eko/gocache/lib/v4/store"
+	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/client"
-	"github.com/peteraglen/slack-manager/common"
 	"github.com/peteraglen/slack-manager/core/config"
 	"github.com/peteraglen/slack-manager/core/models"
 	"github.com/peteraglen/slack-manager/core/slack/controllers"
@@ -256,7 +256,7 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, updateIfMessag
 	if updateIfMessageHasReplies {
 		hasReplies, err := c.api.MessageHasReplies(ctx, issue.LastAlert.SlackChannelID, issue.SlackPostID)
 		if err != nil {
-			logger.ErrorfUnlessContextCanceled("Failed to check if Slack message has replies: %s", err)
+			logger.Errorf("Failed to check if Slack message has replies: %s", err)
 			hasReplies = false
 		}
 
@@ -319,7 +319,7 @@ func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 func (c *Client) UserIsInGroup(ctx context.Context, groupID, userID string) bool {
 	userIDs, err := c.api.ListUserGroupMembers(ctx, groupID)
 	if err != nil {
-		c.logger.ErrorfUnlessContextCanceled("Failed to list user group members: %s", err)
+		c.logger.Errorf("Failed to list user group members: %s", err)
 		return false
 	}
 
@@ -341,7 +341,7 @@ func (c *Client) GetChannelName(ctx context.Context, channelID string) string {
 
 	info, err := c.api.GetChannelInfo(ctx, channelID)
 	if err != nil {
-		c.logger.ErrorfUnlessContextCanceled("Failed to find Slack channel info: %s", err)
+		c.logger.Errorf("Failed to find Slack channel info: %s", err)
 		return ""
 	}
 

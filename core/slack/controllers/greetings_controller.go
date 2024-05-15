@@ -3,7 +3,7 @@ package controllers
 import (
 	"context"
 
-	"github.com/peteraglen/slack-manager/common"
+	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/core/config"
 	"github.com/peteraglen/slack-manager/core/slack/handler"
 	"github.com/peteraglen/slack-manager/core/slack/views"
@@ -44,7 +44,7 @@ func (c *GreetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 
 	userInfo, err := c.client.GetUserInfo(ctx, joinedEvent.User)
 	if err != nil {
-		c.logger.WithField("slack_channel_id", joinedEvent.Channel).WithField("user_id", joinedEvent.User).ErrorfUnlessContextCanceled("Failed to read Slack user info: %s", err)
+		c.logger.WithField("slack_channel_id", joinedEvent.Channel).WithField("user_id", joinedEvent.User).Errorf("Failed to read Slack user info: %s", err)
 		return
 	}
 
@@ -54,7 +54,7 @@ func (c *GreetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 
 	isAlertChannel, _, err := c.client.IsAlertChannel(ctx, joinedEvent.Channel)
 	if err != nil {
-		c.logger.ErrorUnlessContextCanceled(err)
+		c.logger.Errorf("Failed to verify if Slack Manager is in channel: %s", err)
 		return
 	}
 
@@ -71,13 +71,13 @@ func (c *GreetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 	if isInfoChannel {
 		blocks, err := views.InfoChannelView(infoChannelConfig.TemplatePath, userInfo.RealName)
 		if err != nil {
-			logger.ErrorfUnlessContextCanceled("Failed to generate view: %s", err)
+			logger.Errorf("Failed to generate view: %s", err)
 			return
 		}
 
 		_, err = c.client.PostEphemeral(ctx, joinedEvent.Channel, joinedEvent.User, slackapi.MsgOptionBlocks(blocks...))
 		if err != nil {
-			logger.ErrorfUnlessContextCanceled("Failed to post greeting message: %s", err)
+			logger.Errorf("Failed to post greeting message: %s", err)
 			return
 		}
 
@@ -87,7 +87,7 @@ func (c *GreetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 
 		blocks, err := views.GreetingView(userInfo.RealName, userIsChannelAdmin, c.conf)
 		if err != nil {
-			logger.ErrorfUnlessContextCanceled("Failed to generate view: %s", err)
+			logger.Errorf("Failed to generate view: %s", err)
 			return
 		}
 
@@ -99,7 +99,7 @@ func (c *GreetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 
 		_, err = c.client.PostEphemeral(ctx, joinedEvent.Channel, joinedEvent.User, attachments)
 		if err != nil {
-			logger.ErrorfUnlessContextCanceled("Failed to post greeting message: %s", err)
+			logger.Errorf("Failed to post greeting message: %s", err)
 			return
 		}
 
@@ -120,7 +120,7 @@ func (c *GreetingsController) memberLeftChannel(ctx context.Context, evt *socket
 
 	userInfo, err := c.client.GetUserInfo(ctx, leftChannelEvent.User)
 	if err != nil {
-		c.logger.WithField("slack_channel_id", leftChannelEvent.Channel).WithField("user_id", leftChannelEvent.User).ErrorfUnlessContextCanceled("Failed to read Slack user info: %s", err)
+		c.logger.WithField("slack_channel_id", leftChannelEvent.Channel).WithField("user_id", leftChannelEvent.User).Errorf("Failed to read Slack user info: %s", err)
 		return
 	}
 
@@ -132,7 +132,7 @@ func (c *GreetingsController) memberLeftChannel(ctx context.Context, evt *socket
 
 	isAlertChannel, _, err := c.client.IsAlertChannel(ctx, leftChannelEvent.Channel)
 	if err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to verify if Slack manager is in channel: %s", err)
+		logger.Errorf("Failed to verify if Slack manager is in channel: %s", err)
 		return
 	}
 
