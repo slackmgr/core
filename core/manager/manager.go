@@ -24,7 +24,7 @@ type Slack interface {
 
 type FifoQueue interface {
 	Send(ctx context.Context, groupID, dedupID, body string) error
-	Receive(ctx context.Context, sinkCh chan<- *commonlib.QueueItem) error
+	Receive(ctx context.Context, sinkCh chan<- *commonlib.FifoQueueItem) error
 }
 
 type App struct {
