@@ -22,7 +22,7 @@ type Alert struct {
 	OriginalText           string    `json:"originalText"`
 }
 
-func NewAlert(queueItem *commonlib.QueueItem) (Message, error) {
+func NewAlert(queueItem *commonlib.FifoQueueItem) (Message, error) {
 	if len(queueItem.Body) == 0 {
 		return nil, fmt.Errorf("alert body is empty")
 	}

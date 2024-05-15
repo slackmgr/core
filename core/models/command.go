@@ -45,7 +45,7 @@ type WebhookCommandParams struct {
 	CheckboxInput map[string][]string `json:"checkboxInput,omitempty"`
 }
 
-func NewCommandFromQueue(queueItem *commonlib.QueueItem) (Message, error) {
+func NewCommandFromQueue(queueItem *commonlib.FifoQueueItem) (Message, error) {
 	if len(queueItem.Body) == 0 {
 		return nil, fmt.Errorf("alert body is empty")
 	}

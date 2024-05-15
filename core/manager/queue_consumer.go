@@ -16,7 +16,7 @@ func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.Me
 
 	defer close(sinkCh)
 
-	queueCh := make(chan *commonlib.QueueItem, 100)
+	queueCh := make(chan *commonlib.FifoQueueItem, 100)
 
 	errg, ctx := errgroup.WithContext(ctx)
 

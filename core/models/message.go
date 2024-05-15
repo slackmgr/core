@@ -8,7 +8,7 @@ import (
 	commonlib "github.com/peteraglen/slack-manager-common"
 )
 
-type UnmarshalFunc func(queueItem *commonlib.QueueItem) (Message, error)
+type UnmarshalFunc func(queueItem *commonlib.FifoQueueItem) (Message, error)
 
 type Message interface {
 	MessageID() string
@@ -37,7 +37,7 @@ type message struct {
 	processingLock *sync.Mutex
 }
 
-func newMessage(queueItem *commonlib.QueueItem) message {
+func newMessage(queueItem *commonlib.FifoQueueItem) message {
 	return message{
 		messageID:         queueItem.MessageID,
 		groupID:           queueItem.GroupID,
