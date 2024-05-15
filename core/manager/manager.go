@@ -8,33 +8,36 @@ import (
 	"github.com/peteraglen/slack-manager/core/config"
 	"github.com/peteraglen/slack-manager/core/models"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
-
-type Coordinator interface {
-	Init(ctx context.Context) error
-	Run(ctx context.Context) error
-	AddAlert(ctx context.Context, alert *models.Alert)
-	AddCommand(ctx context.Context, alert *models.Command)
-}
 
 type Slack interface {
 	RunSocketMode(ctx context.Context) error
+	GetChannelName(ctx context.Context, channelID string) string
+	IsAlertChannel(ctx context.Context, channelID string) (bool, string, error)
+	UpdateSingleIssue(ctx context.Context, issue *models.Issue) error
+	Update(ctx context.Context, channelID string, issues []*models.Issue) error
+	UpdateSingleIssueWithThrottling(ctx context.Context, issue *models.Issue, issuesInChannel int) error
+	Delete(ctx context.Context, issue *models.Issue, updateIfMessageHasReplies bool, sem *semaphore.Weighted) error
 }
 
-type FifoQueueConsumer interface {
+type FifoQueue interface {
+	Send(ctx context.Context, groupID, dedupID, body string) error
 	Receive(ctx context.Context, sinkCh chan<- *commonlib.QueueItem) error
 }
 
 type App struct {
 	slack        Slack
-	coordinator  Coordinator
-	alertQueue   FifoQueueConsumer
-	commandQueue FifoQueueConsumer
+	coordinator  *coordinator
+	alertQueue   FifoQueue
+	commandQueue FifoQueue
 	logger       common.Logger
 	conf         *config.Config
 }
 
-func New(slack Slack, coordinator Coordinator, alertQueue FifoQueueConsumer, commandQueue FifoQueueConsumer, logger common.Logger, conf *config.Config) *App {
+func New(db DB, slack Slack, alertQueue FifoQueue, commandQueue FifoQueue, logger common.Logger, metrics common.Metrics, conf *config.Config) *App {
+	coordinator := newCoordinator(db, alertQueue, slack, logger, metrics, conf)
+
 	return &App{
 		slack:        slack,
 		coordinator:  coordinator,
@@ -55,7 +58,7 @@ func (app *App) Run(ctx context.Context) error {
 
 	errg, ctx := errgroup.WithContext(ctx)
 
-	if err := app.coordinator.Init(ctx); err != nil {
+	if err := app.coordinator.init(ctx); err != nil {
 		return err
 	}
 

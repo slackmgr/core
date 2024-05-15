@@ -34,7 +34,7 @@ type Config struct {
 	StatusDashboardURL    string
 	LogsDashboardURL      string
 
-	settings *SlackAdminConfig
+	adminSettings *AdminSettings
 }
 
 func NewDefaultConfig() *Config {
@@ -66,22 +66,16 @@ func NewDefaultConfig() *Config {
 	}
 }
 
-func (c *Config) UpdateSettings(settings *SlackAdminConfig) error {
-	if err := settings.Init(); err != nil {
-		return err
-	}
-
-	c.settings = settings
-
-	return nil
+func (c *Config) UpdateSettings(settings *AdminSettings) {
+	c.adminSettings = settings
 }
 
-func (c *Config) Settings() *SlackAdminConfig {
-	return c.settings
+func (c *Config) Settings() *AdminSettings {
+	return c.adminSettings
 }
 
 func (c *Config) UserIsGlobalAdmin(userID string) bool {
-	if _, ok := c.settings.GlobalAdmins[userID]; ok {
+	if _, ok := c.adminSettings.GlobalAdmins[userID]; ok {
 		return true
 	}
 
@@ -93,7 +87,7 @@ func (c *Config) UserIsChannelAdmin(ctx context.Context, channelID, userID strin
 		return false
 	}
 
-	settings := c.settings
+	settings := c.adminSettings
 
 	if _, ok := settings.GlobalAdmins[userID]; ok {
 		return true
@@ -121,7 +115,7 @@ func (c *Config) UserIsChannelAdmin(ctx context.Context, channelID, userID strin
 }
 
 func (c *Config) IsInfoChannel(channelID string) bool {
-	settings := c.settings
+	settings := c.adminSettings
 
 	if _, ok := settings.InfoChannels[channelID]; ok {
 		return true
@@ -131,7 +125,7 @@ func (c *Config) IsInfoChannel(channelID string) bool {
 }
 
 func (c *Config) GetInfoChannelConfig(channelID string) (*InfoChannelConfig, bool) {
-	settings := c.settings
+	settings := c.adminSettings
 
 	if c, ok := settings.InfoChannels[channelID]; ok {
 		return c, true
@@ -145,7 +139,7 @@ func (c *Config) OrderIssuesBySeverity(channelID string) bool {
 		return true
 	}
 
-	settings := c.settings
+	settings := c.adminSettings
 
 	channelConfig, channelFound := settings.AlertChannels[channelID]
 

@@ -1,4 +1,4 @@
-package issues
+package manager
 
 import "github.com/peteraglen/slack-manager/common"
 

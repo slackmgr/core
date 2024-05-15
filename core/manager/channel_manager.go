@@ -1,4 +1,4 @@
-package issues
+package manager
 
 import (
 	"context"
@@ -20,7 +20,7 @@ type cmdFunc func(ctx context.Context, issue *models.Issue, cmd *models.Command,
 
 type channelManager struct {
 	channelID       string
-	issueCollection *issueCollection
+	issueCollection *models.IssueCollection
 	slackClient     Slack
 	db              DB
 	webhookClient   *resty.Client
@@ -30,12 +30,12 @@ type channelManager struct {
 	alertCh         chan *models.Alert
 	commandCh       chan *models.Command
 	addIssueCh      chan *models.Issue
-	moveRequestCh   chan<- *moveRequest
+	moveRequestCh   chan<- *models.MoveRequest
 	cmdFuncs        map[models.CommandAction]cmdFunc
 	initialized     bool
 }
 
-func newChannelManager(channelID string, slackClient Slack, db DB, moveRequestCh chan<- *moveRequest, logger common.Logger, metrics common.Metrics, conf *config.Config) *channelManager {
+func newChannelManager(channelID string, slackClient Slack, db DB, moveRequestCh chan<- *models.MoveRequest, logger common.Logger, metrics common.Metrics, conf *config.Config) *channelManager {
 	restyLogger := newRestyLogger(logger)
 	webhookClient := resty.New().SetRetryCount(2).SetRetryWaitTime(time.Second).AddRetryCondition(webhookRetryPolicy).SetLogger(restyLogger).SetTimeout(conf.WebhookTimeout)
 
@@ -76,7 +76,7 @@ func (c *channelManager) Init(ctx context.Context, issues []*models.Issue) {
 		panic("Channel manager can only be initialized once")
 	}
 
-	c.issueCollection = newIssueCollection(issues)
+	c.issueCollection = models.NewIssueCollection(issues)
 
 	currentChannelName := c.slackClient.GetChannelName(ctx, c.channelID)
 
@@ -206,7 +206,7 @@ func (c *channelManager) FindIssueBySlackPost(ctx context.Context, slackPostID s
 func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) error {
 	c.metrics.AddToCounter(alertsTotal, float64(1), c.channelID)
 
-	alert.SetDefaultValues(c.conf)
+	alert.SetDefaultValues(c.conf.DefaultArchivingDelay)
 	alert.SlackChannelName = c.slackClient.GetChannelName(ctx, c.channelID)
 
 	logger := c.logger.WithField("correlation_id", alert.Alert.CorrelationID)
@@ -538,7 +538,7 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 	// The new channel manager(s) will ensure that the issue is updated in Slack and stored in the database.
 	c.issueCollection.Remove(issue)
 
-	request := &moveRequest{
+	request := &models.MoveRequest{
 		Issue:         issue,
 		UserRealName:  username,
 		SourceChannel: c.channelID,

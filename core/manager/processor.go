@@ -8,7 +8,7 @@ import (
 	"github.com/peteraglen/slack-manager/internal"
 )
 
-func processor(ctx context.Context, coordinator Coordinator, alertCh <-chan models.Message, commandCh <-chan models.Message, extenderCh chan<- models.Message, logger common.Logger) error {
+func processor(ctx context.Context, coordinator *coordinator, alertCh <-chan models.Message, commandCh <-chan models.Message, extenderCh chan<- models.Message, logger common.Logger) error {
 	logger.Debug("processor started")
 	defer logger.Debug("processor exited")
 

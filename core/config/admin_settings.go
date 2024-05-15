@@ -1,6 +1,6 @@
 package config
 
-type SlackAdminConfig struct {
+type AdminSettings struct {
 	GlobalAdmins  map[string]string              `json:"globalAdmins"`
 	AlertChannels map[string]*AlertChannelConfig `json:"alertChannels"`
 	InfoChannels  map[string]*InfoChannelConfig  `json:"infoChannels"`
@@ -16,8 +16,4 @@ type AlertChannelConfig struct {
 type InfoChannelConfig struct {
 	Name         string `json:"name"`
 	TemplatePath string `json:"templatePath"`
-}
-
-func (s *SlackAdminConfig) Init() error {
-	return nil
 }
