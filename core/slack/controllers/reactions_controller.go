@@ -35,13 +35,13 @@ const MuteEmoji = "mask"
 
 type ReactionsController struct {
 	client         handler.SocketClient
-	commandHandler common.FifoQueueProducer
+	commandHandler handler.FifoQueueProducer
 	cache          *internal.Cache[string]
 	logger         common.Logger
 	conf           *config.Config
 }
 
-func NewReactionsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler common.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, conf *config.Config) *ReactionsController {
+func NewReactionsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, conf *config.Config) *ReactionsController {
 	cache := internal.NewCache(cache.New[string](cacheStore), logger)
 
 	c := &ReactionsController{

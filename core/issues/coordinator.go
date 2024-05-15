@@ -28,11 +28,11 @@ type Slack interface {
 }
 
 type DB interface {
-	LoadAllActiveIssues(ctx context.Context) (map[string][]*models.Issue, error)
-	CreateOrUpdateIssue(ctx context.Context, issue *models.Issue) error
-	UpdateIssues(ctx context.Context, issues []*models.Issue) (int, error)
-	GetIssueBySlackPostID(ctx context.Context, channelID, slackPostID string) (*models.Issue, error)
-	AddAlert(ctx context.Context, alert *models.Alert) (models.Future, error)
+	SaveAlert(ctx context.Context, id string, body json.RawMessage) error
+	LoadAllActiveIssues(ctx context.Context) (map[string]json.RawMessage, error)
+	CreateOrUpdateIssue(ctx context.Context, id string, body json.RawMessage) error
+	UpdateIssues(ctx context.Context, issues map[string]json.RawMessage) (int, error)
+	FindSingleIssue(ctx context.Context, filterTerms map[string]interface{}) (string, json.RawMessage, error)
 }
 
 type Settings interface {
@@ -40,12 +40,16 @@ type Settings interface {
 	SaveMoveMapping(ctx context.Context, mapping *models.MoveMapping) error
 }
 
+type FifoQueueProducer interface {
+	Send(ctx context.Context, groupID, dedupID, body string) error
+}
+
 type Coordinator struct {
 	channelManagers          map[string]*channelManager
 	channelManagersWaitGroup *errgroup.Group
 	channelManagersWaitCtx   context.Context //nolint:containedctx
 	db                       DB
-	queue                    common.FifoQueueProducer
+	queue                    FifoQueueProducer
 	settings                 Settings
 	slack                    Slack
 	logger                   common.Logger
@@ -58,7 +62,7 @@ type Coordinator struct {
 	initialized              bool
 }
 
-func NewCoordinator(db DB, queue common.FifoQueueProducer, settings Settings, slack Slack, logger common.Logger, metrics common.Metrics, conf *config.Config) *Coordinator {
+func NewCoordinator(db DB, queue FifoQueueProducer, settings Settings, slack Slack, logger common.Logger, metrics common.Metrics, conf *config.Config) *Coordinator {
 	return &Coordinator{
 		channelManagers: make(map[string]*channelManager),
 		db:              db,
@@ -85,21 +89,33 @@ func (c *Coordinator) Init(ctx context.Context) error {
 	c.channelManagersWaitGroup = errg
 	c.channelManagersWaitCtx = gctx
 
-	issues, err := c.db.LoadAllActiveIssues(ctx)
+	issueBodies, err := c.db.LoadAllActiveIssues(ctx)
 	if err != nil {
 		return err
 	}
 
-	totalIssues := 0
+	issues := make(map[string][]*models.Issue)
+
+	for id, body := range issueBodies {
+		issue := &models.Issue{}
+
+		if err := json.Unmarshal(body, issue); err != nil {
+			return fmt.Errorf("failed to unmarshal issue: %w", err)
+		}
+
+		// Backwards compatibility for issues without populated ID
+		issue.ID = id
+
+		issues[issue.SlackChannelID()] = append(issues[issue.SlackChannelID()], issue)
+	}
 
 	for channelID, channelIssues := range issues {
 		c.findOrCreateChannelManager(channelID, channelIssues...)
-		totalIssues += len(channelIssues)
 	}
 
 	c.initialized = true
 
-	c.logger.Infof("Coordinator initialized with %d issue(s) in %d channel(s)", totalIssues, len(c.channelManagers))
+	c.logger.Infof("Coordinator initialized with %d issue(s) in %d channel(s)", len(issueBodies), len(c.channelManagers))
 
 	return nil
 }
@@ -284,9 +300,12 @@ func (c *Coordinator) findOrCreateChannelManager(channelID string, existingIssue
 }
 
 func (c *Coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.Command) error {
-	// Commands are attempted exactly once, so we ack regardless of any errors below
+	logger := c.logger.WithFields(cmd.LogFields())
+
+	// Commands are attempted exactly once, so we ack regardless of any errors below.
+	// Errors are logged, but otherwise ignored.
 	defer func() {
-		go cmd.Ack(ctx)
+		go ackCommand(ctx, cmd, logger)
 	}()
 
 	alert := client.NewAlert(client.AlertSeverity(cmd.ParamAsString("severity")))

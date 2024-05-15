@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	commonlib "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/common"
 	"github.com/peteraglen/slack-manager/core/config"
 	"github.com/peteraglen/slack-manager/core/models"
@@ -21,24 +22,22 @@ type Slack interface {
 	RunSocketMode(ctx context.Context) error
 }
 
-type DB interface {
-	Errors() <-chan error
+type FifoQueueConsumer interface {
+	Receive(ctx context.Context, sinkCh chan<- *commonlib.QueueItem) error
 }
 
 type App struct {
 	slack        Slack
-	db           DB
 	coordinator  Coordinator
-	alertQueue   common.FifoQueueConsumer
-	commandQueue common.FifoQueueConsumer
+	alertQueue   FifoQueueConsumer
+	commandQueue FifoQueueConsumer
 	logger       common.Logger
 	conf         *config.Config
 }
 
-func New(slack Slack, db DB, coordinator Coordinator, alertQueue common.FifoQueueConsumer, commandQueue common.FifoQueueConsumer, logger common.Logger, conf *config.Config) *App {
+func New(slack Slack, coordinator Coordinator, alertQueue FifoQueueConsumer, commandQueue FifoQueueConsumer, logger common.Logger, conf *config.Config) *App {
 	return &App{
 		slack:        slack,
-		db:           db,
 		coordinator:  coordinator,
 		alertQueue:   alertQueue,
 		commandQueue: commandQueue,
@@ -85,10 +84,6 @@ func (app *App) Run(ctx context.Context) error {
 
 	errg.Go(func() error {
 		return app.slack.RunSocketMode(ctx)
-	})
-
-	errg.Go(func() error {
-		return errorHandler(ctx, app.db.Errors(), app.logger)
 	})
 
 	return errg.Wait()

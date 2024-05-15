@@ -20,8 +20,12 @@ import (
 	"golang.org/x/time/rate"
 )
 
+type FifoQueueProducer interface {
+	Send(ctx context.Context, groupID, dedupID, body string) error
+}
+
 type Server struct {
-	alertQueue         common.FifoQueueProducer
+	alertQueue         FifoQueueProducer
 	limitersByChannel  map[string]*rate.Limiter
 	limitersLock       *sync.Mutex
 	config             *Config
@@ -31,7 +35,7 @@ type Server struct {
 	logger             common.Logger
 }
 
-func New(ctx context.Context, alertQueue common.FifoQueueProducer, cacheStore cachestore.StoreInterface, metrics common.Metrics, logger common.Logger, config *Config) (*Server, error) {
+func New(ctx context.Context, alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, metrics common.Metrics, logger common.Logger, config *Config) (*Server, error) {
 	slackAPI := slackapi.New(cacheStore, config.CachePrefix, logger, metrics, &config.Slack)
 	channelInfoManager := newChannelInfoManager(slackAPI, logger)
 

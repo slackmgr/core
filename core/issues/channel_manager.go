@@ -2,6 +2,7 @@ package issues
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -85,7 +86,13 @@ func (c *channelManager) Init(ctx context.Context, issues []*models.Issue) {
 	for _, issue := range updated {
 		logger := c.logger.WithFields(issue.LogFields())
 
-		if err := c.db.CreateOrUpdateIssue(ctx, issue); err != nil {
+		body, err := json.Marshal(issue)
+		if err != nil {
+			logger.Errorf("Failed to marshal issue body: %s", err)
+			continue
+		}
+
+		if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, body); err != nil {
 			c.logger.ErrorfUnlessContextCanceled("Failed to update Slack channel name for existing issue: %s", err)
 		} else {
 			logger.Info("Updated Slack channel name")
@@ -170,11 +177,26 @@ func (c *channelManager) FindIssueBySlackPost(ctx context.Context, slackPostID s
 	}
 
 	// Search the database for archived issues
-	issue, err := c.db.GetIssueBySlackPostID(ctx, c.channelID, slackPostID)
+	filterTerms := map[string]interface{}{
+		"lastAlert.slackChannelId": c.channelID,
+		"slackPostId":              slackPostID,
+	}
+
+	id, issueBody, err := c.db.FindSingleIssue(ctx, filterTerms)
 	if err != nil {
 		c.logger.ErrorfUnlessContextCanceled("Failed to search for issue in database: %s", err)
 		return nil
 	}
+
+	issue := &models.Issue{}
+
+	if err := json.Unmarshal(issueBody, issue); err != nil {
+		c.logger.ErrorfUnlessContextCanceled("Failed to unmarshal issue body: %s", err)
+		return nil
+	}
+
+	// Backwards compatibility: Set the ID if it is missing
+	issue.ID = id
 
 	return issue
 }
@@ -213,8 +235,6 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	issue, found := c.issueCollection.Find(alert.Alert.CorrelationID)
 
 	if found {
-		logger = logger.WithFields(issue.LogFields())
-
 		if err := c.addAlertToExistingIssue(ctx, issue, alert); err != nil {
 			return fmt.Errorf("failed to update issue: %w", err)
 		}
@@ -224,35 +244,31 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		}
 	}
 
-	f, err := c.db.AddAlert(ctx, alert)
+	alertBody, err := json.Marshal(alert.Alert)
 	if err != nil {
-		return fmt.Errorf("failed to add alert to database: %w", err)
+		return fmt.Errorf("failed to marshal alert body: %w", err)
 	}
 
-	alert.InitWaitForDBWriteDone(f)
+	if err := c.db.SaveAlert(ctx, alert.ID, alertBody); err != nil {
+		return fmt.Errorf("failed to save alert to database: %w", err)
+	}
 
-	// Async wait for the alert to be stored in elastic by the beefy bulk writer.
-	// We can't ack the incoming alert before we are sure that the alert is safely stored.
-	go func() {
-		if err := alert.WaitForDBWriteDone(ctx); err != nil {
-			logger.ErrorfUnlessContextCanceled("Failed to wait for alert done: %s", err)
-			return
-		}
-
-		alert.Ack(ctx)
-	}()
+	if err := alert.Ack(ctx); err != nil {
+		return fmt.Errorf("failed to ack alert: %w", err)
+	}
 
 	return nil
 }
 
 // processCmd handles an incoming command.
 func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) error {
-	// Commands are attempted exactly once, so we ack regardless of any errors below
-	defer func() {
-		go cmd.Ack(ctx)
-	}()
-
 	logger := c.logger.WithFields(cmd.LogFields())
+
+	// Commands are attempted exactly once, so we ack regardless of any errors below.
+	// Errors are logged, but otherwise ignored.
+	defer func() {
+		go ackCommand(ctx, cmd, logger)
+	}()
 
 	issue := c.FindIssueBySlackPost(ctx, cmd.SlackPostID, cmd.IncludeArchivedIssues)
 
@@ -272,18 +288,34 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 		c.logger.ErrorfUnlessContextCanceled("Failed to process command: %s", err)
 	}
 
-	if err := c.db.CreateOrUpdateIssue(ctx, issue); err != nil {
+	body, err := json.Marshal(issue)
+	if err != nil {
+		return fmt.Errorf("failed to marshal issue body: %w", err)
+	}
+
+	if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, body); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
 	return nil
 }
 
+func ackCommand(ctx context.Context, cmd *models.Command, logger common.Logger) {
+	if err := cmd.Ack(ctx); err != nil {
+		logger.ErrorfUnlessContextCanceled("Failed to ack command: %s", err)
+	}
+}
+
 // processAlert handles an incoming issue, i.e. an issue moved from another channel.
 func (c *channelManager) processIncomingIssue(ctx context.Context, issue *models.Issue) error {
 	logger := c.logger.WithFields(issue.LogFields())
 
-	if err := c.db.CreateOrUpdateIssue(ctx, issue); err != nil {
+	body, err := json.Marshal(issue)
+	if err != nil {
+		return fmt.Errorf("failed to marshal issue body: %w", err)
+	}
+
+	if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, body); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
@@ -323,7 +355,19 @@ func (c *channelManager) processActiveIssues(ctx context.Context) {
 		c.logger.ErrorfUnlessContextCanceled("Failed to update issues in Slack: %s", err)
 	}
 
-	updated, err := c.db.UpdateIssues(ctx, allIssues)
+	issueBodies := make(map[string]json.RawMessage, len(allIssues))
+
+	for _, issue := range allIssues {
+		body, err := json.Marshal(issue)
+		if err != nil {
+			c.logger.WithFields(issue.LogFields()).Errorf("Failed to marshal issue body: %s", err)
+			continue
+		}
+
+		issueBodies[issue.ID] = body
+	}
+
+	updated, err := c.db.UpdateIssues(ctx, issueBodies)
 	if err != nil {
 		c.logger.ErrorfUnlessContextCanceled("Failed to update issues in database: %s", err)
 	} else {
@@ -365,7 +409,12 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 		return nil
 	}
 
-	if err := c.db.CreateOrUpdateIssue(ctx, issue); err != nil {
+	body, err := json.Marshal(issue)
+	if err != nil {
+		return fmt.Errorf("failed to marshal issue body: %w", err)
+	}
+
+	if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, body); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
@@ -388,7 +437,12 @@ func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert
 	issue := models.NewIssue(alert, c.logger)
 	logger = logger.WithFields(issue.LogFields())
 
-	if err := c.db.CreateOrUpdateIssue(ctx, issue); err != nil {
+	body, err := json.Marshal(issue)
+	if err != nil {
+		return fmt.Errorf("failed to marshal issue body: %w", err)
+	}
+
+	if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, body); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 

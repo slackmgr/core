@@ -35,13 +35,13 @@ type PrivateModalMetadata struct {
 
 type InteractiveController struct {
 	client         handler.SocketClient
-	commandHandler common.FifoQueueProducer
+	commandHandler handler.FifoQueueProducer
 	issueFinder    handler.IssueFinder
 	logger         common.Logger
 	conf           *config.Config
 }
 
-func NewInteractiveController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler common.FifoQueueProducer, issueFinder handler.IssueFinder, logger common.Logger, conf *config.Config) *InteractiveController {
+func NewInteractiveController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler handler.FifoQueueProducer, issueFinder handler.IssueFinder, logger common.Logger, conf *config.Config) *InteractiveController {
 	c := &InteractiveController{
 		client:         client,
 		commandHandler: commandHandler,

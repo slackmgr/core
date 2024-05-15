@@ -1,7 +1,6 @@
 package models
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -15,17 +14,13 @@ import (
 )
 
 type Alert struct {
-	ID string `json:"-"`
 	client.Alert
+	message
+	ID                     string    `json:"-"`
 	DBTimestamp            time.Time `json:"@timestamp"`
 	SlackChannelName       string    `json:"slackChannelName"`
 	OriginalSlackChannelID string    `json:"originalSlackChannelID"`
 	OriginalText           string    `json:"originalText"`
-
-	// waitForDBWriteDone is used to wait for the alert to be persisted before it is acked.
-	waitForDBWriteDone Future
-
-	message
 }
 
 func NewAlert(queueItem *commonlib.QueueItem) (Message, error) {
@@ -45,24 +40,6 @@ func NewAlert(queueItem *commonlib.QueueItem) (Message, error) {
 		Alert:       alert,
 		message:     newMessage(queueItem),
 	}, nil
-}
-
-// InitWaitForDBWriteDone initializes the wait block which ensures that the alert is persisted before it is acked.
-func (a *Alert) InitWaitForDBWriteDone(f Future) {
-	a.waitForDBWriteDone = f
-}
-
-// WaitForDBWriteDone blocks until the alert has been written to an issue and persisted, or the context is cancelled.
-func (a *Alert) WaitForDBWriteDone(ctx context.Context) error {
-	if a.waitForDBWriteDone == nil {
-		return nil
-	}
-
-	err := a.waitForDBWriteDone.Wait(ctx)
-
-	a.waitForDBWriteDone = nil
-
-	return err
 }
 
 func (a *Alert) SetDefaultValues(conf *config.Config) {

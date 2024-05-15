@@ -29,7 +29,7 @@ const (
 
 type Client struct {
 	api            *slackapi.Client
-	commandHandler common.FifoQueueProducer
+	commandHandler handler.FifoQueueProducer
 	issueFinder    handler.IssueFinder
 	cacheStore     store.StoreInterface
 	logger         common.Logger
@@ -39,7 +39,7 @@ type Client struct {
 
 var location *time.Location
 
-func New(commandHandler common.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, conf *config.Config) *Client {
+func New(commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, conf *config.Config) *Client {
 	location = conf.Location
 
 	return &Client{

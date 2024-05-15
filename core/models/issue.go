@@ -17,7 +17,7 @@ var (
 
 // Issue represents one or more alerts with the same correlation ID (in the same Slack channel)
 type Issue struct {
-	ID                        string        `json:"-"`
+	ID                        string        `json:"id"`
 	CorrelationID             string        `json:"correlationId"`
 	LastAlert                 *Alert        `json:"lastAlert"`
 	AlertCount                int           `json:"alertCount"`
