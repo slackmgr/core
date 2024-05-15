@@ -3,8 +3,8 @@ package manager
 import (
 	"context"
 
+	common "github.com/peteraglen/slack-manager-common"
 	commonlib "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/common"
 	"github.com/peteraglen/slack-manager/core/models"
 	"github.com/peteraglen/slack-manager/internal"
 	"golang.org/x/sync/errgroup"

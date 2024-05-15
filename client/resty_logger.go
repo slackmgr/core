@@ -1,6 +1,6 @@
 package client
 
-import "github.com/peteraglen/slack-manager/common"
+import common "github.com/peteraglen/slack-manager-common"
 
 type restyLogger struct {
 	logger common.Logger

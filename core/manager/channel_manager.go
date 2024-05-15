@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/client"
-	"github.com/peteraglen/slack-manager/common"
 	"github.com/peteraglen/slack-manager/core/config"
 	"github.com/peteraglen/slack-manager/core/models"
 	"github.com/peteraglen/slack-manager/internal"
@@ -93,7 +93,7 @@ func (c *channelManager) Init(ctx context.Context, issues []*models.Issue) {
 		}
 
 		if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, body); err != nil {
-			c.logger.ErrorfUnlessContextCanceled("Failed to update Slack channel name for existing issue: %s", err)
+			c.logger.Errorf("Failed to update Slack channel name for existing issue: %s", err)
 		} else {
 			logger.Info("Updated Slack channel name")
 		}
@@ -123,7 +123,7 @@ func (c *channelManager) Run(ctx context.Context) error {
 			}
 
 			if err := c.processAlert(ctx, alert); err != nil {
-				c.logger.ErrorfUnlessContextCanceled("Failed to process alert: %s", err)
+				c.logger.Errorf("Failed to process alert: %s", err)
 			}
 		case cmd, ok := <-c.commandCh:
 			if !ok {
@@ -131,7 +131,7 @@ func (c *channelManager) Run(ctx context.Context) error {
 			}
 
 			if err := c.processCmd(ctx, cmd); err != nil {
-				c.logger.ErrorfUnlessContextCanceled("Failed to process command: %s", err)
+				c.logger.Errorf("Failed to process command: %s", err)
 			}
 		case issue, ok := <-c.addIssueCh:
 			if !ok {
@@ -139,7 +139,7 @@ func (c *channelManager) Run(ctx context.Context) error {
 			}
 
 			if err := c.processIncomingIssue(ctx, issue); err != nil {
-				c.logger.ErrorfUnlessContextCanceled("Failed to process incoming issue: %s", err)
+				c.logger.Errorf("Failed to process incoming issue: %s", err)
 			}
 		case <-processorTimeout:
 			c.processActiveIssues(ctx)
@@ -184,14 +184,14 @@ func (c *channelManager) FindIssueBySlackPost(ctx context.Context, slackPostID s
 
 	id, issueBody, err := c.db.FindSingleIssue(ctx, filterTerms)
 	if err != nil {
-		c.logger.ErrorfUnlessContextCanceled("Failed to search for issue in database: %s", err)
+		c.logger.Errorf("Failed to search for issue in database: %s", err)
 		return nil
 	}
 
 	issue := &models.Issue{}
 
 	if err := json.Unmarshal(issueBody, issue); err != nil {
-		c.logger.ErrorfUnlessContextCanceled("Failed to unmarshal issue body: %s", err)
+		c.logger.Errorf("Failed to unmarshal issue body: %s", err)
 		return nil
 	}
 
@@ -285,7 +285,7 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 	}
 
 	if err := cmdFunc(ctx, issue, cmd, logger); err != nil {
-		c.logger.ErrorfUnlessContextCanceled("Failed to process command: %s", err)
+		c.logger.Errorf("Failed to process command: %s", err)
 	}
 
 	body, err := json.Marshal(issue)
@@ -302,7 +302,7 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 
 func ackCommand(ctx context.Context, cmd *models.Command, logger common.Logger) {
 	if err := cmd.Ack(ctx); err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to ack command: %s", err)
+		logger.Errorf("Failed to ack command: %s", err)
 	}
 }
 
@@ -352,7 +352,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context) {
 	allIssues := c.issueCollection.All()
 
 	if err := c.slackClient.Update(ctx, c.channelID, allIssues); err != nil {
-		c.logger.ErrorfUnlessContextCanceled("Failed to update issues in Slack: %s", err)
+		c.logger.Errorf("Failed to update issues in Slack: %s", err)
 	}
 
 	issueBodies := make(map[string]json.RawMessage, len(allIssues))
@@ -369,7 +369,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context) {
 
 	updated, err := c.db.UpdateIssues(ctx, issueBodies)
 	if err != nil {
-		c.logger.ErrorfUnlessContextCanceled("Failed to update issues in database: %s", err)
+		c.logger.Errorf("Failed to update issues in database: %s", err)
 	} else {
 		c.logger.WithField("count", len(allIssues)).WithField("updated", updated).WithField("skipped", len(allIssues)-updated).Debug("Updated issue collection in database")
 	}
@@ -594,14 +594,14 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 func (c *channelManager) postWebhook(ctx context.Context, url string, data *client.WebhookCallback, logger common.Logger) {
 	response, err := c.webhookClient.R().SetContext(ctx).SetBody(data).Post(url)
 	if err != nil {
-		c.logger.ErrorfUnlessContextCanceled("POST %s failed: %w", response.Request.URL, err)
+		c.logger.Errorf("POST %s failed: %w", response.Request.URL, err)
 		return
 	}
 
 	logger.Debugf("POST %s %s", response.Request.URL, response.Status())
 
 	if !response.IsSuccess() {
-		c.logger.ErrorfUnlessContextCanceled("POST %s failed with status code %d", response.Request.URL, response.StatusCode())
+		c.logger.Errorf("POST %s failed with status code %d", response.Request.URL, response.StatusCode())
 	}
 }
 

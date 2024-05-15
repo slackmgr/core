@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/peteraglen/slack-manager/common"
+	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/internal"
 	"github.com/peteraglen/slack-manager/internal/slackapi"
 	"golang.org/x/sync/errgroup"

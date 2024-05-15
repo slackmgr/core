@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
+	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/client"
-	"github.com/peteraglen/slack-manager/common"
 	"github.com/peteraglen/slack-manager/core/config"
 	"github.com/peteraglen/slack-manager/core/models"
 	"github.com/peteraglen/slack-manager/internal"
@@ -113,7 +113,7 @@ run:
 
 	// Wait for the channel managers to shut down before returning
 	if err := c.channelManagersWaitGroup.Wait(); err != nil {
-		c.logger.ErrorfUnlessContextCanceled("Channel manager failed during shutdown: %s", err)
+		c.logger.Errorf("Channel manager failed during shutdown: %s", err)
 	}
 
 	return ctx.Err()
@@ -122,7 +122,7 @@ run:
 func (c *coordinator) AddCommand(ctx context.Context, cmd *models.Command) {
 	if cmd.Action == models.CommandActionCreateIssue {
 		if err := c.handleCreateIssueCommand(ctx, cmd); err != nil {
-			c.logger.ErrorfUnlessContextCanceled("Failed to handle create issue command: %s", err)
+			c.logger.Errorf("Failed to handle create issue command: %s", err)
 		}
 		return
 	}
@@ -130,7 +130,7 @@ func (c *coordinator) AddCommand(ctx context.Context, cmd *models.Command) {
 	manager := c.findOrCreateChannelManager(cmd.ChannelID)
 
 	if err := manager.QueueCommand(ctx, cmd); err != nil {
-		c.logger.ErrorfUnlessContextCanceled("Failed to add command to channel manager: %s", err)
+		c.logger.Errorf("Failed to add command to channel manager: %s", err)
 	}
 }
 
@@ -145,7 +145,7 @@ func (c *coordinator) AddAlert(ctx context.Context, alert *models.Alert) {
 	manager := c.findOrCreateChannelManager(alert.SlackChannelID)
 
 	if err := manager.QueueAlert(ctx, alert); err != nil {
-		c.logger.ErrorfUnlessContextCanceled("Failed to add alert to channel manager: %s", err)
+		c.logger.Errorf("Failed to add alert to channel manager: %s", err)
 	}
 }
 
@@ -169,7 +169,7 @@ func (c *coordinator) handleMoveRequest(ctx context.Context, request *models.Mov
 
 	// Save information about the move, so that future alerts are routed correctly
 	if err := c.addMoveMapping(ctx, moveMapping); err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to register move mapping from %s to %s: %s", moveMapping.OriginalChannelID, moveMapping.TargetChannelID, err)
+		logger.Errorf("Failed to register move mapping from %s to %s: %s", moveMapping.OriginalChannelID, moveMapping.TargetChannelID, err)
 		return
 	}
 
@@ -184,7 +184,7 @@ func (c *coordinator) handleMoveRequest(ctx context.Context, request *models.Mov
 
 	// Add the issue to the new manager
 	if err := newManager.QueueMovedIssue(ctx, issue); err != nil {
-		logger.ErrorfUnlessContextCanceled("Failed to queue moved issue: %s", err)
+		logger.Errorf("Failed to queue moved issue: %s", err)
 	}
 }
 
@@ -195,7 +195,7 @@ func (c *coordinator) findMoveMapping(ctx context.Context, channelID, correlatio
 
 	moveMappingsForChannel, err := c.getOrCreateMoveMappingsForChannel(ctx, channelID)
 	if err != nil {
-		c.logger.ErrorfUnlessContextCanceled("Failed to get move mappings for channel %s: %s", channelID, err)
+		c.logger.Errorf("Failed to get move mappings for channel %s: %s", channelID, err)
 		return nil, false
 	}
 

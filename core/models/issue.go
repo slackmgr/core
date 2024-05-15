@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
+	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/client"
-	"github.com/peteraglen/slack-manager/common"
 	"github.com/peteraglen/slack-manager/internal"
 )
 
