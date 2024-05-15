@@ -37,7 +37,36 @@ type Config struct {
 	settings *SlackAdminConfig
 }
 
-func (c *Config) SetSettings(settings *SlackAdminConfig) error {
+func NewDefaultConfig() *Config {
+	slackOptions := common.SlackOptions{}
+	slackOptions.SetDefaults()
+
+	return &Config{
+		SkipAlertsConsumer:    false,
+		ProcessInterval:       5 * time.Second,
+		DefaultArchivingDelay: 12 * time.Hour,
+		WebhookTimeout:        2 * time.Second,
+		ReorderIssueLimit:     30,
+		EncryptionKey:         "",
+		CachePrefix:           "slack-manager",
+		IgnoreCacheReadErrors: true,
+		Location:              time.UTC,
+		Slack:                 slackOptions,
+		ChannelManager: ChannelManagerConfig{
+			AlertChannelSize:   100,
+			CommandChannelSize: 100,
+		},
+		Throttle: ThrottleConfig{
+			MinIssueCountForThrottle: 5,
+			UpperLimit:               90 * time.Second,
+		},
+		DocsURL:            "",
+		StatusDashboardURL: "",
+		LogsDashboardURL:   "",
+	}
+}
+
+func (c *Config) UpdateSettings(settings *SlackAdminConfig) error {
 	if err := settings.Init(); err != nil {
 		return err
 	}
@@ -47,7 +76,7 @@ func (c *Config) SetSettings(settings *SlackAdminConfig) error {
 	return nil
 }
 
-func (c *Config) GetSettings() *SlackAdminConfig {
+func (c *Config) Settings() *SlackAdminConfig {
 	return c.settings
 }
 
