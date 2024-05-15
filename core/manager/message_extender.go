@@ -57,13 +57,8 @@ func processInFlightMessages(ctx context.Context, messages map[string]models.Mes
 
 	logger = logger.WithField("count", len(messages)).WithField("extended_count", len(inNeedOfExtension))
 
-	if len(inNeedOfExtension) < 2 {
-		if len(inNeedOfExtension) == 1 {
-			inNeedOfExtension[0].Extend(ctx, logger)
-		}
-
+	if len(inNeedOfExtension) == 0 {
 		logger.WithField("duration", fmt.Sprintf("%v", time.Since(started))).Info("Completed in-flight message processing")
-
 		return
 	}
 
@@ -76,7 +71,16 @@ func processInFlightMessages(ctx context.Context, messages map[string]models.Mes
 
 		go func() {
 			defer wg.Done()
-			msg.Extend(ctx, logger)
+
+			if msg.ExtendCount() >= 5 {
+				logger.Errorf("Message %s has been extended at least 5 times - giving up", msg.MessageID())
+				msg.SetExtendFunc(nil)
+			}
+
+			if err := msg.Extend(ctx); err != nil {
+				logger.Errorf("Failed to extend message %s", msg.MessageID())
+				return
+			}
 		}()
 	}
 

@@ -6,18 +6,18 @@ import (
 	"time"
 
 	commonlib "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/common"
 )
 
 type UnmarshalFunc func(queueItem *commonlib.QueueItem) (Message, error)
 
 type Message interface {
 	MessageID() string
-	SetAckFunc(f func(ctx context.Context))
+	SetAckFunc(f func(ctx context.Context) error)
 	IsAcked() bool
-	SetExtendFunc(f func(ctx context.Context))
+	SetExtendFunc(f func(ctx context.Context) error)
+	ExtendCount() int
 	NeedsExtension() bool
-	Extend(context.Context, common.Logger)
+	Extend(context.Context) error
 }
 
 type message struct {
@@ -27,10 +27,10 @@ type message struct {
 	visibilityTimeout time.Duration
 
 	// ack is used to ack the message and declare it as processed.
-	ack func(ctx context.Context)
+	ack func(ctx context.Context) error
 
 	// extend is used to extend the visibility timeout of the message. This is to prevent the ack from failing due to the visibilty timeout expiring.
-	extend      func(ctx context.Context)
+	extend      func(ctx context.Context) error
 	extendCount int
 
 	// processingLock is used to prevent the ack and extend functions from being called at the same time.
@@ -51,11 +51,11 @@ func (m *message) MessageID() string {
 	return m.messageID
 }
 
-func (m *message) SetAckFunc(f func(ctx context.Context)) {
+func (m *message) SetAckFunc(f func(ctx context.Context) error) {
 	m.ack = f
 }
 
-func (m *message) Ack(ctx context.Context) {
+func (m *message) Ack(ctx context.Context) error {
 	m.processingLock.Lock()
 	defer m.processingLock.Unlock()
 
@@ -64,44 +64,50 @@ func (m *message) Ack(ctx context.Context) {
 		panic("Ack function has not been set, or has already been called")
 	}
 
-	m.ack(ctx)
+	if err := m.ack(ctx); err != nil {
+		return err
+	}
 
 	// Clear the ack and extend functions to prevent them from being called again.
 	m.ack = nil
 	m.extend = nil
+
+	return nil
 }
 
 func (m *message) IsAcked() bool {
 	return m.ack == nil
 }
 
-func (m *message) SetExtendFunc(f func(ctx context.Context)) {
+func (m *message) SetExtendFunc(f func(ctx context.Context) error) {
 	m.extend = f
+}
+
+func (m *message) ExtendCount() int {
+	return m.extendCount
 }
 
 func (m *message) NeedsExtension() bool {
 	return m.extend != nil && time.Since(m.receiveTimestamp) > m.visibilityTimeout/2
 }
 
-func (m *message) Extend(ctx context.Context, logger common.Logger) {
+func (m *message) Extend(ctx context.Context) error {
 	m.processingLock.Lock()
 	defer m.processingLock.Unlock()
 
 	// Check that the extend function is still set. If it is not, it means that the alert has already been acked (or that we have given up).
 	if m.extend == nil {
-		return
-	}
-
-	if m.extendCount == 5 {
-		logger.Errorf("visibility for message %s has been extended 5 times - giving up", m.messageID)
-		m.extend = nil
-		return
+		return nil
 	}
 
 	// Reset the receive timestamp to prevent the message from being extended again too soon.
 	m.receiveTimestamp = time.Now()
 
-	m.extend(ctx)
+	if err := m.extend(ctx); err != nil {
+		return err
+	}
 
 	m.extendCount++
+
+	return nil
 }
