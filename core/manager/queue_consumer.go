@@ -10,7 +10,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func queueConsumer(ctx context.Context, queue FifoQueueConsumer, sinkCh chan<- models.Message, unmarshalFunc models.UnmarshalFunc, logger common.Logger) error {
+func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.Message, unmarshalFunc models.UnmarshalFunc, logger common.Logger) error {
 	logger.Debug("queueConsumer started")
 	defer logger.Debug("queueConsumer exited")
 

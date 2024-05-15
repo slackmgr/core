@@ -1,9 +1,8 @@
-package issues
+package manager
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -15,17 +14,7 @@ import (
 	"github.com/peteraglen/slack-manager/internal"
 	"github.com/segmentio/ksuid"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 )
-
-type Slack interface {
-	GetChannelName(ctx context.Context, channelID string) string
-	IsAlertChannel(ctx context.Context, channelID string) (bool, string, error)
-	UpdateSingleIssue(ctx context.Context, issue *models.Issue) error
-	Update(ctx context.Context, channelID string, issues []*models.Issue) error
-	UpdateSingleIssueWithThrottling(ctx context.Context, issue *models.Issue, issuesInChannel int) error
-	Delete(ctx context.Context, issue *models.Issue, updateIfMessageHasReplies bool, sem *semaphore.Weighted) error
-}
 
 type DB interface {
 	SaveAlert(ctx context.Context, id string, body json.RawMessage) error
@@ -33,57 +22,43 @@ type DB interface {
 	CreateOrUpdateIssue(ctx context.Context, id string, body json.RawMessage) error
 	UpdateIssues(ctx context.Context, issues map[string]json.RawMessage) (int, error)
 	FindSingleIssue(ctx context.Context, filterTerms map[string]interface{}) (string, json.RawMessage, error)
-}
-
-type Settings interface {
 	GetMoveMappings(ctx context.Context, channelID string) (map[string]*models.MoveMapping, error)
 	SaveMoveMapping(ctx context.Context, mapping *models.MoveMapping) error
 }
 
-type FifoQueueProducer interface {
-	Send(ctx context.Context, groupID, dedupID, body string) error
-}
-
-type Coordinator struct {
+type coordinator struct {
 	channelManagers          map[string]*channelManager
 	channelManagersWaitGroup *errgroup.Group
 	channelManagersWaitCtx   context.Context //nolint:containedctx
 	db                       DB
-	queue                    FifoQueueProducer
-	settings                 Settings
+	alertQueue               FifoQueue
 	slack                    Slack
 	logger                   common.Logger
 	metrics                  common.Metrics
 	conf                     *config.Config
 	managerLock              *sync.Mutex
 	mappingsLock             *sync.Mutex
-	moveRequestCh            chan *moveRequest
+	moveRequestCh            chan *models.MoveRequest
 	moveMappings             map[string]map[string]*models.MoveMapping
-	initialized              bool
 }
 
-func NewCoordinator(db DB, queue FifoQueueProducer, settings Settings, slack Slack, logger common.Logger, metrics common.Metrics, conf *config.Config) *Coordinator {
-	return &Coordinator{
+func newCoordinator(db DB, alertQueue FifoQueue, slack Slack, logger common.Logger, metrics common.Metrics, conf *config.Config) *coordinator {
+	return &coordinator{
 		channelManagers: make(map[string]*channelManager),
 		db:              db,
-		queue:           queue,
-		settings:        settings,
+		alertQueue:      alertQueue,
 		slack:           slack,
 		logger:          logger,
 		metrics:         metrics,
 		conf:            conf,
 		managerLock:     &sync.Mutex{},
 		mappingsLock:    &sync.Mutex{},
-		moveRequestCh:   make(chan *moveRequest, 10),
+		moveRequestCh:   make(chan *models.MoveRequest, 10),
 		moveMappings:    make(map[string]map[string]*models.MoveMapping),
 	}
 }
 
-func (c *Coordinator) Init(ctx context.Context) error {
-	if c.initialized {
-		return errors.New("Coordinator can only be initialized once")
-	}
-
+func (c *coordinator) init(ctx context.Context) error {
 	errg, gctx := errgroup.WithContext(ctx)
 
 	c.channelManagersWaitGroup = errg
@@ -113,14 +88,12 @@ func (c *Coordinator) Init(ctx context.Context) error {
 		c.findOrCreateChannelManager(channelID, channelIssues...)
 	}
 
-	c.initialized = true
-
 	c.logger.Infof("Coordinator initialized with %d issue(s) in %d channel(s)", len(issueBodies), len(c.channelManagers))
 
 	return nil
 }
 
-func (c *Coordinator) Run(ctx context.Context) error {
+func (c *coordinator) Run(ctx context.Context) error {
 	c.logger.Info("Channel coordinator started")
 	defer c.logger.Info("Channel coordinator exited")
 
@@ -146,7 +119,7 @@ run:
 	return ctx.Err()
 }
 
-func (c *Coordinator) AddCommand(ctx context.Context, cmd *models.Command) {
+func (c *coordinator) AddCommand(ctx context.Context, cmd *models.Command) {
 	if cmd.Action == models.CommandActionCreateIssue {
 		if err := c.handleCreateIssueCommand(ctx, cmd); err != nil {
 			c.logger.ErrorfUnlessContextCanceled("Failed to handle create issue command: %s", err)
@@ -161,7 +134,7 @@ func (c *Coordinator) AddCommand(ctx context.Context, cmd *models.Command) {
 	}
 }
 
-func (c *Coordinator) AddAlert(ctx context.Context, alert *models.Alert) {
+func (c *coordinator) AddAlert(ctx context.Context, alert *models.Alert) {
 	alert.OriginalSlackChannelID = alert.SlackChannelID
 	alert.OriginalText = alert.Text
 
@@ -176,13 +149,13 @@ func (c *Coordinator) AddAlert(ctx context.Context, alert *models.Alert) {
 	}
 }
 
-func (c *Coordinator) FindIssueBySlackPost(ctx context.Context, channelID string, slackPostID string, includeArchived bool) *models.Issue {
+func (c *coordinator) FindIssueBySlackPost(ctx context.Context, channelID string, slackPostID string, includeArchived bool) *models.Issue {
 	manager := c.findOrCreateChannelManager(channelID)
 
 	return manager.FindIssueBySlackPost(ctx, slackPostID, includeArchived)
 }
 
-func (c *Coordinator) handleMoveRequest(ctx context.Context, request *moveRequest) {
+func (c *coordinator) handleMoveRequest(ctx context.Context, request *models.MoveRequest) {
 	issue := request.Issue
 
 	moveMapping := &models.MoveMapping{
@@ -216,7 +189,7 @@ func (c *Coordinator) handleMoveRequest(ctx context.Context, request *moveReques
 }
 
 // findMoveMapping finds a move mapping for the specified channel and correlation ID, if it exists.
-func (c *Coordinator) findMoveMapping(ctx context.Context, channelID, correlationID string) (*models.MoveMapping, bool) {
+func (c *coordinator) findMoveMapping(ctx context.Context, channelID, correlationID string) (*models.MoveMapping, bool) {
 	c.mappingsLock.Lock()
 	defer c.mappingsLock.Unlock()
 
@@ -234,7 +207,7 @@ func (c *Coordinator) findMoveMapping(ctx context.Context, channelID, correlatio
 }
 
 // addMoveMapping adds a new move mapping to the settings database (and the local cache).
-func (c *Coordinator) addMoveMapping(ctx context.Context, mapping *models.MoveMapping) error {
+func (c *coordinator) addMoveMapping(ctx context.Context, mapping *models.MoveMapping) error {
 	c.mappingsLock.Lock()
 	defer c.mappingsLock.Unlock()
 
@@ -245,7 +218,7 @@ func (c *Coordinator) addMoveMapping(ctx context.Context, mapping *models.MoveMa
 
 	moveMappingsForChannel[mapping.CorrelationID] = mapping
 
-	if err := c.settings.SaveMoveMapping(ctx, mapping); err != nil {
+	if err := c.db.SaveMoveMapping(ctx, mapping); err != nil {
 		return err
 	}
 
@@ -256,14 +229,14 @@ func (c *Coordinator) addMoveMapping(ctx context.Context, mapping *models.MoveMa
 
 // getOrCreateMoveMappingsForChannel gets the move mappings for the specified channel, either from the local cache or from the settings database.
 // The caller of this function must lock c.mappingsLock!
-func (c *Coordinator) getOrCreateMoveMappingsForChannel(ctx context.Context, channelID string) (map[string]*models.MoveMapping, error) {
+func (c *coordinator) getOrCreateMoveMappingsForChannel(ctx context.Context, channelID string) (map[string]*models.MoveMapping, error) {
 	mappings, found := c.moveMappings[channelID]
 
 	if found {
 		return mappings, nil
 	}
 
-	mappings, err := c.settings.GetMoveMappings(ctx, channelID)
+	mappings, err := c.db.GetMoveMappings(ctx, channelID)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +249,7 @@ func (c *Coordinator) getOrCreateMoveMappingsForChannel(ctx context.Context, cha
 }
 
 // findOrCreateChannelManager finds an existing channel manager, or creates a new.
-func (c *Coordinator) findOrCreateChannelManager(channelID string, existingIssues ...*models.Issue) *channelManager {
+func (c *coordinator) findOrCreateChannelManager(channelID string, existingIssues ...*models.Issue) *channelManager {
 	c.managerLock.Lock()
 	defer c.managerLock.Unlock()
 
@@ -299,7 +272,7 @@ func (c *Coordinator) findOrCreateChannelManager(channelID string, existingIssue
 	return manager
 }
 
-func (c *Coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.Command) error {
+func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.Command) error {
 	logger := c.logger.WithFields(cmd.LogFields())
 
 	// Commands are attempted exactly once, so we ack regardless of any errors below.
@@ -337,5 +310,5 @@ func (c *Coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.
 	groupID := alert.SlackChannelID
 	dedupID := internal.Hash("alert", alert.SlackChannelID, alert.CorrelationID, alert.Timestamp.Format(time.RFC3339Nano))
 
-	return c.queue.Send(ctx, groupID, dedupID, string(body))
+	return c.alertQueue.Send(ctx, groupID, dedupID, string(body))
 }

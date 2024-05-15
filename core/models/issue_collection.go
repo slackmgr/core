@@ -1,19 +1,17 @@
-package issues
+package models
 
 import (
 	"sync"
-
-	"github.com/peteraglen/slack-manager/core/models"
 )
 
-type issueCollection struct {
-	issuesByCorrelationID map[string]*models.Issue
+type IssueCollection struct {
+	issuesByCorrelationID map[string]*Issue
 	lock                  *sync.RWMutex
 }
 
-func newIssueCollection(issues []*models.Issue) *issueCollection {
-	c := &issueCollection{
-		issuesByCorrelationID: make(map[string]*models.Issue),
+func NewIssueCollection(issues []*Issue) *IssueCollection {
+	c := &IssueCollection{
+		issuesByCorrelationID: make(map[string]*Issue),
 		lock:                  &sync.RWMutex{},
 	}
 
@@ -24,18 +22,18 @@ func newIssueCollection(issues []*models.Issue) *issueCollection {
 	return c
 }
 
-func (c *issueCollection) Count() int {
+func (c *IssueCollection) Count() int {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
 	return len(c.issuesByCorrelationID)
 }
 
-func (c *issueCollection) All() []*models.Issue {
+func (c *IssueCollection) All() []*Issue {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
-	issues := make([]*models.Issue, len(c.issuesByCorrelationID))
+	issues := make([]*Issue, len(c.issuesByCorrelationID))
 	i := 0
 
 	for _, issue := range c.issuesByCorrelationID {
@@ -46,7 +44,7 @@ func (c *issueCollection) All() []*models.Issue {
 	return issues
 }
 
-func (c *issueCollection) Find(correlationID string) (*models.Issue, bool) {
+func (c *IssueCollection) Find(correlationID string) (*Issue, bool) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
@@ -55,7 +53,7 @@ func (c *issueCollection) Find(correlationID string) (*models.Issue, bool) {
 	return issue, found
 }
 
-func (c *issueCollection) FindActiveIssueBySlackPost(slackPostID string) (*models.Issue, bool) {
+func (c *IssueCollection) FindActiveIssueBySlackPost(slackPostID string) (*Issue, bool) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
@@ -68,14 +66,14 @@ func (c *issueCollection) FindActiveIssueBySlackPost(slackPostID string) (*model
 	return nil, false
 }
 
-func (c *issueCollection) Add(issue *models.Issue) {
+func (c *IssueCollection) Add(issue *Issue) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
 	c.issuesByCorrelationID[issue.CorrelationID] = issue
 }
 
-func (c *issueCollection) Remove(issue *models.Issue) {
+func (c *IssueCollection) Remove(issue *Issue) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -83,11 +81,11 @@ func (c *issueCollection) Remove(issue *models.Issue) {
 }
 
 // UpdateChannelName updates all issues with the current channel name (if needed)
-func (c *issueCollection) UpdateChannelName(channelName string) []*models.Issue {
+func (c *IssueCollection) UpdateChannelName(channelName string) []*Issue {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	updated := []*models.Issue{}
+	updated := []*Issue{}
 
 	for _, issue := range c.issuesByCorrelationID {
 		if issue.LastAlert == nil || issue.LastAlert.SlackChannelName == channelName {
@@ -102,11 +100,11 @@ func (c *issueCollection) UpdateChannelName(channelName string) []*models.Issue 
 	return updated
 }
 
-func (c *issueCollection) RegisterArchiving() []*models.Issue {
+func (c *IssueCollection) RegisterArchiving() []*Issue {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	archivedIssues := []*models.Issue{}
+	archivedIssues := []*Issue{}
 
 	for _, issue := range c.issuesByCorrelationID {
 		if issue.IsReadyForArchiving() {
@@ -118,11 +116,11 @@ func (c *issueCollection) RegisterArchiving() []*models.Issue {
 	return archivedIssues
 }
 
-func (c *issueCollection) RegisterEscalation() []*models.EscalationResult {
+func (c *IssueCollection) RegisterEscalation() []*EscalationResult {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	results := []*models.EscalationResult{}
+	results := []*EscalationResult{}
 
 	for _, issue := range c.issuesByCorrelationID {
 		results = append(results, issue.ApplyEscalationRules())

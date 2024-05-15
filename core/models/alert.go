@@ -9,7 +9,6 @@ import (
 
 	commonlib "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/client"
-	"github.com/peteraglen/slack-manager/core/config"
 	"github.com/peteraglen/slack-manager/internal"
 )
 
@@ -42,7 +41,7 @@ func NewAlert(queueItem *commonlib.QueueItem) (Message, error) {
 	}, nil
 }
 
-func (a *Alert) SetDefaultValues(conf *config.Config) {
+func (a *Alert) SetDefaultValues(defaultArchivingDelay time.Duration) {
 	if a == nil {
 		return
 	}
@@ -67,7 +66,7 @@ func (a *Alert) SetDefaultValues(conf *config.Config) {
 	}
 
 	if a.ArchivingDelaySeconds <= 0 {
-		a.ArchivingDelaySeconds = int(conf.DefaultArchivingDelay.Seconds())
+		a.ArchivingDelaySeconds = int(defaultArchivingDelay.Seconds())
 	}
 
 	for _, w := range a.Webhooks {
