@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"time"
 
 	commonlib "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/common"
@@ -12,7 +11,7 @@ import (
 )
 
 type Coordinator interface {
-	Init(ctx context.Context, shutdownTimeout time.Duration) error
+	Init(ctx context.Context) error
 	Run(ctx context.Context) error
 	AddAlert(ctx context.Context, alert *models.Alert)
 	AddCommand(ctx context.Context, alert *models.Command)
@@ -56,7 +55,7 @@ func (app *App) Run(ctx context.Context) error {
 
 	errg, ctx := errgroup.WithContext(ctx)
 
-	if err := app.coordinator.Init(ctx, 10*time.Second); err != nil {
+	if err := app.coordinator.Init(ctx); err != nil {
 		return err
 	}
 
