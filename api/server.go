@@ -32,6 +32,7 @@ type Server struct {
 	limitersLock       *sync.Mutex
 	cfg                *config.APIConfig
 	cache              *internal.Cache[string]
+	slackAPI           *slackapi.Client
 	channelInfoManager *channelInfoManager
 	metrics            common.Metrics
 	logger             common.Logger
@@ -56,6 +57,7 @@ func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, log
 		limitersByChannel:  make(map[string]*rate.Limiter),
 		limitersLock:       &sync.Mutex{},
 		cache:              cache,
+		slackAPI:           slackAPI,
 		channelInfoManager: channelInfoManager,
 		metrics:            metrics,
 		logger:             logger,
@@ -91,6 +93,10 @@ func (s *Server) Run(ctx context.Context) error {
 
 	if err := s.channelInfoManager.Init(ctx); err != nil {
 		return fmt.Errorf("failed to initialize channel info manager: %w", err)
+	}
+
+	if _, err := s.slackAPI.Connect(ctx); err != nil {
+		return fmt.Errorf("failed to connect to Slack API: %w", err)
 	}
 
 	router := mux.NewRouter()

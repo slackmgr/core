@@ -59,8 +59,7 @@ func (c *Client) SetIssueFinder(issueFinder handler.IssueFinder) {
 func (c *Client) Connect(ctx context.Context) error {
 	c.api = slackapi.New(c.cacheStore, c.cfg.CachePrefix, c.logger, c.metrics, c.cfg.SlackClient)
 
-	_, err := c.api.Connect(ctx)
-	if err != nil {
+	if _, err := c.api.Connect(ctx); err != nil {
 		return err
 	}
 
