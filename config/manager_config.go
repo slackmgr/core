@@ -7,22 +7,22 @@ import (
 
 type ThrottleConfig struct {
 	MinIssueCountForThrottle int           `json:"minIssueCountForThrottle" yaml:"minIssueCountForThrottle"`
-	UpperLimit               time.Duration `json:"upperLimit" yaml:"upperLimit"`
+	UpperLimit               time.Duration `json:"upperLimit"               yaml:"upperLimit"`
 }
 
 type ManagerConfig struct {
-	SkipAlertsConsumer    bool               `json:"skipAlertsConsumer" yaml:"skipAlertsConsumer"`
-	ProcessInterval       time.Duration      `json:"processInterval" yaml:"processInterval"`
+	SkipAlertsConsumer    bool               `json:"skipAlertsConsumer"    yaml:"skipAlertsConsumer"`
+	ProcessInterval       time.Duration      `json:"processInterval"       yaml:"processInterval"`
 	DefaultArchivingDelay time.Duration      `json:"defaultArchivingDelay" yaml:"defaultArchivingDelay"`
-	WebhookTimeout        time.Duration      `json:"webhookTimeout" yaml:"webhookTimeout"`
-	ReorderIssueLimit     int                `json:"reorderIssueLimit" yaml:"reorderIssueLimit"`
-	EncryptionKey         string             `json:"encryptionKey" yaml:"encryptionKey"`
-	CachePrefix           string             `json:"cachePrefix" yaml:"cachePrefix"`
+	WebhookTimeout        time.Duration      `json:"webhookTimeout"        yaml:"webhookTimeout"`
+	ReorderIssueLimit     int                `json:"reorderIssueLimit"     yaml:"reorderIssueLimit"`
+	EncryptionKey         string             `json:"encryptionKey"         yaml:"encryptionKey"`
+	CachePrefix           string             `json:"cachePrefix"           yaml:"cachePrefix"`
 	IgnoreCacheReadErrors bool               `json:"ignoreCacheReadErrors" yaml:"ignoreCacheReadErrors"`
-	Location              *time.Location     `json:"location" yaml:"location"`
-	SlackClient           *SlackClientConfig `json:"slackClient" yaml:"slackClient"`
-	Throttle              *ThrottleConfig    `json:"throttle" yaml:"throttle"`
-	DocsURL               string             `json:"docsURL" yaml:"docsURL"`
+	Location              *time.Location     `json:"location"              yaml:"location"`
+	SlackClient           *SlackClientConfig `json:"slackClient"           yaml:"slackClient"`
+	Throttle              *ThrottleConfig    `json:"throttle"              yaml:"throttle"`
+	DocsURL               string             `json:"docsURL"               yaml:"docsURL"`
 }
 
 func NewDefaultManagerConfig() *ManagerConfig {

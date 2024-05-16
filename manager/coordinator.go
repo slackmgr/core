@@ -148,12 +148,7 @@ func (c *coordinator) FindIssueBySlackPost(ctx context.Context, channelID string
 func (c *coordinator) handleMoveRequest(ctx context.Context, request *models.MoveRequest) {
 	issue := request.Issue
 
-	moveMapping := &models.MoveMapping{
-		OriginalChannelID: request.Issue.OriginalSlackChannelID(),
-		TargetChannelID:   request.TargetChannel,
-		CorrelationID:     issue.CorrelationID,
-		Timestamp:         time.Now(),
-	}
+	moveMapping := models.NewMoveMapping(issue.CorrelationID, issue.OriginalSlackChannelID(), request.TargetChannel)
 
 	logger := c.logger.WithFields(issue.LogFields())
 
@@ -208,7 +203,12 @@ func (c *coordinator) addMoveMapping(ctx context.Context, mapping *models.MoveMa
 
 	moveMappingsForChannel[mapping.CorrelationID] = mapping
 
-	if err := c.db.SaveMoveMapping(ctx, mapping); err != nil {
+	body, err := json.Marshal(mapping)
+	if err != nil {
+		return fmt.Errorf("failed to marshal move mapping: %w", err)
+	}
+
+	if err := c.db.SaveMoveMapping(ctx, mapping.ID, body); err != nil {
 		return err
 	}
 
@@ -226,9 +226,37 @@ func (c *coordinator) getOrCreateMoveMappingsForChannel(ctx context.Context, cha
 		return mappings, nil
 	}
 
-	mappings, err := c.db.GetMoveMappings(ctx, channelID)
+	filterTerms := map[string]interface{}{
+		"originalChannelId": channelID,
+	}
+
+	mappingsList, err := c.db.GetMoveMappings(ctx, filterTerms)
 	if err != nil {
 		return nil, err
+	}
+
+	mappings = make(map[string]*models.MoveMapping, len(mappingsList))
+
+	for _, body := range mappingsList {
+		mapping := &models.MoveMapping{}
+
+		if err := json.Unmarshal(body, mapping); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal move mapping: %w", err)
+		}
+
+		if mapping.OriginalChannelID != channelID {
+			return nil, fmt.Errorf("move mapping for channel %s has incorrect original channel ID %s", channelID, mapping.OriginalChannelID)
+		}
+
+		if mapping.CorrelationID == "" {
+			return nil, fmt.Errorf("move mapping for channel %s has empty correlation ID", channelID)
+		}
+
+		if mapping.TargetChannelID == "" {
+			return nil, fmt.Errorf("move mapping for channel %s has empty target channel ID", channelID)
+		}
+
+		mappings[mapping.CorrelationID] = mapping
 	}
 
 	c.moveMappings[channelID] = mappings

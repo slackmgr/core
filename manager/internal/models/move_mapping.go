@@ -1,10 +1,25 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/peteraglen/slack-manager/internal"
+)
 
 type MoveMapping struct {
-	CorrelationID     string    `dynamodbav:"correlationId"     json:"correlationId"`
-	OriginalChannelID string    `dynamodbav:"originalChannelId" json:"originalChannelId"`
-	TargetChannelID   string    `dynamodbav:"targetChannelId"   json:"targetChannelId"`
-	Timestamp         time.Time `dynamodbav:"timestamp"         json:"timestamp"`
+	ID                string    `json:"id"`
+	CorrelationID     string    `json:"correlationId"`
+	OriginalChannelID string    `json:"originalChannelId"`
+	TargetChannelID   string    `json:"targetChannelId"`
+	Timestamp         time.Time `json:"timestamp"`
+}
+
+func NewMoveMapping(correlationID, originalChannelID, targetChannelID string) *MoveMapping {
+	return &MoveMapping{
+		ID:                internal.Hash(originalChannelID, correlationID),
+		CorrelationID:     correlationID,
+		OriginalChannelID: originalChannelID,
+		TargetChannelID:   targetChannelID,
+		Timestamp:         time.Now(),
+	}
 }

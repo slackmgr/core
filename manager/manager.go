@@ -20,8 +20,8 @@ type DB interface {
 	CreateOrUpdateIssue(ctx context.Context, id string, body json.RawMessage) error
 	UpdateIssues(ctx context.Context, issues map[string]json.RawMessage) (int, error)
 	FindSingleIssue(ctx context.Context, filterTerms map[string]interface{}) (string, json.RawMessage, error)
-	GetMoveMappings(ctx context.Context, channelID string) (map[string]*models.MoveMapping, error)
-	SaveMoveMapping(ctx context.Context, mapping *models.MoveMapping) error
+	GetMoveMappings(ctx context.Context, filterTerms map[string]interface{}) ([]json.RawMessage, error)
+	SaveMoveMapping(ctx context.Context, id string, body json.RawMessage) error
 }
 
 type FifoQueue interface {
