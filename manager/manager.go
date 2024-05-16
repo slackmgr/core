@@ -99,15 +99,19 @@ func (m *Manager) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize channel settings: %w", err)
 	}
 
+	if err := m.coordinator.init(ctx); err != nil {
+		return err
+	}
+
+	if err := m.slackClient.Connect(ctx); err != nil {
+		return err
+	}
+
 	alertCh := make(chan models.Message, 10000)
 	commandCh := make(chan models.Message, 10000)
 	extenderCh := make(chan models.Message, 10000)
 
 	errg, ctx := errgroup.WithContext(ctx)
-
-	if err := m.coordinator.init(ctx); err != nil {
-		return err
-	}
 
 	errg.Go(func() error {
 		return queueConsumer(ctx, m.commandQueue, commandCh, models.NewCommandFromQueue, m.logger)
