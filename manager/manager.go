@@ -30,6 +30,7 @@ type FifoQueue interface {
 }
 
 type Manager struct {
+	db              DB
 	slackClient     *slack.Client
 	coordinator     *coordinator
 	alertQueue      FifoQueue
@@ -55,6 +56,7 @@ func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.S
 	slackClient.SetIssueFinder(coordinator)
 
 	return &Manager{
+		db:              db,
 		slackClient:     slackClient,
 		coordinator:     coordinator,
 		alertQueue:      alertQueue,
@@ -65,24 +67,29 @@ func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.S
 	}
 }
 
-func (m *Manager) UpdateChannelSettings(channelSettings *config.ChannelSettings) error {
-	if channelSettings == nil {
-		m.channelSettings.Settings = &config.ChannelSettings{}
-		return nil
-	}
-
-	if err := channelSettings.InitAndValidate(); err != nil {
-		return fmt.Errorf("failed to update channel settings: %w", err)
-	}
-
-	m.channelSettings.Settings = channelSettings
-
-	return nil
-}
-
 func (m *Manager) Run(ctx context.Context) error {
 	m.logger.Debug("manager.Run started")
 	defer m.logger.Debug("manager.Run exited")
+
+	if m.db == nil {
+		return fmt.Errorf("database cannot be nil")
+	}
+
+	if m.alertQueue == nil {
+		return fmt.Errorf("alert queue cannot be nil")
+	}
+
+	if m.commandQueue == nil {
+		return fmt.Errorf("command queue cannot be nil")
+	}
+
+	if m.logger == nil {
+		return fmt.Errorf("logger cannot be nil")
+	}
+
+	if m.cfg == nil {
+		return fmt.Errorf("configuration cannot be nil")
+	}
 
 	if err := m.cfg.Validate(); err != nil {
 		return fmt.Errorf("failed to validate configuration: %w", err)
@@ -129,4 +136,19 @@ func (m *Manager) Run(ctx context.Context) error {
 	})
 
 	return errg.Wait()
+}
+
+func (m *Manager) UpdateChannelSettings(channelSettings *config.ChannelSettings) error {
+	if channelSettings == nil {
+		m.channelSettings.Settings = &config.ChannelSettings{}
+		return nil
+	}
+
+	if err := channelSettings.InitAndValidate(); err != nil {
+		return fmt.Errorf("failed to update channel settings: %w", err)
+	}
+
+	m.channelSettings.Settings = channelSettings
+
+	return nil
 }
