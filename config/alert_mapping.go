@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -29,10 +28,6 @@ type RoutingRule struct {
 func (a *AlertMapping) InitAndValidate() error {
 	if a.initialized {
 		return nil
-	}
-
-	if len(a.Rules) == 0 {
-		return errors.New("no alert mapping rules found")
 	}
 
 	for i, r := range a.Rules {
@@ -110,15 +105,6 @@ func (a *AlertMapping) InitAndValidate() error {
 	return nil
 }
 
-func allItemsEmpty(items []string) bool {
-	for _, s := range items {
-		if s != "" {
-			return false
-		}
-	}
-	return true
-}
-
 func (a *AlertMapping) Match(key string) (string, bool) {
 	if rule := a.matchMappingRule(key); rule != nil {
 		return rule.Channel, true
@@ -128,6 +114,10 @@ func (a *AlertMapping) Match(key string) (string, bool) {
 }
 
 func (a *AlertMapping) matchMappingRule(key string) *RoutingRule {
+	if len(a.Rules) == 0 {
+		return nil
+	}
+
 	key = strings.ToLower(strings.TrimSpace(key))
 
 	if key == "" {
@@ -194,4 +184,13 @@ func (m *RoutingRule) matchRegex(key string) bool {
 	}
 
 	return false
+}
+
+func allItemsEmpty(items []string) bool {
+	for _, s := range items {
+		if s != "" {
+			return false
+		}
+	}
+	return true
 }

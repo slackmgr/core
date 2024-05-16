@@ -267,6 +267,10 @@ func (s *Server) writeErrorResponse(ctx context.Context, clientErr error, status
 }
 
 func (s *Server) queueAlert(ctx context.Context, alert *common.Alert) error {
+	if alert.SlackChannelID == "" {
+		return fmt.Errorf("alert has no Slack channel ID")
+	}
+
 	body, err := json.Marshal(alert)
 	if err != nil {
 		return fmt.Errorf("failed to marshal alert: %w", err)

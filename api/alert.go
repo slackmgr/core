@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -88,7 +89,10 @@ func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request, alert
 		return
 	}
 
-	s.setSlackChannelID(req, alerts...)
+	if err := s.setSlackChannelID(req, alerts...); err != nil {
+		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+		return
+	}
 
 	alertsByChannel := make(map[string][]*common.Alert)
 	atLeastOneAlert := false
@@ -228,7 +232,10 @@ func (s *Server) testSlackAlertsHandler(resp http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	s.setSlackChannelID(req, input.Alerts...)
+	if err := s.setSlackChannelID(req, input.Alerts...); err != nil {
+		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+		return
+	}
 
 	body, err := json.Marshal(input)
 	if err != nil {
@@ -330,14 +337,9 @@ func (s *Server) createClientErrorAlert(err error, statusCode int, debugText map
 	return alert
 }
 
-func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) {
-	vars := mux.Vars(req)
-
-	if vars == nil {
-		return
-	}
-
-	channelIDFromURL, foundInURL := vars["slackChannelId"]
+func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) error {
+	var channelIDFromURL string
+	var getChannelIDFromURL sync.Once
 
 	for _, alert := range alerts {
 		// The channel ID may actually be a channel name. If so, attempt to map to channel ID.
@@ -348,17 +350,31 @@ func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) {
 			continue
 		}
 
+		// Try to get the channel ID from the URL, exactly once
+		getChannelIDFromURL.Do(func() {
+			vars := mux.Vars(req)
+			if vars != nil {
+				if val, ok := vars["slackChannelId"]; ok {
+					channelIDFromURL = strings.TrimSpace(val)
+				}
+			}
+		})
+
 		// Channel found in the url, no need to check the route key
-		if foundInURL {
+		if channelIDFromURL != "" {
 			alert.SlackChannelID = channelIDFromURL
 			continue
 		}
 
 		// Find an alert mapping rule matching the route key (if any)
-		if channel, found := s.findChannelForRouteKey(req.Context(), alert.RouteKey); found {
+		if channel, ok := s.findChannelForRouteKey(req.Context(), alert.RouteKey); ok {
 			alert.SlackChannelID = channel
+		} else {
+			return fmt.Errorf("no mapping exists for route key %s", alert.RouteKey)
 		}
 	}
+
+	return nil
 }
 
 func (s *Server) findChannelForRouteKey(ctx context.Context, routeKey string) (string, bool) {
@@ -379,6 +395,7 @@ func (s *Server) findChannelForRouteKey(ctx context.Context, routeKey string) (s
 	}
 
 	s.cache.Set(ctx, cacheKey, "N/A", 30*time.Second)
+
 	return "", false
 }
 
