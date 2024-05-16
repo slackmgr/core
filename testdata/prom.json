@@ -1,5 +1,5 @@
 {
-  "receiver": "peter-test",
+  "receiver": "test",
   "status": "firing",
   "alerts": [
     {

@@ -13,6 +13,10 @@ type AlertClient struct {
 	restClient *restClient
 }
 
+type Alerts struct {
+	Alerts []*common.Alert `json:"alerts"`
+}
+
 func New() *AlertClient {
 	return &AlertClient{}
 }
@@ -38,7 +42,7 @@ func (c *AlertClient) Connect(ctx context.Context, baseURL string, logger common
 	return c, nil
 }
 
-func (c *AlertClient) Send(ctx context.Context, alerts []*Alert) error {
+func (c *AlertClient) Send(ctx context.Context, alerts []*common.Alert) error {
 	if c == nil {
 		return errors.New("alert client is nil")
 	}

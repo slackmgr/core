@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/peteraglen/slack-manager/client"
+	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/internal"
 )
 
@@ -34,7 +34,7 @@ func (s *Server) prometheusAlert(resp http.ResponseWriter, req *http.Request) {
 
 	s.debugLogRequest(req, body)
 
-	var webhook client.PrometheusWebhook
+	var webhook PrometheusWebhook
 
 	if err := json.Unmarshal(body, &webhook); err != nil {
 		err = fmt.Errorf("failed to decode POST body: %w", err)
@@ -53,8 +53,8 @@ func (s *Server) prometheusAlert(resp http.ResponseWriter, req *http.Request) {
 	s.handleAlerts(resp, req, alerts, started)
 }
 
-func (s *Server) mapPrometheusAlert(webhook *client.PrometheusWebhook) []*client.Alert {
-	alerts := []*client.Alert{}
+func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*common.Alert {
+	alerts := []*common.Alert{}
 
 	for _, promAlert := range webhook.Alerts {
 		// Ensure that all annotation and label keys exist in lower-case versions
@@ -92,15 +92,15 @@ func (s *Server) mapPrometheusAlert(webhook *client.PrometheusWebhook) []*client
 			severityString = "error"
 		}
 
-		severity := client.AlertSeverity(severityString)
+		severity := common.AlertSeverity(severityString)
 
-		if !client.SeverityIsValid(severity) {
+		if !common.SeverityIsValid(severity) {
 			s.logger.Infof("Invalid severity '%s' in Prometheus alert", severity)
-			severity = client.AlertError
+			severity = common.AlertError
 		}
 
 		if promAlert.Status == "resolved" {
-			severity = client.AlertResolved
+			severity = common.AlertResolved
 		}
 
 		autoResolveSeconds, err := strconv.Atoi(autoResolve)
@@ -142,7 +142,7 @@ func (s *Server) mapPrometheusAlert(webhook *client.PrometheusWebhook) []*client
 			"groupKey":    webhook.GroupKey,
 		}
 
-		a := client.Alert{
+		a := common.Alert{
 			Timestamp:                 time.Now().UTC(),
 			CorrelationID:             correlationID,
 			Header:                    header,

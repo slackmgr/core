@@ -1,26 +1,26 @@
 {
   "rules": [
     {
-      "teamName": "SUDO",
-      "description": "Team SUDO",
+      "teamName": "FOO",
+      "description": "Team Foo",
       "equals": [
-        "sudo"
+        "foo"
       ],
-      "channel": "C03AKS26HHA"
+      "channel": "CABABABABAB"
     },
     {
-      "teamName": "AI",
-      "description": "Team AI",
+      "teamName": "HI",
+      "description": "Team Hi",
       "hasPrefix": [
-        "ai"
+        "hi"
       ],
-      "channel": "C03GB8VK7D0"
+      "channel": "CFGFGFGFGFGF"
     },
     {
       "teamName": "FALLBACK",
       "description": "Fallback rule",
       "matchAll": true,
-      "channel": "C044CPJMUVB"
+      "channel": "C0101010101"
     }
   ]
 }

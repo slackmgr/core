@@ -14,7 +14,7 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/client"
+	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
 	"github.com/peteraglen/slack-manager/internal/slackapi"
 	"golang.org/x/time/rate"
@@ -28,26 +28,22 @@ type Server struct {
 	alertQueue         FifoQueueProducer
 	limitersByChannel  map[string]*rate.Limiter
 	limitersLock       *sync.Mutex
-	config             *Config
+	cfg                *config.APIConfig
 	cache              *internal.Cache[string]
 	channelInfoManager *channelInfoManager
 	metrics            common.Metrics
 	logger             common.Logger
 }
 
-func New(ctx context.Context, alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, metrics common.Metrics, logger common.Logger, config *Config) (*Server, error) {
-	slackAPI := slackapi.New(cacheStore, config.CachePrefix, logger, metrics, &config.Slack)
+func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.APIConfig) (*Server, error) {
+	slackAPI := slackapi.New(cacheStore, cfg.CachePrefix, logger, metrics, &cfg.SlackClient)
 	channelInfoManager := newChannelInfoManager(slackAPI, logger)
-
-	if err := channelInfoManager.Init(ctx); err != nil {
-		return nil, fmt.Errorf("failed to initialize channel info manager: %w", err)
-	}
 
 	cache := internal.NewCache(cache.New[string](cacheStore), logger)
 
 	return &Server{
 		alertQueue:         alertQueue,
-		config:             config,
+		cfg:                cfg,
 		limitersByChannel:  make(map[string]*rate.Limiter),
 		limitersLock:       &sync.Mutex{},
 		cache:              cache,
@@ -59,6 +55,10 @@ func New(ctx context.Context, alertQueue FifoQueueProducer, cacheStore cachestor
 
 // Run starts the server and handles incoming requests. This method blocks until the context is cancelled, or a server error occurs.
 func (s *Server) Run(ctx context.Context) error {
+	if err := s.channelInfoManager.Init(ctx); err != nil {
+		return fmt.Errorf("failed to initialize channel info manager: %w", err)
+	}
+
 	// The channel info manager runs until the context is cancelled
 	go s.channelInfoManager.Run(ctx)
 
@@ -81,14 +81,14 @@ func (s *Server) Run(ctx context.Context) error {
 	// Route mappings
 	router.HandleFunc("/mappings", s.mappings).Methods("GET")
 
-	// List channels managed by SUDO Slack Manager
+	// List channels managed by Slack Manager
 	router.HandleFunc("/channels", s.channels).Methods("GET")
 
 	// Ping
 	router.HandleFunc("/ping", s.ping).Methods("GET")
 
 	readHeaderTimeout := 2 * time.Second
-	requestTimeout := s.config.GetRecommendedRequestTimeout()
+	requestTimeout := s.cfg.GetRecommendedRequestTimeout()
 	timeoutWiggleRoom := time.Second
 
 	var handler http.Handler
@@ -100,7 +100,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	timeoutHandler := http.TimeoutHandler(handler, requestTimeout, "Handler timeout")
-	listenAddr := fmt.Sprintf(":%s", s.config.RestPort)
+	listenAddr := fmt.Sprintf(":%s", s.cfg.RestPort)
 
 	srv := &http.Server{
 		Handler:           timeoutHandler,
@@ -124,14 +124,14 @@ func (s *Server) Run(ctx context.Context) error {
 		WithField("read_header_timeout", fmt.Sprintf("%v", srv.ReadHeaderTimeout)).
 		WithField("idle_timeout", fmt.Sprintf("%v", srv.IdleTimeout)).
 		WithField("request_timeout", fmt.Sprintf("%v", requestTimeout)).
-		Infof("API available on port %s", s.config.RestPort)
+		Infof("API available on port %s", s.cfg.RestPort)
 
 	err := srv.ListenAndServe()
 	if err == http.ErrServerClosed {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("HTTP listener on port %s failed with error: %w", s.config.RestPort, err)
+		return fmt.Errorf("HTTP listener on port %s failed with error: %w", s.cfg.RestPort, err)
 	}
 
 	return nil
@@ -140,7 +140,7 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) mappings(resp http.ResponseWriter, req *http.Request) {
 	started := time.Now()
 
-	mappings := s.config.GetAlertMappings()
+	mappings := s.cfg.GetAlertMappings()
 
 	data, err := json.MarshalIndent(mappings, "", "  ")
 	if err != nil {
@@ -157,7 +157,7 @@ func (s *Server) mappings(resp http.ResponseWriter, req *http.Request) {
 		s.logger.Errorf("Failed to write mappings response: %s", err)
 	}
 
-	s.metrics.AddHttpRequestMetric(req.URL.Path, req.Method, http.StatusOK, time.Since(started))
+	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusOK, time.Since(started))
 }
 
 func (s *Server) channels(resp http.ResponseWriter, req *http.Request) {
@@ -180,7 +180,7 @@ func (s *Server) channels(resp http.ResponseWriter, req *http.Request) {
 		s.logger.Errorf("Failed to write channel list response: %s", err)
 	}
 
-	s.metrics.AddHttpRequestMetric(req.URL.Path, req.Method, http.StatusOK, time.Since(started))
+	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusOK, time.Since(started))
 }
 
 func (s *Server) ping(resp http.ResponseWriter, req *http.Request) {
@@ -194,7 +194,7 @@ func (s *Server) ping(resp http.ResponseWriter, req *http.Request) {
 		s.logger.Errorf("Failed to write ping response: %s", err)
 	}
 
-	s.metrics.AddHttpRequestMetric(req.URL.Path, req.Method, http.StatusOK, time.Since(started))
+	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusOK, time.Since(started))
 }
 
 func (s *Server) writeErrorResponse(ctx context.Context, clientErr error, statusCode int, debugText map[string]string, targetChannel string, resp http.ResponseWriter, req *http.Request, started time.Time) {
@@ -217,9 +217,9 @@ func (s *Server) writeErrorResponse(ctx context.Context, clientErr error, status
 		s.logger.Errorf("Failed to write error response: %s", err)
 	}
 
-	s.metrics.AddHttpRequestMetric(req.URL.Path, req.Method, statusCode, time.Since(started))
+	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, statusCode, time.Since(started))
 
-	if s.config.ErrorReportChannelID != "" {
+	if s.cfg.ErrorReportChannelID != "" {
 		alert := s.createClientErrorAlert(clientErr, statusCode, debugText, targetChannel)
 
 		if err := s.queueAlert(ctx, alert); err != nil {
@@ -228,7 +228,7 @@ func (s *Server) writeErrorResponse(ctx context.Context, clientErr error, status
 	}
 }
 
-func (s *Server) queueAlert(ctx context.Context, alert *client.Alert) error {
+func (s *Server) queueAlert(ctx context.Context, alert *common.Alert) error {
 	body, err := json.Marshal(alert)
 	if err != nil {
 		return fmt.Errorf("failed to marshal alert: %w", err)
@@ -249,7 +249,7 @@ func (s *Server) waitForRateLimit(ctx context.Context, channel string, count int
 	attempt := 1
 
 	for {
-		ctx, cancel := context.WithTimeout(ctx, s.config.RateLimit.MaxWaitPerAttempt)
+		ctx, cancel := context.WithTimeout(ctx, s.cfg.RateLimit.MaxWaitPerAttempt)
 
 		defer cancel()
 
@@ -265,7 +265,7 @@ func (s *Server) waitForRateLimit(ctx context.Context, channel string, count int
 		}
 
 		// Stop trying after configured number of events
-		if attempt >= s.config.RateLimit.MaxAttempts {
+		if attempt >= s.cfg.RateLimit.MaxAttempts {
 			return 0, fmt.Errorf("rate limit exceeded for %d alerts in channel %s", count, channel)
 		}
 
@@ -285,7 +285,7 @@ func (s *Server) getRateLimiter(channel string) *rate.Limiter {
 	limiter, ok := s.limitersByChannel[channel]
 
 	if !ok {
-		limiter = rate.NewLimiter(rate.Limit(s.config.RateLimit.AlertsPerSecond), s.config.RateLimit.AllowedBurst)
+		limiter = rate.NewLimiter(rate.Limit(s.cfg.RateLimit.AlertsPerSecond), s.cfg.RateLimit.AllowedBurst)
 		s.limitersByChannel[channel] = limiter
 	}
 

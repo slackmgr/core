@@ -1,5 +1,5 @@
 {
-  "correlationId": "peter-test-payload2-v4",
+  "correlationId": "test-payload2-v4",
   "header": ":status: Cloudwatch disk alert v4",
   "text": "TESTING TESTING!\nCloudwatch alert `disk-full` is in alert state",
   "severity": "warning",

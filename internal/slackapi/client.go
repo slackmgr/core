@@ -12,7 +12,8 @@ import (
 
 	"github.com/eko/gocache/lib/v4/cache"
 	cachestore "github.com/eko/gocache/lib/v4/store"
-	common "github.com/peteraglen/slack-manager-common"
+	commonlib "github.com/peteraglen/slack-manager-common"
+	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
@@ -30,17 +31,17 @@ type retryable interface{ Retryable() bool }
 
 type Client struct {
 	api         *slack.Client
-	logger      common.Logger
+	logger      commonlib.Logger
 	cache       *internal.Cache[string]
 	cachePrefix string
-	metrics     common.Metrics
-	options     *common.SlackOptions
+	metrics     commonlib.Metrics
+	cfg         *config.SlackClientConfig
 	connected   bool
 	botUserID   string
 }
 
-func New(cacheStore cachestore.StoreInterface, cachePrefix string, logger common.Logger, metrics common.Metrics, options *common.SlackOptions) *Client {
-	options.SetDefaults()
+func New(cacheStore cachestore.StoreInterface, cachePrefix string, logger commonlib.Logger, metrics commonlib.Metrics, cfg *config.SlackClientConfig) *Client {
+	cfg.SetDefaults()
 
 	cache := internal.NewCache(cache.New[string](cacheStore), logger)
 
@@ -49,7 +50,7 @@ func New(cacheStore cachestore.StoreInterface, cachePrefix string, logger common
 		cache:       cache,
 		cachePrefix: cachePrefix,
 		metrics:     metrics,
-		options:     options,
+		cfg:         cfg,
 	}
 }
 
@@ -66,16 +67,16 @@ func (c *Client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
 		return nil, fmt.Errorf("connect can only be run once")
 	}
 
-	if c.options == nil {
+	if c.cfg == nil {
 		return nil, fmt.Errorf("client options cannot be nil")
 	}
 
-	if c.options.BotToken == "" {
+	if c.cfg.BotToken == "" {
 		return nil, fmt.Errorf("client bot token cannot be nil")
 	}
 
 	if c.cachePrefix == "" {
-		c.cachePrefix = "sudo-go-slackapi"
+		c.cachePrefix = "slack-manager"
 	}
 
 	c.metrics.RegisterCounter(slackRequestMetric, "Total number of Slack client requests", "slack_action")
@@ -84,13 +85,13 @@ func (c *Client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
 	c.metrics.RegisterCounter(slackAPIErrorMetric, "Total number of Slack API call errors", "slack_action")
 
 	httpClient := &http.Client{
-		Timeout: c.options.HTTPTimeout,
+		Timeout: c.cfg.HTTPTimeout,
 	}
 
 	c.api = slack.New(
-		c.options.BotToken,
-		slack.OptionDebug(c.options.DebugLogging),
-		slack.OptionAppLevelToken(c.options.AppToken),
+		c.cfg.BotToken,
+		slack.OptionDebug(c.cfg.DebugLogging),
+		slack.OptionAppLevelToken(c.cfg.AppToken),
 		slack.OptionLog(&slackApilogger{logger: c.logger}),
 		slack.OptionHTTPClient(httpClient),
 	)
@@ -118,7 +119,7 @@ func (c *Client) API() *slack.Client {
 }
 
 func (c *Client) NewSocketModeClient() *socketmode.Client {
-	return socketmode.New(c.api, socketmode.OptionDebug(c.options.DebugLogging), socketmode.OptionLog(&slackApilogger{logger: c.logger}))
+	return socketmode.New(c.api, socketmode.OptionDebug(c.cfg.DebugLogging), socketmode.OptionLog(&slackApilogger{logger: c.logger}))
 }
 
 func (c *Client) BotUserID() string {
@@ -135,7 +136,7 @@ func (c *Client) ChatPostMessage(ctx context.Context, channelID string, options 
 		return ts, nil, err
 	}
 
-	ts, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.options, c.metrics, action, f)
+	ts, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f)
 	if err != nil {
 		return "", err
 	}
@@ -153,7 +154,7 @@ func (c *Client) ChatUpdateMessage(ctx context.Context, channelID string, option
 		return ts, nil, err
 	}
 
-	ts, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.options, c.metrics, action, f)
+	ts, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f)
 	if err != nil {
 		return "", err
 	}
@@ -171,7 +172,7 @@ func (c *Client) ChatDeleteMessage(ctx context.Context, channelID string, ts str
 		return nil, nil, err
 	}
 
-	if _, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.options, c.metrics, action, f); err != nil {
+	if _, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f); err != nil {
 		return err
 	}
 
@@ -206,7 +207,7 @@ func (c *Client) SendResponse(ctx context.Context, channelID, responseURL, respo
 		return nil, nil, err
 	}
 
-	if _, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.options, c.metrics, action, f); err != nil {
+	if _, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f); err != nil {
 		return fmt.Errorf("failed to send Slack response in channel %s: %w", channelID, err)
 	}
 
@@ -231,7 +232,7 @@ func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, op
 		return ts, nil, err
 	}
 
-	ts, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.options, c.metrics, action, f)
+	ts, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f)
 	if err != nil {
 		return "", fmt.Errorf("failed to post ephemeral Slack message to user %s in channel %s: %w", userID, channelID, err)
 	}
@@ -281,7 +282,7 @@ func (c *Client) MessageHasReplies(ctx context.Context, channelID, ts string) (b
 		return msgs, nil, err
 	}
 
-	msgs, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.options, c.metrics, action, f, ChannelNotFoundError, "thread_not_found")
+	msgs, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f, ChannelNotFoundError, "thread_not_found")
 	if err != nil {
 		if err.Error() == ChannelNotFoundError || err.Error() == "thread_not_found" {
 			return false, nil
@@ -324,7 +325,7 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 		return val, nil, err
 	}
 
-	channel, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.options, c.metrics, action, f, ChannelNotFoundError)
+	channel, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f, ChannelNotFoundError)
 	if err != nil {
 		if err.Error() == ChannelNotFoundError {
 			channel = &slack.Channel{
@@ -382,7 +383,7 @@ func (c *Client) ListAllChannels(ctx context.Context) ([]*internal.ChannelSummar
 	channels := []*internal.ChannelSummary{}
 
 	for {
-		chs, nextCursor, err := callAPI(ctx, c.logger, c.options, c.metrics, action, f)
+		chs, nextCursor, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f)
 		if err != nil {
 			return nil, err
 		}
@@ -444,7 +445,7 @@ func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummar
 	channels := []*internal.ChannelSummary{}
 
 	for {
-		chs, nextCursor, err := callAPI(ctx, c.logger, c.options, c.metrics, action, f)
+		chs, nextCursor, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f)
 		if err != nil {
 			return nil, err
 		}
@@ -502,7 +503,7 @@ func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 		return val, nil, err
 	}
 
-	user, _, err := callAPI(ctx, c.logger, c.options, c.metrics, action, f)
+	user, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read Slack user info for %s: %w", userID, err)
 	}
@@ -547,7 +548,7 @@ func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 		return val, nil, err
 	}
 
-	userIDs, _, err := callAPI(ctx, c.logger, c.options, c.metrics, action, f, "no_such_subteam")
+	userIDs, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f, "no_such_subteam")
 	if err != nil {
 		if err.Error() == "no_such_subteam" {
 			return result, nil
@@ -597,7 +598,7 @@ func (c *Client) GetUserByEmail(ctx context.Context, email string) (*slack.User,
 		return val, nil, err
 	}
 
-	user, _, err := callAPI(ctx, c.logger, c.options, c.metrics, "users.lookupByEmail", f, "users_not_found")
+	user, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, "users.lookupByEmail", f, "users_not_found")
 	if err != nil {
 		if err.Error() == "users_not_found" {
 			return nil, nil
@@ -627,7 +628,7 @@ func (c *Client) ListAllUsers(ctx context.Context) (map[string]*slack.User, erro
 		return val, nil, err
 	}
 
-	users, _, err := callAPI(ctx, c.logger, c.options, c.metrics, action, f)
+	users, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read Slack user list: %w", err)
 	}
@@ -675,7 +676,7 @@ func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 	}
 
 	for {
-		users, nextCursor, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.options, c.metrics, action, f, ChannelNotFoundError)
+		users, nextCursor, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f, ChannelNotFoundError)
 		if err != nil {
 			if err.Error() == ChannelNotFoundError {
 				return result, nil
@@ -751,7 +752,7 @@ func (c *Client) AddUserToChannel(ctx context.Context, user *slack.User, channel
 		return nil, nil, err
 	}
 
-	_, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.options, c.metrics, action, f)
+	_, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f)
 	if err != nil {
 		return fmt.Errorf("failed to add user %s (%s) to channel %s: %w", user.RealName, user.Profile.Email, channelID, err)
 	}
@@ -759,7 +760,7 @@ func (c *Client) AddUserToChannel(ctx context.Context, user *slack.User, channel
 	return nil
 }
 
-func callAPI[V any, W any](ctx context.Context, logger common.Logger, options *common.SlackOptions, metrics common.Metrics, action string, f func(ctx context.Context) (V, W, error), expectedErrors ...string) (V, W, error) {
+func callAPI[V any, W any](ctx context.Context, logger commonlib.Logger, metrics commonlib.Metrics, cfg *config.SlackClientConfig, action string, f func(ctx context.Context) (V, W, error), expectedErrors ...string) (V, W, error) {
 	attempt := 1
 	started := time.Now()
 
@@ -791,7 +792,7 @@ func callAPI[V any, W any](ctx context.Context, logger common.Logger, options *c
 			return result1, result2, err
 		}
 
-		if waitErr := waitForAPIError(ctx, started, logger, attempt, action, options, err); waitErr != nil {
+		if waitErr := waitForAPIError(ctx, started, logger, attempt, action, cfg, err); waitErr != nil {
 			return result1, result2, waitErr
 		}
 
@@ -799,13 +800,13 @@ func callAPI[V any, W any](ctx context.Context, logger common.Logger, options *c
 	}
 }
 
-func waitForAPIError(ctx context.Context, started time.Time, logger common.Logger, attempt int, action string, options *common.SlackOptions, err error) error {
+func waitForAPIError(ctx context.Context, started time.Time, logger commonlib.Logger, attempt int, action string, cfg *config.SlackClientConfig, err error) error {
 	var rateLimitError *slack.RateLimitedError
 
 	if errors.As(err, &rateLimitError) {
-		remainingWaitTime := time.Until(started.Add(options.MaxRateLimitErrorWaitTime))
+		remainingWaitTime := time.Until(started.Add(cfg.MaxRateLimitErrorWaitTime))
 
-		if attempt >= options.MaxAttemtsForRateLimitError || remainingWaitTime < time.Second {
+		if attempt >= cfg.MaxAttemtsForRateLimitError || remainingWaitTime < time.Second {
 			return fmt.Errorf("failed to call Slack API %s after %d attempts and %d seconds: rate limit error: %w", action, attempt, int(time.Since(started).Seconds()), err)
 		}
 
@@ -813,18 +814,18 @@ func waitForAPIError(ctx context.Context, started time.Time, logger common.Logge
 	}
 
 	if isTransientError(err) {
-		remainingWaitTime := time.Until(started.Add(options.MaxTransientErrorWaitTime))
+		remainingWaitTime := time.Until(started.Add(cfg.MaxTransientErrorWaitTime))
 
-		if attempt >= options.MaxAttemptsForTransientError || remainingWaitTime < time.Second {
+		if attempt >= cfg.MaxAttemptsForTransientError || remainingWaitTime < time.Second {
 			return fmt.Errorf("failed to call Slack API %s after %d attempts and %d seconds: transient error: %w", action, attempt, int(time.Since(started).Seconds()), err)
 		}
 
 		return waitForTransientError(ctx, logger, err, attempt, action, remainingWaitTime)
 	}
 
-	remainingWaitTime := time.Until(started.Add(options.MaxFatalErrorWaitTime))
+	remainingWaitTime := time.Until(started.Add(cfg.MaxFatalErrorWaitTime))
 
-	if attempt >= options.MaxAttemptsForFatalError || remainingWaitTime < time.Second {
+	if attempt >= cfg.MaxAttemptsForFatalError || remainingWaitTime < time.Second {
 		return fmt.Errorf("failed to call Slack API %s after %d attempts and %d seconds: fatal error: %w", action, attempt, int(time.Since(started).Seconds()), err)
 	}
 
@@ -840,7 +841,7 @@ func inSlice(s string, slice []string) bool {
 	return false
 }
 
-func waitForRateLimit(ctx context.Context, logger common.Logger, err *slack.RateLimitedError, attempt int, action string, remainingWaitTime time.Duration) error {
+func waitForRateLimit(ctx context.Context, logger commonlib.Logger, err *slack.RateLimitedError, attempt int, action string, remainingWaitTime time.Duration) error {
 	wait := err.RetryAfter + 2*time.Second
 
 	if wait > remainingWaitTime {
@@ -852,7 +853,7 @@ func waitForRateLimit(ctx context.Context, logger common.Logger, err *slack.Rate
 	return sleep(ctx, wait)
 }
 
-func waitForTransientError(ctx context.Context, logger common.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
+func waitForTransientError(ctx context.Context, logger commonlib.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
 	wait := time.Duration(attempt) * time.Second
 
 	if wait > remainingWaitTime {
@@ -864,7 +865,7 @@ func waitForTransientError(ctx context.Context, logger common.Logger, err error,
 	return sleep(ctx, wait)
 }
 
-func waitForFatalError(ctx context.Context, logger common.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
+func waitForFatalError(ctx context.Context, logger commonlib.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
 	wait := time.Duration(attempt) * time.Second * 2
 
 	if wait > remainingWaitTime {

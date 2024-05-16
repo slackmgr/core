@@ -3,14 +3,14 @@ package api
 import (
 	"testing"
 
-	"github.com/peteraglen/slack-manager/client"
+	common "github.com/peteraglen/slack-manager-common"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestReduceAlerts(t *testing.T) {
 	limit := 2
 
-	alerts := []*client.Alert{
+	alerts := []*common.Alert{
 		{SlackChannelID: "123", Header: "a"},
 		{SlackChannelID: "123", Header: "b"},
 	}
@@ -19,7 +19,7 @@ func TestReduceAlerts(t *testing.T) {
 	assert.Len(t, keptAlerts, 2)
 	assert.Len(t, skippedAlerts, 0)
 
-	alerts = append(alerts, &client.Alert{
+	alerts = append(alerts, &common.Alert{
 		SlackChannelID: "123", Header: "c",
 	})
 
@@ -30,7 +30,7 @@ func TestReduceAlerts(t *testing.T) {
 	assert.Equal(t, "b", keptAlerts[1].Header)
 	assert.Equal(t, ":status: Too many alerts", keptAlerts[2].Header)
 
-	alerts = []*client.Alert{
+	alerts = []*common.Alert{
 		{SlackChannelID: "123", Header: "a"},
 		{SlackChannelID: "123", Header: "b"},
 		{SlackChannelID: "123", Header: "c"},
