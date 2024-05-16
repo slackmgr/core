@@ -6,20 +6,20 @@ import (
 )
 
 type RateLimitConfig struct {
-	AlertsPerSecond   float64       `json:"alertsPerSecond" yaml:"alertsPerSecond"`
-	AllowedBurst      int           `json:"allowedBurst" yaml:"allowedBurst"`
+	AlertsPerSecond   float64       `json:"alertsPerSecond"   yaml:"alertsPerSecond"`
+	AllowedBurst      int           `json:"allowedBurst"      yaml:"allowedBurst"`
 	MaxWaitPerAttempt time.Duration `json:"maxWaitPerAttempt" yaml:"maxWaitPerAttempt"`
-	MaxAttempts       int           `json:"maxAttempts" yaml:"maxAttempts"`
+	MaxAttempts       int           `json:"maxAttempts"       yaml:"maxAttempts"`
 }
 
 type APIConfig struct {
-	RestPort               string             `json:"restPort" yaml:"restPort"`
-	EncryptionKey          string             `json:"encryptionKey" yaml:"encryptionKey"`
-	CachePrefix            string             `json:"cachePrefix" yaml:"cachePrefix"`
-	ErrorReportChannelID   string             `json:"errorReportChannelID" yaml:"errorReportChannelID"`
+	RestPort               string             `json:"restPort"               yaml:"restPort"`
+	EncryptionKey          string             `json:"encryptionKey"          yaml:"encryptionKey"`
+	CachePrefix            string             `json:"cachePrefix"            yaml:"cachePrefix"`
+	ErrorReportChannelID   string             `json:"errorReportChannelID"   yaml:"errorReportChannelID"`
 	MaxUsersInAlertChannel int                `json:"maxUsersInAlertChannel" yaml:"maxUsersInAlertChannel"`
-	RateLimit              *RateLimitConfig   `json:"rateLimit" yaml:"rateLimit"`
-	SlackClient            *SlackClientConfig `json:"slackClient" yaml:"slackClient"`
+	RateLimit              *RateLimitConfig   `json:"rateLimit"              yaml:"rateLimit"`
+	SlackClient            *SlackClientConfig `json:"slackClient"            yaml:"slackClient"`
 }
 
 func NewDefaultAPIConfig() *APIConfig {

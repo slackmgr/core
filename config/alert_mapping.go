@@ -14,13 +14,13 @@ type AlertMapping struct {
 }
 
 type RoutingRule struct {
-	TeamName     string   `json:"teamName" yaml:"teamName"`
-	Description  string   `json:"description" yaml:"description"`
-	Equals       []string `json:"equals" yaml:"equals"`
-	HasPrefix    []string `json:"hasPrefix" yaml:"hasPrefix"`
+	TeamName     string   `json:"teamName"     yaml:"teamName"`
+	Description  string   `json:"description"  yaml:"description"`
+	Equals       []string `json:"equals"       yaml:"equals"`
+	HasPrefix    []string `json:"hasPrefix"    yaml:"hasPrefix"`
 	MatchesRegex []string `json:"matchesRegex" yaml:"matchesRegex"`
-	MatchAll     bool     `json:"matchAll" yaml:"matchAll"`
-	Channel      string   `json:"channel" yaml:"channel"`
+	MatchAll     bool     `json:"matchAll"     yaml:"matchAll"`
+	Channel      string   `json:"channel"      yaml:"channel"`
 
 	regex []*regexp.Regexp
 }

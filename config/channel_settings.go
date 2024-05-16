@@ -6,9 +6,9 @@ import (
 )
 
 type ChannelSettings struct {
-	GlobalAdmins  []string                `json:"globalAdmins" yaml:"globalAdmins"`
+	GlobalAdmins  []string                `json:"globalAdmins"  yaml:"globalAdmins"`
 	AlertChannels []*AlertChannelSettings `json:"alertChannels" yaml:"alertChannels"`
-	InfoChannels  []*InfoChannelSettings  `json:"infoChannels" yaml:"infoChannels"`
+	InfoChannels  []*InfoChannelSettings  `json:"infoChannels"  yaml:"infoChannels"`
 
 	globalAdmins  map[string]struct{}
 	alertChannels map[string]*AlertChannelSettings
@@ -17,9 +17,9 @@ type ChannelSettings struct {
 }
 
 type AlertChannelSettings struct {
-	ID                    string   `json:"id" yaml:"id"`
-	AdminUsers            []string `json:"adminUsers" yaml:"adminUsers"`
-	AdminGroups           []string `json:"adminGroups" yaml:"adminGroups"`
+	ID                    string   `json:"id"                    yaml:"id"`
+	AdminUsers            []string `json:"adminUsers"            yaml:"adminUsers"`
+	AdminGroups           []string `json:"adminGroups"           yaml:"adminGroups"`
 	OrderIssuesBySeverity bool     `json:"orderIssuesBySeverity" yaml:"orderIssuesBySeverity"`
 
 	adminUsers  map[string]struct{}
@@ -27,7 +27,7 @@ type AlertChannelSettings struct {
 }
 
 type InfoChannelSettings struct {
-	ID           string `json:"channelID" yaml:"channelID"`
+	ID           string `json:"channelID"    yaml:"channelID"`
 	TemplatePath string `json:"templatePath" yaml:"templatePath"`
 }
 

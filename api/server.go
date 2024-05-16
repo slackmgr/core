@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -164,11 +165,11 @@ func (s *Server) Run(ctx context.Context) error {
 		if err := srv.Close(); err != nil {
 			s.logger.Errorf("Failed to close http server: %s", err)
 		}
-		return nil
+		return ctx.Err()
 	})
 
 	if err := errg.Wait(); err != nil {
-		if err == http.ErrServerClosed {
+		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 		return err
