@@ -12,7 +12,6 @@ import (
 
 	"github.com/gorilla/mux"
 	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
 )
 
@@ -340,8 +339,6 @@ func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) {
 
 	channelIDFromURL, foundInURL := vars["slackChannelId"]
 
-	alertMappings := s.cfg.GetAlertMappings()
-
 	for _, alert := range alerts {
 		// The channel ID may actually be a channel name. If so, attempt to map to channel ID.
 		alert.SlackChannelID = s.channelInfoManager.MapChannelNameToIDIfNeeded(alert.SlackChannelID)
@@ -358,13 +355,13 @@ func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) {
 		}
 
 		// Find an alert mapping rule matching the route key (if any)
-		if channel, found := s.findChannelForRouteKey(req.Context(), alertMappings, alert.RouteKey); found {
+		if channel, found := s.findChannelForRouteKey(req.Context(), alert.RouteKey); found {
 			alert.SlackChannelID = channel
 		}
 	}
 }
 
-func (s *Server) findChannelForRouteKey(ctx context.Context, alertMappings *config.AlertMapping, routeKey string) (string, bool) {
+func (s *Server) findChannelForRouteKey(ctx context.Context, routeKey string) (string, bool) {
 	cacheKey := "slack-manager::findChannelForRouteKey::" + routeKey
 
 	if val, found := s.cache.Get(ctx, cacheKey); found {
@@ -374,7 +371,7 @@ func (s *Server) findChannelForRouteKey(ctx context.Context, alertMappings *conf
 		return val, true
 	}
 
-	channel, found := alertMappings.Match(routeKey)
+	channel, found := s.alertMapping.Match(routeKey)
 
 	if found {
 		s.cache.Set(ctx, cacheKey, channel, 30*time.Second)

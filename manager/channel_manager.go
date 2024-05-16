@@ -48,8 +48,8 @@ func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveR
 		logger:        logger,
 		metrics:       metrics,
 		cfg:           cfg,
-		alertCh:       make(chan *models.Alert, cfg.ChannelManager.AlertChannelSize),
-		commandCh:     make(chan *models.Command, cfg.ChannelManager.CommandChannelSize),
+		alertCh:       make(chan *models.Alert, 1000),
+		commandCh:     make(chan *models.Command, 100),
 		addIssueCh:    make(chan *models.Issue, 10),
 	}
 

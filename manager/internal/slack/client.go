@@ -27,26 +27,28 @@ const (
 )
 
 type Client struct {
-	api            *slackapi.Client
-	commandHandler handler.FifoQueueProducer
-	issueFinder    handler.IssueFinder
-	cacheStore     store.StoreInterface
-	logger         common.Logger
-	metrics        common.Metrics
-	conf           *config.ManagerConfig
+	api             *slackapi.Client
+	commandHandler  handler.FifoQueueProducer
+	issueFinder     handler.IssueFinder
+	cacheStore      store.StoreInterface
+	logger          common.Logger
+	metrics         common.Metrics
+	cfg             *config.ManagerConfig
+	channelSettings *models.ChannelSettingsWrapper
 }
 
 var location *time.Location
 
-func New(commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, conf *config.ManagerConfig) *Client {
-	location = conf.Location
+func New(commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, channelSettings *models.ChannelSettingsWrapper) *Client {
+	location = cfg.Location
 
 	return &Client{
-		commandHandler: commandHandler,
-		cacheStore:     cacheStore,
-		logger:         logger,
-		metrics:        metrics,
-		conf:           conf,
+		commandHandler:  commandHandler,
+		cacheStore:      cacheStore,
+		logger:          logger,
+		metrics:         metrics,
+		cfg:             cfg,
+		channelSettings: channelSettings,
 	}
 }
 
@@ -55,7 +57,7 @@ func (c *Client) SetIssueFinder(issueFinder handler.IssueFinder) {
 }
 
 func (c *Client) Connect(ctx context.Context) error {
-	c.api = slackapi.New(c.cacheStore, c.conf.CachePrefix, c.logger, c.metrics, &c.conf.Slack)
+	c.api = slackapi.New(c.cacheStore, c.cfg.CachePrefix, c.logger, c.metrics, c.cfg.SlackClient)
 
 	_, err := c.api.Connect(ctx)
 	if err != nil {
@@ -80,16 +82,16 @@ func (c *Client) RunSocketMode(ctx context.Context) error {
 	controllers.NewInternalEventsController(handler, c.logger)
 
 	// Interactive actions
-	controllers.NewInteractiveController(handler, c, c.commandHandler, c.issueFinder, c.logger, c.conf)
+	controllers.NewInteractiveController(handler, c, c.commandHandler, c.issueFinder, c.logger, c.cfg, c.channelSettings)
 
 	// Slash commands actions
 	controllers.NewSlashCommandsController(handler, c.logger)
 
 	// Post reactions (emojis)
-	controllers.NewReactionsController(handler, c, c.commandHandler, c.cacheStore, c.logger, c.conf)
+	controllers.NewReactionsController(handler, c, c.commandHandler, c.cacheStore, c.logger, c.cfg, c.channelSettings)
 
 	// Greeting situations (joined channel etc)
-	controllers.NewGreetingsController(handler, c, c.logger, c.conf)
+	controllers.NewGreetingsController(handler, c, c.logger, c.cfg, c.channelSettings)
 
 	// Events API
 	controllers.NewEventsAPIController(handler, c.logger)
@@ -109,7 +111,7 @@ func (c *Client) OpenModal(ctx context.Context, triggerID string, request slack.
 }
 
 func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error) {
-	if c.conf.Slack.DryRun {
+	if c.cfg.SlackClient.DryRun {
 		c.logger.Infof("DRYRUN: Slack post ephemeral message to user %s in channel %s", userID, channelID)
 		return "", nil
 	}
@@ -139,10 +141,10 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 	})
 
 	// Reordering is allowed when the channel config allows it AND the number of active issues in the channel is small enough
-	allowIssueReordering := c.conf.OrderIssuesBySeverity(channelID) && openIssueCount <= c.conf.ReorderIssueLimit
+	allowIssueReordering := c.channelSettings.Settings.OrderIssuesBySeverity(channelID) && openIssueCount <= c.cfg.ReorderIssueLimit
 	atLeastOnePostDeleted := false
 
-	sem := semaphore.NewWeighted(int64(c.conf.Slack.Concurrency))
+	sem := semaphore.NewWeighted(int64(c.cfg.SlackClient.Concurrency))
 	errg, gctx := errgroup.WithContext(ctx)
 
 	for _, _issue := range issues {
@@ -192,7 +194,7 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 			continue
 		}
 
-		if c.conf.Slack.DryRun {
+		if c.cfg.SlackClient.DryRun {
 			c.logger.Infof("DRYRUN: Slack %s issue %s", action, issue.CorrelationID)
 			continue
 		}
@@ -237,7 +239,7 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, updateIfMessag
 		return nil
 	}
 
-	if c.conf.Slack.DryRun {
+	if c.cfg.SlackClient.DryRun {
 		c.logger.Infof("DRYRUN: Slack DELETE issue %s, post %s", issue.CorrelationID, issue.SlackPostID)
 		return nil
 	}
@@ -295,7 +297,7 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, updateIfMessag
 }
 
 func (c *Client) IsAlertChannel(ctx context.Context, channelID string) (bool, string, error) {
-	if c.conf.IsInfoChannel(channelID) {
+	if c.channelSettings.Settings.IsInfoChannel(channelID) {
 		return false, "channel is defined as 'info channel' (no alerts allowed)", nil
 	}
 
@@ -708,7 +710,7 @@ func getTextBlocks(alertText, statusEmoji string, method Method) []slack.Block {
 
 func (c *Client) throttleIssue(issue *models.Issue, action models.SlackAction, issuesInChannel int) bool {
 	// Don't throttle if total number of open issues in channel is less than configured value
-	if issuesInChannel < c.conf.Throttle.MinIssueCountForThrottle {
+	if issuesInChannel < c.cfg.Throttle.MinIssueCountForThrottle {
 		return false
 	}
 
@@ -739,8 +741,8 @@ func (c *Client) throttleIssue(issue *models.Issue, action models.SlackAction, i
 	limit := time.Duration(2*issue.AlertCount) * time.Second
 
 	// Limit is never more than the configured upper limit
-	if limit > c.conf.Throttle.UpperLimit {
-		limit = c.conf.Throttle.UpperLimit
+	if limit > c.cfg.Throttle.UpperLimit {
+		limit = c.cfg.Throttle.UpperLimit
 	}
 
 	// Reduce the upper limit if the alert text has changed

@@ -53,7 +53,7 @@ func (c *channelInfoManager) Init(ctx context.Context) error {
 	return nil
 }
 
-func (c *channelInfoManager) Run(ctx context.Context) {
+func (c *channelInfoManager) Run(ctx context.Context) error {
 	refreshChannelInfoInterval := 30 * time.Second
 	refreshAllManagerChannelsInterval := 5 * time.Minute
 	pruneInterval := 30 * time.Minute
@@ -65,7 +65,7 @@ func (c *channelInfoManager) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case channel := <-c.detectedChannels:
 			c.channelsLastSeen[channel] = time.Now()
 		case <-refreshChannelInfo:

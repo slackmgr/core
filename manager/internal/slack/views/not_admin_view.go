@@ -14,13 +14,11 @@ var notAdminAssets embed.FS
 
 func NotAdminView(user string, conf *config.ManagerConfig) ([]slack.Block, error) {
 	type args struct {
-		User               string
-		DocsURL            string
-		StatusDashboardURL string
-		LogsDashboardURL   string
+		User    string
+		DocsURL string
 	}
 
-	tpl, err := renderTemplate(notAdminAssets, "not_admin_view_assets/not_admin.json", args{User: user, DocsURL: conf.DocsURL, StatusDashboardURL: conf.StatusDashboardURL, LogsDashboardURL: conf.LogsDashboardURL})
+	tpl, err := renderTemplate(notAdminAssets, "not_admin_view_assets/not_admin.json", args{User: user, DocsURL: conf.DocsURL})
 	if err != nil {
 		return nil, err
 	}

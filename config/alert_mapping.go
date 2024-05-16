@@ -10,22 +10,27 @@ import (
 var slackChannelIDRegex = regexp.MustCompile(`^[0-9a-zA-Z]{9,15}$`)
 
 type AlertMapping struct {
-	Rules []*RoutingRule `json:"rules"`
+	Rules       []*RoutingRule `json:"rules" yaml:"rules"`
+	initialized bool
 }
 
 type RoutingRule struct {
-	TeamName     string   `json:"teamName"`
-	Description  string   `json:"description"`
-	Equals       []string `json:"equals"`
-	HasPrefix    []string `json:"hasPrefix"`
-	MatchesRegex []string `json:"matchesRegex"`
-	MatchAll     bool     `json:"matchAll"`
-	Channel      string   `json:"channel"`
+	TeamName     string   `json:"teamName" yaml:"teamName"`
+	Description  string   `json:"description" yaml:"description"`
+	Equals       []string `json:"equals" yaml:"equals"`
+	HasPrefix    []string `json:"hasPrefix" yaml:"hasPrefix"`
+	MatchesRegex []string `json:"matchesRegex" yaml:"matchesRegex"`
+	MatchAll     bool     `json:"matchAll" yaml:"matchAll"`
+	Channel      string   `json:"channel" yaml:"channel"`
 
 	regex []*regexp.Regexp
 }
 
-func (a *AlertMapping) Init() error {
+func (a *AlertMapping) InitAndValidate() error {
+	if a.initialized {
+		return nil
+	}
+
 	if len(a.Rules) == 0 {
 		return errors.New("no alert mapping rules found")
 	}
@@ -99,6 +104,8 @@ func (a *AlertMapping) Init() error {
 			return fmt.Errorf("rule[%d].channel is not a valid Slack channel ID", i)
 		}
 	}
+
+	a.initialized = true
 
 	return nil
 }

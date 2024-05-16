@@ -1,24 +1,27 @@
 package config
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type SlackClientConfig struct {
-	AppToken                     string
-	BotToken                     string
-	DebugLogging                 bool
-	DryRun                       bool
-	Concurrency                  int
-	MaxAttemtsForRateLimitError  int
-	MaxAttemptsForTransientError int
-	MaxAttemptsForFatalError     int
-	MaxRateLimitErrorWaitTime    time.Duration
-	MaxTransientErrorWaitTime    time.Duration
-	MaxFatalErrorWaitTime        time.Duration
-	HTTPTimeout                  time.Duration
+	AppToken                     string        `json:"appToken" yaml:"appToken"`
+	BotToken                     string        `json:"botToken" yaml:"botToken"`
+	DebugLogging                 bool          `json:"debugLogging" yaml:"debugLogging"`
+	DryRun                       bool          `json:"dryRun" yaml:"dryRun"`
+	Concurrency                  int           `json:"concurrency" yaml:"concurrency"`
+	MaxAttemtsForRateLimitError  int           `json:"maxAttemtsForRateLimitError" yaml:"maxAttemtsForRateLimitError"`
+	MaxAttemptsForTransientError int           `json:"maxAttemptsForTransientError" yaml:"maxAttemptsForTransientError"`
+	MaxAttemptsForFatalError     int           `json:"maxAttemptsForFatalError" yaml:"maxAttemptsForFatalError"`
+	MaxRateLimitErrorWaitTime    time.Duration `json:"maxRateLimitErrorWaitTime" yaml:"maxRateLimitErrorWaitTime"`
+	MaxTransientErrorWaitTime    time.Duration `json:"maxTransientErrorWaitTime" yaml:"maxTransientErrorWaitTime"`
+	MaxFatalErrorWaitTime        time.Duration `json:"maxFatalErrorWaitTime" yaml:"maxFatalErrorWaitTime"`
+	HTTPTimeout                  time.Duration `json:"httpTimeout" yaml:"httpTimeout"`
 }
 
-func NewDefaultSlackClientConfig() SlackClientConfig {
-	c := SlackClientConfig{}
+func NewDefaultSlackClientConfig() *SlackClientConfig {
+	c := &SlackClientConfig{}
 	c.SetDefaults()
 	return c
 }
@@ -55,4 +58,20 @@ func (c *SlackClientConfig) SetDefaults() {
 	if c.HTTPTimeout <= 0 {
 		c.HTTPTimeout = 30 * time.Second
 	}
+}
+
+func (c *SlackClientConfig) Validate() error {
+	if c.AppToken == "" {
+		return fmt.Errorf("app token is empty")
+	}
+
+	if c.BotToken == "" {
+		return fmt.Errorf("bot token is empty")
+	}
+
+	if c.HTTPTimeout <= 0 {
+		return fmt.Errorf("http timeout must be greater than 0")
+	}
+
+	return nil
 }
