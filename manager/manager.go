@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/eko/gocache/lib/v4/store"
 	common "github.com/peteraglen/slack-manager-common"
@@ -29,38 +30,67 @@ type FifoQueue interface {
 }
 
 type Manager struct {
-	slackClient  *slack.Client
-	coordinator  *coordinator
-	alertQueue   FifoQueue
-	commandQueue FifoQueue
-	logger       common.Logger
-	cfg          *config.ManagerConfig
+	slackClient     *slack.Client
+	coordinator     *coordinator
+	alertQueue      FifoQueue
+	commandQueue    FifoQueue
+	logger          common.Logger
+	cfg             *config.ManagerConfig
+	channelSettings *models.ChannelSettingsWrapper
 }
 
-func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig) *Manager {
+func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, channelSettings *config.ChannelSettings) *Manager {
 	if metrics == nil {
 		metrics = &internal.NoopMetrics{}
 	}
 
-	slackClient := slack.New(commandQueue, cacheStore, logger, metrics, cfg)
+	if channelSettings == nil {
+		channelSettings = &config.ChannelSettings{}
+	}
 
+	channelSettingsWrapper := &models.ChannelSettingsWrapper{Settings: channelSettings}
+
+	slackClient := slack.New(commandQueue, cacheStore, logger, metrics, cfg, channelSettingsWrapper)
 	coordinator := newCoordinator(db, alertQueue, slackClient, logger, metrics, cfg)
-
 	slackClient.SetIssueFinder(coordinator)
 
 	return &Manager{
-		slackClient:  slackClient,
-		coordinator:  coordinator,
-		alertQueue:   alertQueue,
-		commandQueue: commandQueue,
-		logger:       logger,
-		cfg:          cfg,
+		slackClient:     slackClient,
+		coordinator:     coordinator,
+		alertQueue:      alertQueue,
+		commandQueue:    commandQueue,
+		logger:          logger,
+		cfg:             cfg,
+		channelSettings: channelSettingsWrapper,
 	}
+}
+
+func (m *Manager) UpdateChannelSettings(channelSettings *config.ChannelSettings) error {
+	if channelSettings == nil {
+		m.channelSettings.Settings = &config.ChannelSettings{}
+		return nil
+	}
+
+	if err := channelSettings.InitAndValidate(); err != nil {
+		return fmt.Errorf("failed to update channel settings: %w", err)
+	}
+
+	m.channelSettings.Settings = channelSettings
+
+	return nil
 }
 
 func (m *Manager) Run(ctx context.Context) error {
 	m.logger.Debug("manager.Run started")
 	defer m.logger.Debug("manager.Run exited")
+
+	if err := m.cfg.Validate(); err != nil {
+		return fmt.Errorf("failed to validate configuration: %w", err)
+	}
+
+	if err := m.channelSettings.Settings.InitAndValidate(); err != nil {
+		return fmt.Errorf("failed to initialize channel settings: %w", err)
+	}
 
 	alertCh := make(chan models.Message, 10000)
 	commandCh := make(chan models.Message, 10000)

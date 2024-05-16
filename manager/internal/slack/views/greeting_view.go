@@ -12,21 +12,17 @@ import (
 //go:embed greeting_view_assets/*
 var greetingAssets embed.FS
 
-func GreetingView(user string, isChannelAdmin bool, conf *config.ManagerConfig) ([]slack.Block, error) {
+func GreetingView(user string, isChannelAdmin bool, cfg *config.ManagerConfig) ([]slack.Block, error) {
 	type args struct {
-		User               string
-		IsChannelAdmin     bool
-		DocsURL            string
-		StatusDashboardURL string
-		LogsDashboardURL   string
+		User           string
+		IsChannelAdmin bool
+		DocsURL        string
 	}
 
 	templateArgs := args{
-		User:               user,
-		IsChannelAdmin:     isChannelAdmin,
-		DocsURL:            conf.DocsURL,
-		StatusDashboardURL: conf.StatusDashboardURL,
-		LogsDashboardURL:   conf.LogsDashboardURL,
+		User:           user,
+		IsChannelAdmin: isChannelAdmin,
+		DocsURL:        cfg.DocsURL,
 	}
 
 	tpl, err := renderTemplate(greetingAssets, "greeting_view_assets/greeting.json", templateArgs)

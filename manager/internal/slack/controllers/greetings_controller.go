@@ -5,6 +5,7 @@ import (
 
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
+	"github.com/peteraglen/slack-manager/manager/internal/models"
 	"github.com/peteraglen/slack-manager/manager/internal/slack/handler"
 	"github.com/peteraglen/slack-manager/manager/internal/slack/views"
 	slackapi "github.com/slack-go/slack"
@@ -13,16 +14,18 @@ import (
 )
 
 type GreetingsController struct {
-	client handler.SocketClient
-	logger common.Logger
-	conf   *config.ManagerConfig
+	client          handler.SocketClient
+	logger          common.Logger
+	cfg             *config.ManagerConfig
+	channelSettings *models.ChannelSettingsWrapper
 }
 
-func NewGreetingsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, logger common.Logger, conf *config.ManagerConfig) *GreetingsController {
+func NewGreetingsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, logger common.Logger, cfg *config.ManagerConfig, channelSettings *models.ChannelSettingsWrapper) *GreetingsController {
 	c := &GreetingsController{
-		client: client,
-		logger: logger,
-		conf:   conf,
+		client:          client,
+		logger:          logger,
+		cfg:             cfg,
+		channelSettings: channelSettings,
 	}
 
 	eventhandler.HandleEventsAPI(string(slackevents.MemberJoinedChannel), c.memberJoinedChannel)
@@ -66,7 +69,7 @@ func (c *GreetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 		logger.Info("User joined un-managed channel")
 	}
 
-	infoChannelConfig, isInfoChannel := c.conf.GetInfoChannelConfig(joinedEvent.Channel)
+	infoChannelConfig, isInfoChannel := c.channelSettings.Settings.GetInfoChannelConfig(joinedEvent.Channel)
 
 	if isInfoChannel {
 		blocks, err := views.InfoChannelView(infoChannelConfig.TemplatePath, userInfo.RealName)
@@ -83,9 +86,9 @@ func (c *GreetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 
 		logger.WithField("reason", "Greeting message in info channel").Info("Post ephemeral message")
 	} else if isAlertChannel {
-		userIsChannelAdmin := c.conf.UserIsChannelAdmin(ctx, joinedEvent.Channel, userInfo.ID, c.client.UserIsInGroup)
+		userIsChannelAdmin := c.channelSettings.Settings.UserIsChannelAdmin(ctx, joinedEvent.Channel, userInfo.ID, c.client.UserIsInGroup)
 
-		blocks, err := views.GreetingView(userInfo.RealName, userIsChannelAdmin, c.conf)
+		blocks, err := views.GreetingView(userInfo.RealName, userIsChannelAdmin, c.cfg)
 		if err != nil {
 			logger.Errorf("Failed to generate view: %s", err)
 			return

@@ -6,21 +6,20 @@ import (
 )
 
 type RateLimitConfig struct {
-	AlertsPerSecond   float64
-	AllowedBurst      int
-	MaxWaitPerAttempt time.Duration
-	MaxAttempts       int
+	AlertsPerSecond   float64       `json:"alertsPerSecond" yaml:"alertsPerSecond"`
+	AllowedBurst      int           `json:"allowedBurst" yaml:"allowedBurst"`
+	MaxWaitPerAttempt time.Duration `json:"maxWaitPerAttempt" yaml:"maxWaitPerAttempt"`
+	MaxAttempts       int           `json:"maxAttempts" yaml:"maxAttempts"`
 }
 
 type APIConfig struct {
-	RestPort               string
-	EncryptionKey          string
-	CachePrefix            string
-	ErrorReportChannelID   string
-	MaxUsersInAlertChannel int
-	RateLimit              RateLimitConfig
-	SlackClient            SlackClientConfig
-	alertMapping           *AlertMapping
+	RestPort               string             `json:"restPort" yaml:"restPort"`
+	EncryptionKey          string             `json:"encryptionKey" yaml:"encryptionKey"`
+	CachePrefix            string             `json:"cachePrefix" yaml:"cachePrefix"`
+	ErrorReportChannelID   string             `json:"errorReportChannelID" yaml:"errorReportChannelID"`
+	MaxUsersInAlertChannel int                `json:"maxUsersInAlertChannel" yaml:"maxUsersInAlertChannel"`
+	RateLimit              *RateLimitConfig   `json:"rateLimit" yaml:"rateLimit"`
+	SlackClient            *SlackClientConfig `json:"slackClient" yaml:"slackClient"`
 }
 
 func NewDefaultAPIConfig() *APIConfig {
@@ -30,7 +29,7 @@ func NewDefaultAPIConfig() *APIConfig {
 		CachePrefix:            "slack-manager",
 		ErrorReportChannelID:   "",
 		MaxUsersInAlertChannel: 100,
-		RateLimit: RateLimitConfig{
+		RateLimit: &RateLimitConfig{
 			AlertsPerSecond:   0.5,
 			AllowedBurst:      10,
 			MaxWaitPerAttempt: 10 * time.Second,
@@ -40,34 +39,18 @@ func NewDefaultAPIConfig() *APIConfig {
 	}
 }
 
-func (c *APIConfig) SetAlertMapping(alertMapping *AlertMapping) error {
-	if err := alertMapping.Init(); err != nil {
-		return fmt.Errorf("failed to update alert mapping: %w", err)
+func (c *APIConfig) Validate() error {
+	if c.RestPort == "" {
+		return fmt.Errorf("rest port is required")
 	}
 
-	c.alertMapping = alertMapping
+	if c.SlackClient == nil {
+		return fmt.Errorf("slack client config is required")
+	}
+
+	if err := c.SlackClient.Validate(); err != nil {
+		return fmt.Errorf("slack client config is invalid: %w", err)
+	}
 
 	return nil
-}
-
-func (c *APIConfig) GetAlertMappings() *AlertMapping {
-	return c.alertMapping
-}
-
-func (c *APIConfig) GetRecommendedRequestTimeout() time.Duration {
-	apiRateLimitMaxTime := c.RateLimit.MaxWaitPerAttempt * time.Duration(c.RateLimit.MaxAttempts)
-
-	return max(apiRateLimitMaxTime, c.SlackClient.MaxRateLimitErrorWaitTime, c.SlackClient.MaxTransientErrorWaitTime, c.SlackClient.MaxFatalErrorWaitTime) + time.Second
-}
-
-func max(values ...time.Duration) time.Duration {
-	max := time.Duration(0)
-
-	for _, v := range values {
-		if v > max {
-			max = v
-		}
-	}
-
-	return max
 }

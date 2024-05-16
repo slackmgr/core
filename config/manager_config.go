@@ -1,146 +1,92 @@
 package config
 
 import (
-	"context"
+	"fmt"
 	"time"
 )
 
-type ChannelConfig struct {
-	AlertChannelSize   int
-	CommandChannelSize int
-}
-
 type ThrottleConfig struct {
-	MinIssueCountForThrottle int
-	UpperLimit               time.Duration
+	MinIssueCountForThrottle int           `json:"minIssueCountForThrottle" yaml:"minIssueCountForThrottle"`
+	UpperLimit               time.Duration `json:"upperLimit" yaml:"upperLimit"`
 }
 
 type ManagerConfig struct {
-	SkipAlertsConsumer    bool
-	ProcessInterval       time.Duration
-	DefaultArchivingDelay time.Duration
-	WebhookTimeout        time.Duration
-	ReorderIssueLimit     int
-	EncryptionKey         string
-	CachePrefix           string
-	IgnoreCacheReadErrors bool
-	Location              *time.Location
-	Slack                 SlackClientConfig
-	ChannelManager        ChannelConfig
-	Throttle              ThrottleConfig
-	DocsURL               string
-	StatusDashboardURL    string
-	LogsDashboardURL      string
-
-	adminSettings *AdminSettings
+	SkipAlertsConsumer    bool               `json:"skipAlertsConsumer" yaml:"skipAlertsConsumer"`
+	ProcessInterval       time.Duration      `json:"processInterval" yaml:"processInterval"`
+	DefaultArchivingDelay time.Duration      `json:"defaultArchivingDelay" yaml:"defaultArchivingDelay"`
+	WebhookTimeout        time.Duration      `json:"webhookTimeout" yaml:"webhookTimeout"`
+	ReorderIssueLimit     int                `json:"reorderIssueLimit" yaml:"reorderIssueLimit"`
+	EncryptionKey         string             `json:"encryptionKey" yaml:"encryptionKey"`
+	CachePrefix           string             `json:"cachePrefix" yaml:"cachePrefix"`
+	IgnoreCacheReadErrors bool               `json:"ignoreCacheReadErrors" yaml:"ignoreCacheReadErrors"`
+	Location              *time.Location     `json:"location" yaml:"location"`
+	SlackClient           *SlackClientConfig `json:"slackClient" yaml:"slackClient"`
+	Throttle              *ThrottleConfig    `json:"throttle" yaml:"throttle"`
+	DocsURL               string             `json:"docsURL" yaml:"docsURL"`
 }
 
-func NewDefaultConfig() *ManagerConfig {
+func NewDefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
 		SkipAlertsConsumer:    false,
-		ProcessInterval:       5 * time.Second,
+		ProcessInterval:       10 * time.Second,
 		DefaultArchivingDelay: 12 * time.Hour,
 		WebhookTimeout:        2 * time.Second,
 		ReorderIssueLimit:     30,
-		EncryptionKey:         "",
 		CachePrefix:           "slack-manager",
 		IgnoreCacheReadErrors: true,
 		Location:              time.UTC,
-		Slack:                 NewDefaultSlackClientConfig(),
-		ChannelManager: ChannelConfig{
-			AlertChannelSize:   100,
-			CommandChannelSize: 100,
-		},
-		Throttle: ThrottleConfig{
+		SlackClient:           NewDefaultSlackClientConfig(),
+		Throttle: &ThrottleConfig{
 			MinIssueCountForThrottle: 5,
 			UpperLimit:               90 * time.Second,
 		},
-		DocsURL:            "",
-		StatusDashboardURL: "",
-		LogsDashboardURL:   "",
 	}
 }
 
-func (c *ManagerConfig) UpdateAdminSettings(settings *AdminSettings) {
-	c.adminSettings = settings
-}
-
-func (c *ManagerConfig) AdminSettings() *AdminSettings {
-	return c.adminSettings
-}
-
-func (c *ManagerConfig) UserIsGlobalAdmin(userID string) bool {
-	if _, ok := c.adminSettings.GlobalAdmins[userID]; ok {
-		return true
+func (c *ManagerConfig) Validate() error {
+	if c.ProcessInterval < 2*time.Second || c.ProcessInterval > time.Minute {
+		return fmt.Errorf("process interval must be between 2 seconds and 1 minute")
 	}
 
-	return false
-}
-
-func (c *ManagerConfig) UserIsChannelAdmin(ctx context.Context, channelID, userID string, userIsInGroup func(ctx context.Context, groupID, userID string) bool) bool {
-	if userID == "" || channelID == "" {
-		return false
+	if c.DefaultArchivingDelay < 1*time.Minute || c.DefaultArchivingDelay > 30*24*time.Hour {
+		return fmt.Errorf("default archiving delay must be between 1 minute and 30 days")
 	}
 
-	settings := c.adminSettings
-
-	if _, ok := settings.GlobalAdmins[userID]; ok {
-		return true
+	if c.WebhookTimeout < 1*time.Second || c.WebhookTimeout > 30*time.Second {
+		return fmt.Errorf("webhook timeout must be between 1 and 30 seconds")
 	}
 
-	channelConfig, channelFound := settings.AlertChannels[channelID]
-
-	if !channelFound {
-		return false
+	if c.ReorderIssueLimit < 1 || c.ReorderIssueLimit > 100 {
+		return fmt.Errorf("reorder issue limit must be between 1 and 100")
 	}
 
-	if _, ok := channelConfig.Admins[userID]; ok {
-		return true
+	if c.SlackClient == nil {
+		return fmt.Errorf("slack client config is required")
 	}
 
-	if userIsInGroup != nil {
-		for group := range channelConfig.AdminGroups {
-			if userIsInGroup(ctx, group, userID) {
-				return true
-			}
-		}
+	if c.Location == nil {
+		return fmt.Errorf("location is required")
 	}
 
-	return false
-}
-
-func (c *ManagerConfig) IsInfoChannel(channelID string) bool {
-	settings := c.adminSettings
-
-	if _, ok := settings.InfoChannels[channelID]; ok {
-		return true
+	if c.SlackClient == nil {
+		return fmt.Errorf("slack client config is required")
 	}
 
-	return false
-}
-
-func (c *ManagerConfig) GetInfoChannelConfig(channelID string) (*InfoChannelConfig, bool) {
-	settings := c.adminSettings
-
-	if c, ok := settings.InfoChannels[channelID]; ok {
-		return c, true
+	if err := c.SlackClient.Validate(); err != nil {
+		return fmt.Errorf("slack client config is invalid: %w", err)
 	}
 
-	return nil, false
-}
-
-func (c *ManagerConfig) OrderIssuesBySeverity(channelID string) bool {
-	if channelID == "" {
-		return true
+	if c.Throttle == nil {
+		return fmt.Errorf("throttle config is required")
 	}
 
-	settings := c.adminSettings
-
-	channelConfig, channelFound := settings.AlertChannels[channelID]
-
-	if !channelFound {
-		return true
+	if c.Throttle.MinIssueCountForThrottle < 1 {
+		return fmt.Errorf("min issue count for throttle must be at least 1")
 	}
 
-	return channelConfig.OrderIssuesBySeverity
+	if c.Throttle.UpperLimit < 10*time.Second || c.Throttle.UpperLimit > 5*time.Minute {
+		return fmt.Errorf("upper limit must be between 10 seconds and 5 minutes")
+	}
+
+	return nil
 }

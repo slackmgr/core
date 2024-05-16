@@ -34,22 +34,24 @@ const InvestigateEmoji = "eyes"
 const MuteEmoji = "mask"
 
 type ReactionsController struct {
-	client         handler.SocketClient
-	commandHandler handler.FifoQueueProducer
-	cache          *internal.Cache[string]
-	logger         common.Logger
-	conf           *config.ManagerConfig
+	client          handler.SocketClient
+	commandHandler  handler.FifoQueueProducer
+	cache           *internal.Cache[string]
+	logger          common.Logger
+	cfg             *config.ManagerConfig
+	channelSettings *models.ChannelSettingsWrapper
 }
 
-func NewReactionsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, conf *config.ManagerConfig) *ReactionsController {
+func NewReactionsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, cfg *config.ManagerConfig, channelSettings *models.ChannelSettingsWrapper) *ReactionsController {
 	cache := internal.NewCache(cache.New[string](cacheStore), logger)
 
 	c := &ReactionsController{
-		client:         client,
-		commandHandler: commandHandler,
-		cache:          cache,
-		logger:         logger,
-		conf:           conf,
+		client:          client,
+		commandHandler:  commandHandler,
+		cache:           cache,
+		logger:          logger,
+		cfg:             cfg,
+		channelSettings: channelSettings,
 	}
 
 	eventhandler.HandleEventsAPI(string(slackevents.ReactionAdded), c.reactionAdded)
@@ -171,7 +173,7 @@ func (c *ReactionsController) getUserInfo(ctx context.Context, channel, userID s
 	logger.Info("User reaction to message in managed channel")
 
 	if requireChannelAdmin {
-		userIsChannelAdmin := c.conf.UserIsChannelAdmin(ctx, channel, userInfo.ID, c.client.UserIsInGroup)
+		userIsChannelAdmin := c.channelSettings.Settings.UserIsChannelAdmin(ctx, channel, userInfo.ID, c.client.UserIsInGroup)
 
 		if !userIsChannelAdmin {
 			logger.Info("User is not admin in channel")
@@ -190,7 +192,7 @@ func (c *ReactionsController) postNotAdminAlert(ctx context.Context, channel, us
 		return
 	}
 
-	blocks, err := views.NotAdminView(userRealName, c.conf)
+	blocks, err := views.NotAdminView(userRealName, c.cfg)
 	if err != nil {
 		logger.Errorf("Failed to generate view: %s", err)
 		return

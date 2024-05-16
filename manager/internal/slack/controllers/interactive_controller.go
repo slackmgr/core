@@ -33,20 +33,22 @@ type PrivateModalMetadata struct {
 }
 
 type InteractiveController struct {
-	client         handler.SocketClient
-	commandHandler handler.FifoQueueProducer
-	issueFinder    handler.IssueFinder
-	logger         common.Logger
-	conf           *config.ManagerConfig
+	client          handler.SocketClient
+	commandHandler  handler.FifoQueueProducer
+	issueFinder     handler.IssueFinder
+	logger          common.Logger
+	cfg             *config.ManagerConfig
+	channelSettings *models.ChannelSettingsWrapper
 }
 
-func NewInteractiveController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler handler.FifoQueueProducer, issueFinder handler.IssueFinder, logger common.Logger, conf *config.ManagerConfig) *InteractiveController {
+func NewInteractiveController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler handler.FifoQueueProducer, issueFinder handler.IssueFinder, logger common.Logger, cfg *config.ManagerConfig, channelSettings *models.ChannelSettingsWrapper) *InteractiveController {
 	c := &InteractiveController{
-		client:         client,
-		commandHandler: commandHandler,
-		issueFinder:    issueFinder,
-		logger:         logger,
-		conf:           conf,
+		client:          client,
+		commandHandler:  commandHandler,
+		issueFinder:     issueFinder,
+		logger:          logger,
+		cfg:             cfg,
+		channelSettings: channelSettings,
 	}
 
 	// Global shortcuts
@@ -157,7 +159,7 @@ func (c *InteractiveController) defaultInteractiveHandler(_ context.Context, evt
 // It opens a modal view with options to move the issue, IF the user is allowed to perform this action.
 // https://api.slack.com/interactivity/shortcuts/using#message_shortcuts
 func (c *InteractiveController) handleMoveIssueRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
-	userIsGlobalAdmin := c.conf.UserIsGlobalAdmin(interaction.User.ID)
+	userIsGlobalAdmin := c.channelSettings.Settings.UserIsGlobalAdmin(interaction.User.ID)
 
 	if !userIsGlobalAdmin {
 		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but this feature is currently only available to Slack Manager global admins."); err != nil {
@@ -316,7 +318,7 @@ func (c *InteractiveController) createIssueViewSubmission(ctx context.Context, e
 		return
 	}
 
-	isAdminInTargetChannel := c.conf.UserIsChannelAdmin(ctx, targetChannelID, userInfo.ID, c.client.UserIsInGroup)
+	isAdminInTargetChannel := c.channelSettings.Settings.UserIsChannelAdmin(ctx, targetChannelID, userInfo.ID, c.client.UserIsInGroup)
 
 	if !isAdminInTargetChannel {
 		ackWithFieldErrorMsg(evt, clt, "select_channel", "You need to be Slack Manager admin in the selected channel")
@@ -423,7 +425,7 @@ func (c *InteractiveController) handleViewIssueDetailsRequest(ctx context.Contex
 		return
 	}
 
-	blocks, err := views.IssueDetailsAssets(issue, c.conf)
+	blocks, err := views.IssueDetailsAssets(issue, c.cfg)
 	if err != nil {
 		logger.Errorf("Failed to generate view: %s", err)
 		return
@@ -507,7 +509,7 @@ func (c *InteractiveController) handleWebhookRequest(ctx context.Context, intera
 
 func (c *InteractiveController) verifyWebhookAccess(ctx context.Context, interaction slack.InteractionCallback, webhook *common.Webhook, logger common.Logger) bool {
 	if webhook.AccessLevel == common.WebhookAccessLevelGlobalAdmins || webhook.AccessLevel == "" {
-		userIsGlobalAdmin := c.conf.UserIsGlobalAdmin(interaction.User.ID)
+		userIsGlobalAdmin := c.channelSettings.Settings.UserIsGlobalAdmin(interaction.User.ID)
 
 		if !userIsGlobalAdmin {
 			if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but this webhook is available only to Slack Manager global admins."); err != nil {
@@ -520,7 +522,7 @@ func (c *InteractiveController) verifyWebhookAccess(ctx context.Context, interac
 	}
 
 	if webhook.AccessLevel == common.WebhookAccessLevelChannelAdmins {
-		userIsChannelAdmin := c.conf.UserIsChannelAdmin(ctx, interaction.Channel.ID, interaction.User.ID, c.client.UserIsInGroup)
+		userIsChannelAdmin := c.channelSettings.Settings.UserIsChannelAdmin(ctx, interaction.Channel.ID, interaction.User.ID, c.client.UserIsInGroup)
 
 		if !userIsChannelAdmin {
 			if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but this webhook is available only to channel admins and above."); err != nil {
