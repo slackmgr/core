@@ -11,11 +11,16 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/peteraglen/slack-manager/client"
+	common "github.com/peteraglen/slack-manager-common"
+	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
 )
 
 const NA = "N/A"
+
+type Alerts struct {
+	Alerts []*common.Alert `json:"alerts"`
+}
 
 func (s *Server) alert(resp http.ResponseWriter, req *http.Request) {
 	started := time.Now()
@@ -35,7 +40,7 @@ func (s *Server) alert(resp http.ResponseWriter, req *http.Request) {
 
 	s.debugLogRequest(req, body)
 
-	var alert client.Alert
+	var alert common.Alert
 
 	if err := json.Unmarshal(body, &alert); err != nil {
 		err = fmt.Errorf("failed to decode POST body: %w", err)
@@ -43,7 +48,7 @@ func (s *Server) alert(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	alerts := []*client.Alert{&alert}
+	alerts := []*common.Alert{&alert}
 
 	s.handleAlerts(resp, req, alerts, started)
 }
@@ -66,7 +71,7 @@ func (s *Server) alerts(resp http.ResponseWriter, req *http.Request) {
 
 	s.debugLogRequest(req, body)
 
-	var input *client.Alerts
+	var input *Alerts
 
 	if err := json.Unmarshal(body, &input); err != nil {
 		err = fmt.Errorf("failed to decode POST body: %w", err)
@@ -77,7 +82,7 @@ func (s *Server) alerts(resp http.ResponseWriter, req *http.Request) {
 	s.handleAlerts(resp, req, input.Alerts, started)
 }
 
-func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request, alerts []*client.Alert, started time.Time) {
+func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request, alerts []*common.Alert, started time.Time) {
 	if len(alerts) == 0 {
 		err := fmt.Errorf("alert list is empty")
 		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
@@ -86,7 +91,7 @@ func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request, alert
 
 	s.setSlackChannelID(req, alerts...)
 
-	alertsByChannel := make(map[string][]*client.Alert)
+	alertsByChannel := make(map[string][]*common.Alert)
 	atLeastOneAlert := false
 
 	for _, alert := range alerts {
@@ -112,7 +117,7 @@ func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request, alert
 		if ok {
 			alertsByChannel[channel] = append(channelAlerts, alert)
 		} else {
-			alertsByChannel[channel] = []*client.Alert{alert}
+			alertsByChannel[channel] = []*common.Alert{alert}
 		}
 	}
 
@@ -121,7 +126,7 @@ func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request, alert
 		return
 	}
 
-	alertLimitPerChannel := s.config.RateLimit.AllowedBurst
+	alertLimitPerChannel := s.cfg.RateLimit.AllowedBurst
 
 	for channel, channelAlerts := range alertsByChannel {
 		channelInfo, err := s.channelInfoManager.GetChannelInfo(req.Context(), channel)
@@ -144,13 +149,13 @@ func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request, alert
 		}
 
 		if !channelInfo.ManagerIsInChannel {
-			err := fmt.Errorf("SUDO Slack Manager is not in channel %s", channel)
+			err := fmt.Errorf("the Slack Manager integration is not in channel %s", channel)
 			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]), resp, req, started)
 			return
 		}
 
-		if channelInfo.UserCount > s.config.MaxUsersInAlertChannel {
-			err := fmt.Errorf("the number of users (%d) in channel %s exceeds the limit (%d)", channelInfo.UserCount, channel, s.config.MaxUsersInAlertChannel)
+		if channelInfo.UserCount > s.cfg.MaxUsersInAlertChannel {
+			err := fmt.Errorf("the number of users (%d) in channel %s exceeds the limit (%d)", channelInfo.UserCount, channel, s.cfg.MaxUsersInAlertChannel)
 			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]), resp, req, started)
 			return
 		}
@@ -186,7 +191,7 @@ func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request, alert
 
 		for _, alert := range channelAlerts {
 			for _, w := range alert.Webhooks {
-				if err := w.EncryptPayload([]byte(s.config.EncryptionKey)); err != nil {
+				if err := w.EncryptPayload([]byte(s.cfg.EncryptionKey)); err != nil {
 					err = fmt.Errorf("failed to encrypt webhook: %w", err)
 					s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, getClientErrorDebugText(alert), getAlertChannelWithRouteKey(alert), resp, req, started)
 					return
@@ -216,7 +221,7 @@ func (s *Server) testSlackAlertsHandler(resp http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	var input *client.Alerts
+	var input *Alerts
 
 	if err := json.NewDecoder(req.Body).Decode(&input); err != nil {
 		err = fmt.Errorf("failed to decode POST body: %w", err)
@@ -238,7 +243,7 @@ func (s *Server) testSlackAlertsHandler(resp http.ResponseWriter, req *http.Requ
 	resp.WriteHeader(http.StatusNoContent)
 }
 
-func getClientErrorDebugText(alert *client.Alert) map[string]string {
+func getClientErrorDebugText(alert *common.Alert) map[string]string {
 	if alert == nil {
 		return nil
 	}
@@ -250,9 +255,9 @@ func getClientErrorDebugText(alert *client.Alert) map[string]string {
 	}
 }
 
-func reduceAlertCountForChannel(channel string, alerts []*client.Alert, limit int) ([]*client.Alert, []*client.Alert) {
+func reduceAlertCountForChannel(channel string, alerts []*common.Alert, limit int) ([]*common.Alert, []*common.Alert) {
 	if len(alerts) <= limit {
-		return alerts, []*client.Alert{}
+		return alerts, []*common.Alert{}
 	}
 
 	reducedAlerts := alerts[0:limit]
@@ -264,8 +269,8 @@ func reduceAlertCountForChannel(channel string, alerts []*client.Alert, limit in
 	return reducedAlerts, alerts[limit:]
 }
 
-func createRateLimitAlert(channel string, overflow int, template *client.Alert) *client.Alert {
-	summary := client.NewPanicAlert()
+func createRateLimitAlert(channel string, overflow int, template *common.Alert) *common.Alert {
+	summary := common.NewPanicAlert()
 	summary.CorrelationID = fmt.Sprintf("__rate_limit_%s", channel)
 	summary.Header = ":status: Too many alerts"
 	summary.Text = fmt.Sprintf("%d alerts were dropped", overflow)
@@ -282,23 +287,23 @@ func createRateLimitAlert(channel string, overflow int, template *client.Alert) 
 	return summary
 }
 
-func (s *Server) createClientErrorAlert(err error, statusCode int, debugText map[string]string, targetChannel string) *client.Alert {
-	severity := client.AlertWarning
+func (s *Server) createClientErrorAlert(err error, statusCode int, debugText map[string]string, targetChannel string) *common.Alert {
+	severity := common.AlertWarning
 
 	if statusCode >= 500 {
-		severity = client.AlertError
+		severity = common.AlertError
 	}
 
 	if targetChannel == "" {
 		targetChannel = NA
 	}
 
-	alert := client.NewAlert(severity)
+	alert := common.NewAlert(severity)
 
 	alert.CorrelationID = fmt.Sprintf("__client_error_%s_%s", targetChannel, internal.Hash(err.Error()))
 	alert.Header = fmt.Sprintf(":status: Client error %d", statusCode)
 	alert.FallbackText = fmt.Sprintf("Client error %d", statusCode)
-	alert.SlackChannelID = s.config.ErrorReportChannelID
+	alert.SlackChannelID = s.cfg.ErrorReportChannelID
 	alert.IssueFollowUpEnabled = true
 	alert.AutoResolveSeconds = 3600
 	alert.ArchivingDelaySeconds = 24 * 3600
@@ -326,7 +331,7 @@ func (s *Server) createClientErrorAlert(err error, statusCode int, debugText map
 	return alert
 }
 
-func (s *Server) setSlackChannelID(req *http.Request, alerts ...*client.Alert) {
+func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) {
 	vars := mux.Vars(req)
 
 	if vars == nil {
@@ -335,7 +340,7 @@ func (s *Server) setSlackChannelID(req *http.Request, alerts ...*client.Alert) {
 
 	channelIDFromURL, foundInURL := vars["slackChannelId"]
 
-	alertMappings := s.config.GetAlertMappings()
+	alertMappings := s.cfg.GetAlertMappings()
 
 	for _, alert := range alerts {
 		// The channel ID may actually be a channel name. If so, attempt to map to channel ID.
@@ -359,7 +364,7 @@ func (s *Server) setSlackChannelID(req *http.Request, alerts ...*client.Alert) {
 	}
 }
 
-func (s *Server) findChannelForRouteKey(ctx context.Context, alertMappings *RouteMapping, routeKey string) (string, bool) {
+func (s *Server) findChannelForRouteKey(ctx context.Context, alertMappings *config.AlertMapping, routeKey string) (string, bool) {
 	cacheKey := "slack-manager::findChannelForRouteKey::" + routeKey
 
 	if val, found := s.cache.Get(ctx, cacheKey); found {
@@ -380,7 +385,7 @@ func (s *Server) findChannelForRouteKey(ctx context.Context, alertMappings *Rout
 	return "", false
 }
 
-func ignoreAlert(alert *client.Alert) (bool, string) {
+func ignoreAlert(alert *common.Alert) (bool, string) {
 	if alert == nil || len(alert.IgnoreIfTextContains) == 0 || alert.Text == "" {
 		return false, ""
 	}
@@ -400,7 +405,7 @@ func ignoreAlert(alert *client.Alert) (bool, string) {
 	return false, ""
 }
 
-func (s *Server) logAlerts(text, reason string, started time.Time, alerts ...*client.Alert) {
+func (s *Server) logAlerts(text, reason string, started time.Time, alerts ...*common.Alert) {
 	d := fmt.Sprintf("%v", time.Since(started))
 
 	for _, alert := range alerts {
@@ -412,7 +417,7 @@ func (s *Server) logAlerts(text, reason string, started time.Time, alerts ...*cl
 	}
 }
 
-func getAlertChannelWithRouteKey(alert *client.Alert) string {
+func getAlertChannelWithRouteKey(alert *common.Alert) string {
 	var result string
 
 	if alert.SlackChannelID != "" {

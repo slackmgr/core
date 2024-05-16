@@ -48,7 +48,7 @@ func (c *channelInfoManager) Init(ctx context.Context) error {
 		return err
 	}
 
-	c.logger.Infof("Found %d channels managed by SUDO Slack Manager", len(c.allManagerChannels))
+	c.logger.Infof("Found %d channels managed by Slack Manager", len(c.allManagerChannels))
 
 	return nil
 }
