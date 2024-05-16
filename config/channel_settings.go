@@ -6,19 +6,14 @@ import (
 )
 
 type ChannelSettings struct {
-	GlobalAdmins  []*GlobalAdmin          `json:"globalAdmins" yaml:"globalAdmins"`
+	GlobalAdmins  []string                `json:"globalAdmins" yaml:"globalAdmins"`
 	AlertChannels []*AlertChannelSettings `json:"alertChannels" yaml:"alertChannels"`
 	InfoChannels  []*InfoChannelSettings  `json:"infoChannels" yaml:"infoChannels"`
 
-	globalAdmins  map[string]string
+	globalAdmins  map[string]struct{}
 	alertChannels map[string]*AlertChannelSettings
 	infoChannels  map[string]*InfoChannelSettings
 	initialized   bool
-}
-
-type GlobalAdmin struct {
-	UserID string `json:"userId" yaml:"userId"`
-	Name   string `json:"name" yaml:"name"`
 }
 
 type AlertChannelSettings struct {
@@ -41,7 +36,7 @@ func (c *ChannelSettings) InitAndValidate() error {
 		return nil
 	}
 
-	c.globalAdmins = make(map[string]string)
+	c.globalAdmins = make(map[string]struct{})
 	c.alertChannels = make(map[string]*AlertChannelSettings)
 	c.infoChannels = make(map[string]*InfoChannelSettings)
 
@@ -49,16 +44,12 @@ func (c *ChannelSettings) InitAndValidate() error {
 		return fmt.Errorf("there must be at least one global admin")
 	}
 
-	for i, a := range c.GlobalAdmins {
-		if a.UserID == "" {
-			return fmt.Errorf("globalAdmins[%d].userId cannot be empty", i)
+	for i, userID := range c.GlobalAdmins {
+		if userID == "" {
+			return fmt.Errorf("globalAdmins[%d] cannot be empty", i)
 		}
 
-		if a.Name == "" {
-			return fmt.Errorf("globalAdmins[%d].name cannot be empty", i)
-		}
-
-		c.globalAdmins[a.UserID] = a.Name
+		c.globalAdmins[userID] = struct{}{}
 	}
 
 	for i, a := range c.AlertChannels {
