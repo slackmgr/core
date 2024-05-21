@@ -57,6 +57,30 @@ func (c *Client) SetIssueFinder(issueFinder handler.IssueFinder) {
 }
 
 func (c *Client) Connect(ctx context.Context) error {
+	if c.commandHandler == nil {
+		return fmt.Errorf("command handler must be set before connecting")
+	}
+
+	if c.cacheStore == nil {
+		return fmt.Errorf("cache store must be set before connecting")
+	}
+
+	if c.logger == nil {
+		return fmt.Errorf("logger must be set before connecting")
+	}
+
+	if c.metrics == nil {
+		return fmt.Errorf("metrics must be set before connecting")
+	}
+
+	if c.cfg == nil {
+		return fmt.Errorf("config must be set before connecting")
+	}
+
+	if c.channelSettings == nil {
+		return fmt.Errorf("channel settings must be set before connecting")
+	}
+
 	c.api = slackapi.New(c.cacheStore, c.cfg.CachePrefix, c.logger, c.metrics, c.cfg.SlackClient)
 
 	if _, err := c.api.Connect(ctx); err != nil {
