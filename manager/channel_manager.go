@@ -244,7 +244,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		}
 	}
 
-	alertBody, err := json.Marshal(alert.Alert)
+	alertBody, err := json.Marshal(alert)
 	if err != nil {
 		return fmt.Errorf("failed to marshal alert body: %w", err)
 	}
