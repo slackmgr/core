@@ -100,11 +100,11 @@ func (m *Manager) Run(ctx context.Context) error {
 	}
 
 	if err := m.coordinator.init(ctx); err != nil {
-		return err
+		return fmt.Errorf("failed to initialize coordinator: %w", err)
 	}
 
 	if err := m.slackClient.Connect(ctx); err != nil {
-		return err
+		return fmt.Errorf("failed to connect Slack client: %w", err)
 	}
 
 	alertCh := make(chan models.Message, 10000)
