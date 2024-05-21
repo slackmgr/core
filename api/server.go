@@ -99,10 +99,6 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize channel info manager: %w", err)
 	}
 
-	if _, err := s.slackAPI.Connect(ctx); err != nil {
-		return fmt.Errorf("failed to connect to Slack API: %w", err)
-	}
-
 	router := mux.NewRouter()
 
 	// Stateful alerts
