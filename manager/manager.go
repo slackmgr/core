@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/eko/gocache/lib/v4/store"
+	gocache_store "github.com/eko/gocache/store/go_cache/v4"
+	gocache "github.com/patrickmn/go-cache"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
@@ -35,12 +38,19 @@ type Manager struct {
 	coordinator     *coordinator
 	alertQueue      FifoQueue
 	commandQueue    FifoQueue
+	cacheStore      store.StoreInterface
 	logger          common.Logger
+	metrics         common.Metrics
 	cfg             *config.ManagerConfig
 	channelSettings *models.ChannelSettingsWrapper
 }
 
 func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, channelSettings *config.ChannelSettings) *Manager {
+	if cacheStore == nil {
+		gocacheClient := gocache.New(5*time.Minute, time.Minute)
+		cacheStore = gocache_store.NewGoCache(gocacheClient)
+	}
+
 	if metrics == nil {
 		metrics = &internal.NoopMetrics{}
 	}
@@ -49,21 +59,15 @@ func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.S
 		channelSettings = &config.ChannelSettings{}
 	}
 
-	channelSettingsWrapper := &models.ChannelSettingsWrapper{Settings: channelSettings}
-
-	slackClient := slack.New(commandQueue, cacheStore, logger, metrics, cfg, channelSettingsWrapper)
-	coordinator := newCoordinator(db, alertQueue, slackClient, logger, metrics, cfg)
-	slackClient.SetIssueFinder(coordinator)
-
 	return &Manager{
 		db:              db,
-		slackClient:     slackClient,
-		coordinator:     coordinator,
 		alertQueue:      alertQueue,
 		commandQueue:    commandQueue,
+		cacheStore:      cacheStore,
 		logger:          logger,
+		metrics:         metrics,
 		cfg:             cfg,
-		channelSettings: channelSettingsWrapper,
+		channelSettings: &models.ChannelSettingsWrapper{Settings: channelSettings},
 	}
 }
 
@@ -95,17 +99,23 @@ func (m *Manager) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to validate configuration: %w", err)
 	}
 
-	if err := m.slackClient.Connect(ctx); err != nil {
-		return fmt.Errorf("failed to connect Slack client: %w", err)
-	}
-
 	if err := m.channelSettings.Settings.InitAndValidate(); err != nil {
 		return fmt.Errorf("failed to initialize channel settings: %w", err)
 	}
 
+	m.slackClient = slack.New(m.commandQueue, m.cacheStore, m.logger, m.metrics, m.cfg, m.channelSettings)
+
+	if err := m.slackClient.Connect(ctx); err != nil {
+		return fmt.Errorf("failed to connect Slack client: %w", err)
+	}
+
+	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.logger, m.metrics, m.cfg)
+
 	if err := m.coordinator.init(ctx); err != nil {
 		return fmt.Errorf("failed to initialize coordinator: %w", err)
 	}
+
+	m.slackClient.SetIssueFinder(m.coordinator)
 
 	alertCh := make(chan models.Message, 10000)
 	commandCh := make(chan models.Message, 10000)
@@ -117,11 +127,9 @@ func (m *Manager) Run(ctx context.Context) error {
 		return queueConsumer(ctx, m.commandQueue, commandCh, models.NewCommandFromQueue, m.logger)
 	})
 
-	if !m.cfg.SkipAlertsConsumer {
-		errg.Go(func() error {
-			return queueConsumer(ctx, m.alertQueue, alertCh, models.NewAlert, m.logger)
-		})
-	}
+	errg.Go(func() error {
+		return queueConsumer(ctx, m.alertQueue, alertCh, models.NewAlert, m.logger)
+	})
 
 	errg.Go(func() error {
 		return processor(ctx, m.coordinator, alertCh, commandCh, extenderCh, m.logger)

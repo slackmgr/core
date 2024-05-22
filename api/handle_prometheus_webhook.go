@@ -16,7 +16,7 @@ import (
 
 const True = "true"
 
-func (s *Server) prometheusAlert(resp http.ResponseWriter, req *http.Request) {
+func (s *Server) handlePrometheusWebhook(resp http.ResponseWriter, req *http.Request) {
 	started := time.Now()
 
 	if req.ContentLength <= 0 {
@@ -50,7 +50,7 @@ func (s *Server) prometheusAlert(resp http.ResponseWriter, req *http.Request) {
 
 	alerts := s.mapPrometheusAlert(&webhook)
 
-	s.handleAlerts(resp, req, alerts, started)
+	s.processAlerts(resp, req, alerts, started)
 }
 
 func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*common.Alert {

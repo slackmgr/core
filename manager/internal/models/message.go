@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -61,7 +62,7 @@ func (m *message) Ack(ctx context.Context) error {
 
 	// The ack func must be set for *all* messages, and it must only be called exactly once.
 	if m.ack == nil {
-		panic("Ack function has not been set, or has already been called")
+		return fmt.Errorf("ack function has not been set, or has already been called")
 	}
 
 	if err := m.ack(ctx); err != nil {

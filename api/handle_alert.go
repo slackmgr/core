@@ -22,7 +22,7 @@ type Alerts struct {
 	Alerts []*common.Alert `json:"alerts"`
 }
 
-func (s *Server) alert(resp http.ResponseWriter, req *http.Request) {
+func (s *Server) handleAlert(resp http.ResponseWriter, req *http.Request) {
 	started := time.Now()
 
 	if req.ContentLength <= 0 {
@@ -50,10 +50,10 @@ func (s *Server) alert(resp http.ResponseWriter, req *http.Request) {
 
 	alerts := []*common.Alert{&alert}
 
-	s.handleAlerts(resp, req, alerts, started)
+	s.processAlerts(resp, req, alerts, started)
 }
 
-func (s *Server) alerts(resp http.ResponseWriter, req *http.Request) {
+func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request) {
 	started := time.Now()
 
 	if req.ContentLength <= 0 {
@@ -71,21 +71,31 @@ func (s *Server) alerts(resp http.ResponseWriter, req *http.Request) {
 
 	s.debugLogRequest(req, body)
 
-	var input *Alerts
+	var alerts []*common.Alert
 
-	if err := json.Unmarshal(body, &input); err != nil {
-		err = fmt.Errorf("failed to decode POST body: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
-		return
+	if strings.HasPrefix(string(body), "[") {
+		if err := json.Unmarshal(body, &alerts); err != nil {
+			err = fmt.Errorf("failed to decode POST body: %w", err)
+			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+			return
+		}
+	} else {
+		var input *Alerts
+		if err := json.Unmarshal(body, &input); err != nil {
+			err = fmt.Errorf("failed to decode POST body: %w", err)
+			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+			return
+		}
+
+		alerts = input.Alerts
 	}
 
-	s.handleAlerts(resp, req, input.Alerts, started)
+	s.processAlerts(resp, req, alerts, started)
 }
 
-func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request, alerts []*common.Alert, started time.Time) {
+func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, alerts []*common.Alert, started time.Time) {
 	if len(alerts) == 0 {
-		err := fmt.Errorf("alert list is empty")
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+		resp.WriteHeader(http.StatusNoContent)
 		return
 	}
 
@@ -132,7 +142,7 @@ func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request, alert
 	alertLimitPerChannel := s.cfg.RateLimit.AllowedBurst
 
 	for channel, channelAlerts := range alertsByChannel {
-		channelInfo, err := s.channelInfoManager.GetChannelInfo(req.Context(), channel)
+		channelInfo, err := s.channelInfoSyncer.GetChannelInfo(req.Context(), channel)
 		if err != nil {
 			err = fmt.Errorf("failed to fetch info for channel %s: %w", channel, err)
 			s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]), resp, req, started)
@@ -194,8 +204,8 @@ func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request, alert
 
 		for _, alert := range channelAlerts {
 			for _, w := range alert.Webhooks {
-				if err := w.EncryptPayload([]byte(s.cfg.EncryptionKey)); err != nil {
-					err = fmt.Errorf("failed to encrypt webhook: %w", err)
+				if err := internal.EncryptWebhookPayload(w, []byte(s.cfg.EncryptionKey)); err != nil {
+					err = fmt.Errorf("failed to encrypt webhook payload: %w", err)
 					s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, getClientErrorDebugText(alert), getAlertChannelWithRouteKey(alert), resp, req, started)
 					return
 				}
@@ -212,7 +222,7 @@ func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request, alert
 
 	resp.WriteHeader(http.StatusNoContent)
 
-	// metrics.AddHttpRequestMetric(req.URL.Path, req.Method, http.StatusNoContent, time.Since(started))
+	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusNoContent, time.Since(started))
 }
 
 func (s *Server) testSlackAlertsHandler(resp http.ResponseWriter, req *http.Request) {
@@ -343,7 +353,7 @@ func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) e
 
 	for _, alert := range alerts {
 		// The channel ID may actually be a channel name. If so, attempt to map to channel ID.
-		alert.SlackChannelID = s.channelInfoManager.MapChannelNameToIDIfNeeded(alert.SlackChannelID)
+		alert.SlackChannelID = s.channelInfoSyncer.MapChannelNameToIDIfNeeded(alert.SlackChannelID)
 
 		// Channel found in the alert body -> move on
 		if alert.SlackChannelID != "" {
