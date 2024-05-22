@@ -9,7 +9,7 @@ require (
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
 	github.com/patrickmn/go-cache v2.1.0+incompatible
-	github.com/peteraglen/slack-manager-common v0.0.10
+	github.com/peteraglen/slack-manager-common v0.0.11
 	github.com/segmentio/ksuid v1.0.4
 	github.com/slack-go/slack v0.12.5
 	github.com/stretchr/testify v1.9.0
@@ -23,6 +23,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/golang/mock v1.6.0 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

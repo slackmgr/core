@@ -11,7 +11,6 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
 	"github.com/peteraglen/slack-manager/manager/internal/models"
 	slack "github.com/peteraglen/slack-manager/manager/internal/slack"
 	"golang.org/x/sync/errgroup"
@@ -52,7 +51,7 @@ func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.S
 	}
 
 	if metrics == nil {
-		metrics = &internal.NoopMetrics{}
+		metrics = &common.NoopMetrics{}
 	}
 
 	if channelSettings == nil {

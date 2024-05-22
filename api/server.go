@@ -49,7 +49,7 @@ func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, log
 	}
 
 	if metrics == nil {
-		metrics = &internal.NoopMetrics{}
+		metrics = &common.NoopMetrics{}
 	}
 
 	if alertMapping == nil {
