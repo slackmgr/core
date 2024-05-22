@@ -55,16 +55,16 @@ func New(cacheStore cachestore.StoreInterface, cachePrefix string, logger common
 }
 
 func (c *Client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
+	if c.connected {
+		return nil, fmt.Errorf("connect can only be run once")
+	}
+
 	if c.metrics == nil {
 		return nil, fmt.Errorf("client metrics cannot be nil")
 	}
 
 	if c.cache == nil {
 		return nil, fmt.Errorf("client cache cannot be nil")
-	}
-
-	if c.connected {
-		return nil, fmt.Errorf("connect can only be run once")
 	}
 
 	if c.cfg == nil {

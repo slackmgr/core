@@ -13,13 +13,13 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-type channelInfoManager struct {
+type channelInfoSyncer struct {
 	slackClient           *slackapi.Client
 	channelsLastSeen      map[string]time.Time
 	detectedChannels      chan string
 	channelInfoCache      map[string]*channelInfo
-	allManagerChannels    []*internal.ChannelSummary
-	allManagerChannelsMap map[string]*internal.ChannelSummary
+	allManagedChannels    []*internal.ChannelSummary
+	allManagedChannelsMap map[string]*internal.ChannelSummary
 	cacheLock             *sync.RWMutex
 	logger                common.Logger
 }
@@ -32,8 +32,8 @@ type channelInfo struct {
 	UserCount          int
 }
 
-func newChannelInfoManager(slackClient *slackapi.Client, logger common.Logger) *channelInfoManager {
-	return &channelInfoManager{
+func newChannelInfoSyncer(slackClient *slackapi.Client, logger common.Logger) *channelInfoSyncer {
+	return &channelInfoSyncer{
 		slackClient:      slackClient,
 		channelsLastSeen: make(map[string]time.Time),
 		detectedChannels: make(chan string, 10000),
@@ -43,23 +43,23 @@ func newChannelInfoManager(slackClient *slackapi.Client, logger common.Logger) *
 	}
 }
 
-func (c *channelInfoManager) Init(ctx context.Context) error {
-	if err := c.refreshAllManagerChannelsMap(ctx); err != nil {
+func (c *channelInfoSyncer) Init(ctx context.Context) error {
+	if err := c.refreshAllManagedChannelsMap(ctx); err != nil {
 		return err
 	}
 
-	c.logger.Infof("Found %d channels managed by Slack Manager", len(c.allManagerChannels))
+	c.logger.Infof("Found %d channels managed by Slack Manager", len(c.allManagedChannels))
 
 	return nil
 }
 
-func (c *channelInfoManager) Run(ctx context.Context) error {
+func (c *channelInfoSyncer) Run(ctx context.Context) error {
 	refreshChannelInfoInterval := 30 * time.Second
-	refreshAllManagerChannelsInterval := 5 * time.Minute
+	refreshAllManagedChannelsInterval := 5 * time.Minute
 	pruneInterval := 30 * time.Minute
 
 	refreshChannelInfo := time.After(refreshChannelInfoInterval)
-	refreshAllManagerChannels := time.After(refreshAllManagerChannelsInterval)
+	refreshAllManagedChannels := time.After(refreshAllManagedChannelsInterval)
 	prune := time.After(pruneInterval)
 
 	for {
@@ -73,11 +73,11 @@ func (c *channelInfoManager) Run(ctx context.Context) error {
 				c.logger.Errorf("Failed to refresh Slack channel info: %s", err)
 			}
 			refreshChannelInfo = time.After(refreshChannelInfoInterval)
-		case <-refreshAllManagerChannels:
-			if err := c.refreshAllManagerChannelsMap(ctx); err != nil {
+		case <-refreshAllManagedChannels:
+			if err := c.refreshAllManagedChannelsMap(ctx); err != nil {
 				c.logger.Errorf("Failed to refresh Slack manager channel list: %s", err)
 			}
-			refreshAllManagerChannels = time.After(refreshAllManagerChannelsInterval)
+			refreshAllManagedChannels = time.After(refreshAllManagedChannelsInterval)
 		case <-prune:
 			c.pruneInactiveChannels()
 			prune = time.After(pruneInterval)
@@ -87,19 +87,19 @@ func (c *channelInfoManager) Run(ctx context.Context) error {
 
 // MapChannelNameToIDIfNeeded maps a channel name to a channel ID, if needed. It the input value is a channel ID, it is returned unchanged.
 // This ensures that alert clients may use both channel names and channel IDs interchangeably.
-func (c *channelInfoManager) MapChannelNameToIDIfNeeded(channelName string) string {
+func (c *channelInfoSyncer) MapChannelNameToIDIfNeeded(channelName string) string {
 	if channelName == "" {
 		return ""
 	}
 
-	if channel, found := c.allManagerChannelsMap[channelName]; found {
+	if channel, found := c.allManagedChannelsMap[channelName]; found {
 		return channel.ID
 	}
 
 	return channelName
 }
 
-func (c *channelInfoManager) GetChannelInfo(ctx context.Context, channel string) (*channelInfo, error) {
+func (c *channelInfoSyncer) GetChannelInfo(ctx context.Context, channel string) (*channelInfo, error) {
 	// Refresh the last seen timestamp for the channel, to ensure continued caching
 	if err := internal.TrySend(ctx, channel, c.detectedChannels); err != nil {
 		return nil, err
@@ -116,11 +116,11 @@ func (c *channelInfoManager) GetChannelInfo(ctx context.Context, channel string)
 	return info, err
 }
 
-func (c *channelInfoManager) ManagedChannels() []*internal.ChannelSummary {
-	return c.allManagerChannels
+func (c *channelInfoSyncer) ManagedChannels() []*internal.ChannelSummary {
+	return c.allManagedChannels
 }
 
-func (c *channelInfoManager) getCachedInfo(channel string) (*channelInfo, bool) {
+func (c *channelInfoSyncer) getCachedInfo(channel string) (*channelInfo, bool) {
 	c.cacheLock.RLock()
 	defer c.cacheLock.RUnlock()
 
@@ -131,7 +131,7 @@ func (c *channelInfoManager) getCachedInfo(channel string) (*channelInfo, bool) 
 	return nil, false
 }
 
-func (c *channelInfoManager) refreshData(ctx context.Context) error {
+func (c *channelInfoSyncer) refreshData(ctx context.Context) error {
 	sem := semaphore.NewWeighted(3)
 	errg, ctx := errgroup.WithContext(ctx)
 
@@ -155,7 +155,7 @@ func (c *channelInfoManager) refreshData(ctx context.Context) error {
 	return errg.Wait()
 }
 
-func (c *channelInfoManager) refreshChannelInfo(ctx context.Context, channel string) (*channelInfo, error) {
+func (c *channelInfoSyncer) refreshChannelInfo(ctx context.Context, channel string) (*channelInfo, error) {
 	channelFound := true
 
 	slackChannel, err := c.slackClient.GetChannelInfo(ctx, channel)
@@ -199,7 +199,7 @@ func (c *channelInfoManager) refreshChannelInfo(ctx context.Context, channel str
 	return info, nil
 }
 
-func (c *channelInfoManager) pruneInactiveChannels() {
+func (c *channelInfoSyncer) pruneInactiveChannels() {
 	for channel, lastSeen := range c.channelsLastSeen {
 		if time.Since(lastSeen) > 12*time.Hour {
 			delete(c.channelsLastSeen, channel)
@@ -207,21 +207,21 @@ func (c *channelInfoManager) pruneInactiveChannels() {
 	}
 }
 
-func (c *channelInfoManager) refreshAllManagerChannelsMap(ctx context.Context) error {
-	allManagerChannels, err := c.slackClient.ListBotChannels(ctx)
+func (c *channelInfoSyncer) refreshAllManagedChannelsMap(ctx context.Context) error {
+	allManagedChannels, err := c.slackClient.ListBotChannels(ctx)
 	if err != nil {
 		return err
 	}
 
-	allManagerChannelsMap := make(map[string]*internal.ChannelSummary)
+	allManagedChannelsMap := make(map[string]*internal.ChannelSummary)
 
-	for _, channel := range allManagerChannels {
-		allManagerChannelsMap[channel.ID] = channel
-		allManagerChannelsMap[channel.Name] = channel
+	for _, channel := range allManagedChannels {
+		allManagedChannelsMap[channel.ID] = channel
+		allManagedChannelsMap[channel.Name] = channel
 	}
 
-	c.allManagerChannels = allManagerChannels
-	c.allManagerChannelsMap = allManagerChannelsMap
+	c.allManagedChannels = allManagedChannels
+	c.allManagedChannelsMap = allManagedChannelsMap
 
 	return nil
 }

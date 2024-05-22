@@ -232,9 +232,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		}
 	}
 
-	issue, found := c.issueCollection.Find(alert.Alert.CorrelationID)
-
-	if found {
+	if issue, ok := c.issueCollection.Find(alert.Alert.CorrelationID); ok {
 		if err := c.addAlertToExistingIssue(ctx, issue, alert); err != nil {
 			return fmt.Errorf("failed to update issue: %w", err)
 		}
@@ -250,11 +248,15 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	}
 
 	if err := c.db.SaveAlert(ctx, alert.ID, alertBody); err != nil {
-		return fmt.Errorf("failed to save alert to database: %w", err)
+		if c.cfg.IgnoreSaveAlertErrors {
+			c.logger.Errorf("Failed to save alert to database: %s", err)
+		} else {
+			return fmt.Errorf("failed to save alert to database: %w", err)
+		}
 	}
 
 	if err := alert.Ack(ctx); err != nil {
-		return fmt.Errorf("failed to ack alert: %w", err)
+		c.logger.Errorf("Failed to ack alert: %s", err)
 	}
 
 	return nil
@@ -569,7 +571,7 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 
 	logger = c.logger.WithField("url", webhook.URL)
 
-	payload, err := webhook.DecryptPayload([]byte(c.cfg.EncryptionKey))
+	payload, err := internal.DecryptWebhookPayload(webhook, []byte(c.cfg.EncryptionKey))
 	if err != nil {
 		return fmt.Errorf("failed to decrypt webhook payload: %w", err)
 	}

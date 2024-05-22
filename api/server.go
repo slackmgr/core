@@ -12,8 +12,10 @@ import (
 
 	"github.com/eko/gocache/lib/v4/cache"
 	cachestore "github.com/eko/gocache/lib/v4/store"
+	gocache_store "github.com/eko/gocache/store/go_cache/v4"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
+	gocache "github.com/patrickmn/go-cache"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
@@ -27,19 +29,25 @@ type FifoQueueProducer interface {
 }
 
 type Server struct {
-	alertQueue         FifoQueueProducer
-	limitersByChannel  map[string]*rate.Limiter
-	limitersLock       *sync.Mutex
-	cfg                *config.APIConfig
-	cache              *internal.Cache[string]
-	slackAPI           *slackapi.Client
-	channelInfoManager *channelInfoManager
-	metrics            common.Metrics
-	logger             common.Logger
-	alertMapping       *config.AlertMapping
+	alertQueue        FifoQueueProducer
+	limitersByChannel map[string]*rate.Limiter
+	limitersLock      *sync.Mutex
+	cacheStore        cachestore.StoreInterface
+	cache             *internal.Cache[string]
+	slackAPI          *slackapi.Client
+	channelInfoSyncer *channelInfoSyncer
+	logger            common.Logger
+	metrics           common.Metrics
+	alertMapping      *config.AlertMapping
+	cfg               *config.APIConfig
 }
 
 func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.APIConfig, alertMapping *config.AlertMapping) *Server {
+	if cacheStore == nil {
+		gocacheClient := gocache.New(5*time.Minute, time.Minute)
+		cacheStore = gocache_store.NewGoCache(gocacheClient)
+	}
+
 	if metrics == nil {
 		metrics = &internal.NoopMetrics{}
 	}
@@ -48,21 +56,15 @@ func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, log
 		alertMapping = &config.AlertMapping{}
 	}
 
-	slackAPI := slackapi.New(cacheStore, cfg.CachePrefix, logger, metrics, cfg.SlackClient)
-	channelInfoManager := newChannelInfoManager(slackAPI, logger)
-	cache := internal.NewCache(cache.New[string](cacheStore), logger)
-
 	return &Server{
-		alertQueue:         alertQueue,
-		limitersByChannel:  make(map[string]*rate.Limiter),
-		limitersLock:       &sync.Mutex{},
-		cache:              cache,
-		slackAPI:           slackAPI,
-		channelInfoManager: channelInfoManager,
-		metrics:            metrics,
-		logger:             logger,
-		alertMapping:       alertMapping,
-		cfg:                cfg,
+		alertQueue:        alertQueue,
+		limitersByChannel: make(map[string]*rate.Limiter),
+		limitersLock:      &sync.Mutex{},
+		cacheStore:        cacheStore,
+		logger:            logger,
+		metrics:           metrics,
+		alertMapping:      alertMapping,
+		cfg:               cfg,
 	}
 }
 
@@ -83,33 +85,47 @@ func (s *Server) UpdateAlertMapping(alertMapping *config.AlertMapping) error {
 
 // Run starts the server and handles incoming requests. This method blocks until the context is cancelled, or a server error occurs.
 func (s *Server) Run(ctx context.Context) error {
-	if err := s.cfg.Validate(); err != nil {
-		return fmt.Errorf("failed to validate configuration: %w", err)
+	if s.alertQueue == nil {
+		return errors.New("alert queue cannot be nil")
 	}
 
-	if _, err := s.slackAPI.Connect(ctx); err != nil {
-		return fmt.Errorf("failed to connect to Slack API: %w", err)
+	if s.cfg == nil {
+		return errors.New("manager configuration cannot be nil")
+	}
+
+	if err := s.cfg.Validate(); err != nil {
+		return fmt.Errorf("failed to validate manager configuration: %w", err)
 	}
 
 	if err := s.alertMapping.InitAndValidate(); err != nil {
 		return fmt.Errorf("failed to initialize alert mapping: %w", err)
 	}
 
-	if err := s.channelInfoManager.Init(ctx); err != nil {
+	s.slackAPI = slackapi.New(s.cacheStore, s.cfg.CachePrefix, s.logger, s.metrics, s.cfg.SlackClient)
+
+	if _, err := s.slackAPI.Connect(ctx); err != nil {
+		return fmt.Errorf("failed to connect to Slack API: %w", err)
+	}
+
+	s.cache = internal.NewCache(cache.New[string](s.cacheStore), s.logger)
+
+	s.channelInfoSyncer = newChannelInfoSyncer(s.slackAPI, s.logger)
+
+	if err := s.channelInfoSyncer.Init(ctx); err != nil {
 		return fmt.Errorf("failed to initialize channel info manager: %w", err)
 	}
 
 	router := mux.NewRouter()
 
 	// Stateful alerts
-	router.HandleFunc("/alert", s.alert).Methods("POST")
-	router.HandleFunc("/alert/{slackChannelId}", s.alert).Methods("POST")
-	router.HandleFunc("/alerts", s.alerts).Methods("POST")
-	router.HandleFunc("/alerts/{slackChannelId}", s.alerts).Methods("POST")
+	router.HandleFunc("/alert", s.handleAlert).Methods("POST")
+	router.HandleFunc("/alert/{slackChannelId}", s.handleAlert).Methods("POST")
+	router.HandleFunc("/alerts", s.handleAlerts).Methods("POST")
+	router.HandleFunc("/alerts/{slackChannelId}", s.handleAlerts).Methods("POST")
 
 	// Prometheus alert manager
-	router.HandleFunc("/prometheus-alert", s.prometheusAlert).Methods("POST")
-	router.HandleFunc("/prometheus-alert/{slackChannelId}", s.prometheusAlert).Methods("POST")
+	router.HandleFunc("/prometheus-alert", s.handlePrometheusWebhook).Methods("POST")
+	router.HandleFunc("/prometheus-alert/{slackChannelId}", s.handlePrometheusWebhook).Methods("POST")
 
 	// Test endpoint for stateful alerts, which writes the input message as an info log message
 	router.HandleFunc("/alerts-test", s.testSlackAlertsHandler).Methods("POST")
@@ -159,7 +175,7 @@ func (s *Server) Run(ctx context.Context) error {
 	errg, ctx := errgroup.WithContext(ctx)
 
 	errg.Go(func() error {
-		return s.channelInfoManager.Run(ctx)
+		return s.channelInfoSyncer.Run(ctx)
 	})
 
 	errg.Go(func() error {
@@ -182,64 +198,6 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-func (s *Server) mappings(resp http.ResponseWriter, req *http.Request) {
-	started := time.Now()
-
-	data, err := json.MarshalIndent(s.alertMapping, "", "  ")
-	if err != nil {
-		err = fmt.Errorf("failed to marshal alert mappings: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, nil, "", resp, req, started)
-		return
-	}
-
-	resp.Header().Add("Content-Type", "application/json")
-	resp.WriteHeader(http.StatusOK)
-
-	_, err = resp.Write(data)
-	if err != nil {
-		s.logger.Errorf("Failed to write mappings response: %s", err)
-	}
-
-	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusOK, time.Since(started))
-}
-
-func (s *Server) channels(resp http.ResponseWriter, req *http.Request) {
-	started := time.Now()
-
-	channels := s.channelInfoManager.ManagedChannels()
-
-	data, err := json.MarshalIndent(channels, "", "  ")
-	if err != nil {
-		err = fmt.Errorf("failed to marshal channel list: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, nil, "", resp, req, started)
-		return
-	}
-
-	resp.Header().Add("Content-Type", "application/json")
-	resp.WriteHeader(http.StatusOK)
-
-	_, err = resp.Write(data)
-	if err != nil {
-		s.logger.Errorf("Failed to write channel list response: %s", err)
-	}
-
-	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusOK, time.Since(started))
-}
-
-func (s *Server) ping(resp http.ResponseWriter, req *http.Request) {
-	started := time.Now()
-
-	resp.Header().Add("Content-Type", "text/plain")
-	resp.WriteHeader(http.StatusOK)
-
-	_, err := resp.Write([]byte("pong"))
-	if err != nil {
-		s.logger.Errorf("Failed to write ping response: %s", err)
-	}
-
-	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusOK, time.Since(started))
 }
 
 func (s *Server) writeErrorResponse(ctx context.Context, clientErr error, statusCode int, debugText map[string]string, targetChannel string, resp http.ResponseWriter, req *http.Request, started time.Time) {

@@ -11,7 +11,6 @@ type ThrottleConfig struct {
 }
 
 type ManagerConfig struct {
-	SkipAlertsConsumer    bool               `json:"skipAlertsConsumer"    yaml:"skipAlertsConsumer"`
 	ProcessInterval       time.Duration      `json:"processInterval"       yaml:"processInterval"`
 	DefaultArchivingDelay time.Duration      `json:"defaultArchivingDelay" yaml:"defaultArchivingDelay"`
 	WebhookTimeout        time.Duration      `json:"webhookTimeout"        yaml:"webhookTimeout"`
@@ -19,6 +18,7 @@ type ManagerConfig struct {
 	EncryptionKey         string             `json:"encryptionKey"         yaml:"encryptionKey"`
 	CachePrefix           string             `json:"cachePrefix"           yaml:"cachePrefix"`
 	IgnoreCacheReadErrors bool               `json:"ignoreCacheReadErrors" yaml:"ignoreCacheReadErrors"`
+	IgnoreSaveAlertErrors bool               `json:"ignoreSaveAlertErrors" yaml:"ignoreSaveAlertErrors"`
 	Location              *time.Location     `json:"location"              yaml:"location"`
 	SlackClient           *SlackClientConfig `json:"slackClient"           yaml:"slackClient"`
 	Throttle              *ThrottleConfig    `json:"throttle"              yaml:"throttle"`
@@ -27,13 +27,13 @@ type ManagerConfig struct {
 
 func NewDefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
-		SkipAlertsConsumer:    false,
 		ProcessInterval:       10 * time.Second,
 		DefaultArchivingDelay: 12 * time.Hour,
 		WebhookTimeout:        2 * time.Second,
 		ReorderIssueLimit:     30,
 		CachePrefix:           "slack-manager",
 		IgnoreCacheReadErrors: true,
+		IgnoreSaveAlertErrors: true,
 		Location:              time.UTC,
 		SlackClient:           NewDefaultSlackClientConfig(),
 		Throttle: &ThrottleConfig{
