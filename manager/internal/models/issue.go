@@ -539,12 +539,12 @@ func (issue *Issue) setArchivingTime() {
 func (issue *Issue) sanitizeSlackMentions(skipMuting bool) {
 	// Mentions are only allowed in the alert text
 	issue.LastAlert.Header = slackMentionRegex.ReplaceAllString(issue.LastAlert.Header, "*$1*")
-	issue.LastAlert.Header = slackMentionRegex.ReplaceAllString(issue.LastAlert.HeaderWhenResolved, "*$1*")
+	issue.LastAlert.HeaderWhenResolved = slackMentionRegex.ReplaceAllString(issue.LastAlert.HeaderWhenResolved, "*$1*")
 	issue.LastAlert.Author = slackMentionRegex.ReplaceAllString(issue.LastAlert.Author, "*$1*")
 	issue.LastAlert.Host = slackMentionRegex.ReplaceAllString(issue.LastAlert.Host, "*$1*")
 	issue.LastAlert.Footer = slackMentionRegex.ReplaceAllString(issue.LastAlert.Footer, "*$1*")
-	issue.LastAlert.Footer = slackMentionRegex.ReplaceAllString(issue.LastAlert.FallbackText, "*$1*")
-	issue.LastAlert.Text = slackMentionRegex.ReplaceAllString(issue.LastAlert.TextWhenResolved, "*$1*")
+	issue.LastAlert.FallbackText = slackMentionRegex.ReplaceAllString(issue.LastAlert.FallbackText, "*$1*")
+	issue.LastAlert.TextWhenResolved = slackMentionRegex.ReplaceAllString(issue.LastAlert.TextWhenResolved, "*$1*")
 
 	for _, f := range issue.LastAlert.Fields {
 		f.Title = slackMentionRegex.ReplaceAllString(f.Title, "*$1*")
