@@ -8,6 +8,6 @@ type RequestLogger interface {
 
 type NoopLogger struct{}
 
-func (l *NoopLogger) Errorf(format string, v ...interface{}) {}
-func (l *NoopLogger) Warnf(format string, v ...interface{})  {}
-func (l *NoopLogger) Debugf(format string, v ...interface{}) {}
+func (l *NoopLogger) Errorf(_ string, _ ...interface{}) {}
+func (l *NoopLogger) Warnf(_ string, _ ...interface{})  {}
+func (l *NoopLogger) Debugf(_ string, _ ...interface{}) {}
