@@ -3,12 +3,44 @@ package config
 import (
 	"context"
 	"fmt"
+	"time"
+
+	common "github.com/peteraglen/slack-manager-common"
 )
 
 type ChannelSettings struct {
-	GlobalAdmins  []string                `json:"globalAdmins"  yaml:"globalAdmins"`
+	// GlobalAdmins is a list of Slack user IDs that have global Slack Manager admin rights,
+	// including using emojis to handle issues, and invoking all alert webhooks.
+	// Not to be confused with the Slack workspace's global admins!
+	// This list should be kept as short as possible.
+	GlobalAdmins []string `json:"globalAdmins" yaml:"globalAdmins"`
+
+	// AlertChannels is an optional list of settings for individual alert channels.
+	// Each alert channel can potentially have its own list of admins, and some settings that affect how alerts are handled.
+	// If no settings are specified for a channel, the default settings are used.
 	AlertChannels []*AlertChannelSettings `json:"alertChannels" yaml:"alertChannels"`
-	InfoChannels  []*InfoChannelSettings  `json:"infoChannels"  yaml:"infoChannels"`
+
+	// InfoChannels is a list of channels defined as "info channels".
+	// These channels are used to display information about the Slack Manager system, but cannot be used to handle alerts.
+	InfoChannels []*InfoChannelSettings `json:"infoChannels" yaml:"infoChannels"`
+
+	// DefaultPostIconEmoji is the default emoji to use for Slack posts, on the format ":emoji:".
+	// This value is used for alerts where no icon emoji is specified.
+	// https://api.slack.com/methods/chat.postMessage#arg_icon_emoji
+	DefaultPostIconEmoji string `json:"defaultPostIconEmoji" yaml:"defaultPostIconEmoji"`
+
+	// DefaultPostUsername is the default username to use for Slack posts.
+	// This value is used for alerts where no username is specified.
+	// https://api.slack.com/methods/chat.postMessage#arg_username
+	DefaultPostUsername string `json:"defaultPostUsername" yaml:"defaultPostUsername"`
+
+	// DefaultAlertSeverity is the default severity to use for alerts.
+	// This value is used for alerts where no severity is specified.
+	DefaultAlertSeverity string `json:"defaultAlertSeverity" yaml:"defaultAlertSeverity"`
+
+	// DefaultIssueArchivingDelay is the default delay before an alert is archived.
+	// This value is used for alerts where no archiving delay is specified.
+	DefaultIssueArchivingDelay time.Duration `json:"defaultIssueArchivingDelay" yaml:"defaultIssueArchivingDelay"`
 
 	globalAdmins  map[string]struct{}
 	alertChannels map[string]*AlertChannelSettings
@@ -85,6 +117,28 @@ func (c *ChannelSettings) InitAndValidate() error {
 		}
 
 		c.infoChannels[a.ID] = a
+	}
+
+	if c.DefaultPostIconEmoji == "" {
+		c.DefaultPostIconEmoji = ":female-detective:"
+	} else if !common.IconRegex.MatchString(c.DefaultPostIconEmoji) {
+		return fmt.Errorf("default icon emoji must be on the format \":emoji:\"")
+	}
+
+	if c.DefaultPostUsername == "" {
+		c.DefaultPostUsername = "Slack Manager"
+	}
+
+	if c.DefaultAlertSeverity == "" {
+		c.DefaultAlertSeverity = string(common.AlertError)
+	} else if c.DefaultAlertSeverity != string(common.AlertPanic) && c.DefaultAlertSeverity != string(common.AlertError) && c.DefaultAlertSeverity != string(common.AlertWarning) {
+		return fmt.Errorf("default alert severity must be one of [%s, %s, %s]", common.AlertPanic, common.AlertError, common.AlertWarning)
+	}
+
+	if c.DefaultIssueArchivingDelay <= 0 {
+		c.DefaultIssueArchivingDelay = 12 * time.Hour
+	} else if c.DefaultIssueArchivingDelay < time.Minute || c.DefaultIssueArchivingDelay > 30*24*time.Hour {
+		return fmt.Errorf("default archiving delay must be between 1 minute and 30 days")
 	}
 
 	c.initialized = true
