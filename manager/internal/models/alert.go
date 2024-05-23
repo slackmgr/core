@@ -74,3 +74,15 @@ func (a *Alert) SetDefaultValues(defaultArchivingDelay time.Duration) {
 		}
 	}
 }
+
+func (a *Alert) LogFields() map[string]interface{} {
+	if a == nil {
+		return nil
+	}
+
+	return map[string]interface{}{
+		"slack_channel_id":   a.SlackChannelID,
+		"slack_channel_name": a.SlackChannelName,
+		"correlation_id":     a.CorrelationID,
+	}
+}

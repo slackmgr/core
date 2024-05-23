@@ -21,7 +21,12 @@ func processor(ctx context.Context, coordinator *coordinator, alertCh <-chan mod
 				return nil
 			}
 
-			coordinator.AddAlert(ctx, msg.(*models.Alert))
+			alert := msg.(*models.Alert)
+
+			if err := coordinator.AddAlert(ctx, alert); err != nil {
+				logger.WithFields(alert.LogFields()).Errorf("Failed to process alert %s: %s", alert.ID, err)
+				continue
+			}
 
 			if err := internal.TrySend(ctx, msg, extenderCh); err != nil {
 				return err
@@ -31,7 +36,12 @@ func processor(ctx context.Context, coordinator *coordinator, alertCh <-chan mod
 				return nil
 			}
 
-			coordinator.AddCommand(ctx, msg.(*models.Command))
+			cmd := msg.(*models.Command)
+
+			if err := coordinator.AddCommand(ctx, cmd); err != nil {
+				logger.WithFields(cmd.LogFields()).Errorf("Failed to process %s command: %s", cmd.Action, err)
+				continue
+			}
 
 			if err := internal.TrySend(ctx, msg, extenderCh); err != nil {
 				return err

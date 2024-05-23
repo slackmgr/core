@@ -18,7 +18,6 @@ type ManagerConfig struct {
 	EncryptionKey         string             `json:"encryptionKey"         yaml:"encryptionKey"`
 	CachePrefix           string             `json:"cachePrefix"           yaml:"cachePrefix"`
 	IgnoreCacheReadErrors bool               `json:"ignoreCacheReadErrors" yaml:"ignoreCacheReadErrors"`
-	IgnoreSaveAlertErrors bool               `json:"ignoreSaveAlertErrors" yaml:"ignoreSaveAlertErrors"`
 	Location              *time.Location     `json:"location"              yaml:"location"`
 	SlackClient           *SlackClientConfig `json:"slackClient"           yaml:"slackClient"`
 	Throttle              *ThrottleConfig    `json:"throttle"              yaml:"throttle"`
@@ -33,7 +32,6 @@ func NewDefaultManagerConfig() *ManagerConfig {
 		ReorderIssueLimit:     30,
 		CachePrefix:           "slack-manager",
 		IgnoreCacheReadErrors: true,
-		IgnoreSaveAlertErrors: true,
 		Location:              time.UTC,
 		SlackClient:           NewDefaultSlackClientConfig(),
 		Throttle: &ThrottleConfig{
