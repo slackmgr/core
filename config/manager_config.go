@@ -11,29 +11,31 @@ type ThrottleConfig struct {
 }
 
 type ManagerConfig struct {
-	ProcessInterval       time.Duration      `json:"processInterval"       yaml:"processInterval"`
-	DefaultArchivingDelay time.Duration      `json:"defaultArchivingDelay" yaml:"defaultArchivingDelay"`
-	WebhookTimeout        time.Duration      `json:"webhookTimeout"        yaml:"webhookTimeout"`
-	ReorderIssueLimit     int                `json:"reorderIssueLimit"     yaml:"reorderIssueLimit"`
-	EncryptionKey         string             `json:"encryptionKey"         yaml:"encryptionKey"`
-	CachePrefix           string             `json:"cachePrefix"           yaml:"cachePrefix"`
-	IgnoreCacheReadErrors bool               `json:"ignoreCacheReadErrors" yaml:"ignoreCacheReadErrors"`
-	Location              *time.Location     `json:"location"              yaml:"location"`
-	SlackClient           *SlackClientConfig `json:"slackClient"           yaml:"slackClient"`
-	Throttle              *ThrottleConfig    `json:"throttle"              yaml:"throttle"`
-	DocsURL               string             `json:"docsURL"               yaml:"docsURL"`
+	IssueProcessInterval            time.Duration      `json:"issueProcessInterval"            yaml:"issueProcessInterval"`
+	MessageExtensionProcessInterval time.Duration      `json:"messageExtensionProcessInterval" yaml:"messageExtensionProcessInterval"`
+	DefaultArchivingDelay           time.Duration      `json:"defaultArchivingDelay"           yaml:"defaultArchivingDelay"`
+	WebhookTimeout                  time.Duration      `json:"webhookTimeout"                  yaml:"webhookTimeout"`
+	ReorderIssueLimit               int                `json:"reorderIssueLimit"               yaml:"reorderIssueLimit"`
+	EncryptionKey                   string             `json:"encryptionKey"                   yaml:"encryptionKey"`
+	CachePrefix                     string             `json:"cachePrefix"                     yaml:"cachePrefix"`
+	IgnoreCacheReadErrors           bool               `json:"ignoreCacheReadErrors"           yaml:"ignoreCacheReadErrors"`
+	Location                        *time.Location     `json:"location"                        yaml:"location"`
+	SlackClient                     *SlackClientConfig `json:"slackClient"                     yaml:"slackClient"`
+	Throttle                        *ThrottleConfig    `json:"throttle"                        yaml:"throttle"`
+	DocsURL                         string             `json:"docsURL"                         yaml:"docsURL"`
 }
 
 func NewDefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
-		ProcessInterval:       10 * time.Second,
-		DefaultArchivingDelay: 12 * time.Hour,
-		WebhookTimeout:        2 * time.Second,
-		ReorderIssueLimit:     30,
-		CachePrefix:           "slack-manager",
-		IgnoreCacheReadErrors: true,
-		Location:              time.UTC,
-		SlackClient:           NewDefaultSlackClientConfig(),
+		IssueProcessInterval:            10 * time.Second,
+		MessageExtensionProcessInterval: 10 * time.Second,
+		DefaultArchivingDelay:           12 * time.Hour,
+		WebhookTimeout:                  2 * time.Second,
+		ReorderIssueLimit:               30,
+		CachePrefix:                     "slack-manager",
+		IgnoreCacheReadErrors:           true,
+		Location:                        time.UTC,
+		SlackClient:                     NewDefaultSlackClientConfig(),
 		Throttle: &ThrottleConfig{
 			MinIssueCountForThrottle: 5,
 			UpperLimit:               90 * time.Second,
@@ -42,8 +44,12 @@ func NewDefaultManagerConfig() *ManagerConfig {
 }
 
 func (c *ManagerConfig) Validate() error {
-	if c.ProcessInterval < 2*time.Second || c.ProcessInterval > time.Minute {
+	if c.IssueProcessInterval < 2*time.Second || c.IssueProcessInterval > time.Minute {
 		return fmt.Errorf("process interval must be between 2 seconds and 1 minute")
+	}
+
+	if c.MessageExtensionProcessInterval < 5*time.Second || c.MessageExtensionProcessInterval > time.Minute {
+		return fmt.Errorf("message extension process interval must be between 5 seconds and 1 minute")
 	}
 
 	if c.DefaultArchivingDelay < 1*time.Minute || c.DefaultArchivingDelay > 30*24*time.Hour {

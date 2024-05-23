@@ -225,7 +225,7 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusNoContent, time.Since(started))
 }
 
-func (s *Server) testSlackAlertsHandler(resp http.ResponseWriter, req *http.Request) {
+func (s *Server) handleAlertsTest(resp http.ResponseWriter, req *http.Request) {
 	started := time.Now()
 
 	if req.ContentLength <= 0 {

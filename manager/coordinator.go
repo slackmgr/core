@@ -16,9 +16,7 @@ import (
 )
 
 type coordinator struct {
-	channelManagers map[string]*channelManager
-	// channelManagersWaitGroup *errgroup.Group
-	// channelManagersWaitCtx   context.Context //nolint:containedctx
+	channelManagers          map[string]*channelManager
 	channelManagersWaitGroup *sync.WaitGroup
 	channelManagersLock      *sync.Mutex
 	db                       DB

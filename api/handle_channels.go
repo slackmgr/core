@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func (s *Server) channels(resp http.ResponseWriter, req *http.Request) {
+func (s *Server) handleChannels(resp http.ResponseWriter, req *http.Request) {
 	started := time.Now()
 
 	channels := s.channelInfoSyncer.ManagedChannels()

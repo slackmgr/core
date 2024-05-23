@@ -24,6 +24,7 @@ func processor(ctx context.Context, coordinator *coordinator, alertCh <-chan mod
 			alert := msg.(*models.Alert)
 
 			if err := coordinator.AddAlert(ctx, alert); err != nil {
+				msg.MarkAsFailed()
 				logger.WithFields(alert.LogFields()).Errorf("Failed to process alert %s: %s", alert.ID, err)
 				continue
 			}
@@ -39,6 +40,7 @@ func processor(ctx context.Context, coordinator *coordinator, alertCh <-chan mod
 			cmd := msg.(*models.Command)
 
 			if err := coordinator.AddCommand(ctx, cmd); err != nil {
+				msg.MarkAsFailed()
 				logger.WithFields(cmd.LogFields()).Errorf("Failed to process %s command: %s", cmd.Action, err)
 				continue
 			}
