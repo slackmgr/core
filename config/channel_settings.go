@@ -40,10 +40,6 @@ func (c *ChannelSettings) InitAndValidate() error {
 	c.alertChannels = make(map[string]*AlertChannelSettings)
 	c.infoChannels = make(map[string]*InfoChannelSettings)
 
-	if len(c.GlobalAdmins) == 0 {
-		return fmt.Errorf("there must be at least one global admin")
-	}
-
 	for i, userID := range c.GlobalAdmins {
 		if userID == "" {
 			return fmt.Errorf("globalAdmins[%d] cannot be empty", i)

@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func (s *Server) mappings(resp http.ResponseWriter, req *http.Request) {
+func (s *Server) handleMappings(resp http.ResponseWriter, req *http.Request) {
 	started := time.Now()
 
 	data, err := json.MarshalIndent(s.alertMapping, "", "  ")

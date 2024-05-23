@@ -15,10 +15,13 @@ type Message interface {
 	MessageID() string
 	SetAckFunc(f func(ctx context.Context) error)
 	IsAcked() bool
-	SetExtendFunc(f func(ctx context.Context) error)
+	IsFailed() bool
+	MarkAsFailed()
+	SetExtendVisibilityFunc(f func(ctx context.Context) error)
+	IsExtendable() bool
 	ExtendCount() int
-	NeedsExtension() bool
-	Extend(context.Context) error
+	NeedsExtensionNow() bool
+	ExtendVisibility(context.Context) error
 }
 
 type message struct {
@@ -27,14 +30,19 @@ type message struct {
 	receiveTimestamp  time.Time
 	visibilityTimeout time.Duration
 
-	// ack is used to ack the message and declare it as processed.
-	ack func(ctx context.Context) error
+	// ackFunc is used to acknowledge the message and declare it as processed.
+	// The ack function must be set for *all* messages.
+	ackFunc func(ctx context.Context) error
 
-	// extend is used to extend the visibility timeout of the message. This is to prevent the ack from failing due to the visibilty timeout expiring.
-	extend      func(ctx context.Context) error
-	extendCount int
+	// extendVisibilityFunc is used to extend the visibility timeout of the message. This is to prevent the ack from failing due to the visibilty timeout expiring.
+	// The extend function is optional, and is only set if the message can in fact be extended.
+	extendVisibilityFunc func(ctx context.Context) error
+	extendCount          int
 
-	// processingLock is used to prevent the ack and extend functions from being called at the same time.
+	// isFailed is used to indicate that the message has failed processing.
+	isFailed bool
+
+	// processingLock is used to prevent the Ack and Extend functions from being called at the same time.
 	processingLock *sync.Mutex
 }
 
@@ -53,58 +61,71 @@ func (m *message) MessageID() string {
 }
 
 func (m *message) SetAckFunc(f func(ctx context.Context) error) {
-	m.ack = f
+	m.ackFunc = f
 }
 
 func (m *message) Ack(ctx context.Context) error {
 	m.processingLock.Lock()
 	defer m.processingLock.Unlock()
 
-	// The ack func must be set for *all* messages, and it must only be called exactly once.
-	if m.ack == nil {
+	// The ack func must be set for *all* messages, and it can be called at most once.
+	if m.ackFunc == nil {
 		return fmt.Errorf("ack function has not been set, or has already been called")
 	}
 
-	if err := m.ack(ctx); err != nil {
+	if err := m.ackFunc(ctx); err != nil {
 		return err
 	}
 
 	// Clear the ack and extend functions to prevent them from being called again.
-	m.ack = nil
-	m.extend = nil
+	m.ackFunc = nil
+	m.extendVisibilityFunc = nil
 
 	return nil
 }
 
 func (m *message) IsAcked() bool {
-	return m.ack == nil
+	return m.ackFunc == nil
 }
 
-func (m *message) SetExtendFunc(f func(ctx context.Context) error) {
-	m.extend = f
+func (m *message) IsFailed() bool {
+	return m.isFailed
+}
+
+func (m *message) MarkAsFailed() {
+	m.isFailed = true
+}
+
+func (m *message) SetExtendVisibilityFunc(f func(ctx context.Context) error) {
+	m.extendVisibilityFunc = f
+}
+
+func (m *message) IsExtendable() bool {
+	return m.extendVisibilityFunc != nil
 }
 
 func (m *message) ExtendCount() int {
 	return m.extendCount
 }
 
-func (m *message) NeedsExtension() bool {
-	return m.extend != nil && time.Since(m.receiveTimestamp) > m.visibilityTimeout/2
+func (m *message) NeedsExtensionNow() bool {
+	return m.extendVisibilityFunc != nil && time.Since(m.receiveTimestamp) > m.visibilityTimeout/2
 }
 
-func (m *message) Extend(ctx context.Context) error {
+func (m *message) ExtendVisibility(ctx context.Context) error {
 	m.processingLock.Lock()
 	defer m.processingLock.Unlock()
 
-	// Check that the extend function is still set. If it is not, it means that the alert has already been acked (or that we have given up).
-	if m.extend == nil {
+	// Check that the extend function is still set after we acquired the lock.
+	// If it is not, it means that the alert has already been acked (or that we have given up).
+	if m.extendVisibilityFunc == nil {
 		return nil
 	}
 
 	// Reset the receive timestamp to prevent the message from being extended again too soon.
 	m.receiveTimestamp = time.Now()
 
-	if err := m.extend(ctx); err != nil {
+	if err := m.extendVisibilityFunc(ctx); err != nil {
 		return err
 	}
 

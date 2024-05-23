@@ -30,7 +30,7 @@ type channelManager struct {
 	cfg             *config.ManagerConfig
 	alertCh         chan *models.Alert
 	commandCh       chan *models.Command
-	addIssueCh      chan *models.Issue
+	movedIssueCh    chan *models.Issue
 	moveRequestCh   chan<- *models.MoveRequest
 	cmdFuncs        map[models.CommandAction]cmdFunc
 	initialized     bool
@@ -52,7 +52,7 @@ func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveR
 		cfg:           cfg,
 		alertCh:       make(chan *models.Alert, 1000),
 		commandCh:     make(chan *models.Command, 100),
-		addIssueCh:    make(chan *models.Issue, 10),
+		movedIssueCh:  make(chan *models.Issue, 10),
 	}
 
 	c.cmdFuncs = map[models.CommandAction]cmdFunc{
@@ -126,6 +126,7 @@ func (c *channelManager) Run(ctx context.Context, waitGroup *sync.WaitGroup) {
 			}
 
 			if err := c.processAlert(ctx, alert); err != nil {
+				alert.MarkAsFailed()
 				c.logger.WithFields(alert.LogFields()).Errorf("Failed to process alert: %s", err)
 			}
 		case cmd, ok := <-c.commandCh:
@@ -134,21 +135,23 @@ func (c *channelManager) Run(ctx context.Context, waitGroup *sync.WaitGroup) {
 			}
 
 			if err := c.processCmd(ctx, cmd); err != nil {
+				cmd.MarkAsFailed()
 				c.logger.WithFields(cmd.LogFields()).Errorf("Failed to process command: %s", err)
 			}
-		case issue, ok := <-c.addIssueCh:
+		case issue, ok := <-c.movedIssueCh:
 			if !ok {
 				return
 			}
 
-			if err := c.processIncomingIssue(ctx, issue); err != nil {
-				c.logger.WithFields(issue.LogFields()).Errorf("Failed to process incoming issue: %s", err)
+			if err := c.processIncomingMovedIssue(ctx, issue); err != nil {
+				c.logger.WithFields(issue.LogFields()).Errorf("Failed to process incoming moved issue: %s", err)
 			}
 		case <-processorTimeout:
 			if err := c.processActiveIssues(ctx); err != nil {
 				c.logger.Errorf("Failed to process active issues: %s", err)
 			}
-			processorTimeout = time.After(c.cfg.ProcessInterval)
+
+			processorTimeout = time.After(c.cfg.IssueProcessInterval)
 		}
 	}
 }
@@ -171,7 +174,7 @@ func (c *channelManager) QueueCommand(ctx context.Context, cmd *models.Command) 
 
 // QueueMovedIssue adds a moved issue to the issue queue channel.
 func (c *channelManager) QueueMovedIssue(ctx context.Context, issue *models.Issue) error {
-	if err := internal.TrySend(ctx, issue, c.addIssueCh); err != nil {
+	if err := internal.TrySend(ctx, issue, c.movedIssueCh); err != nil {
 		return fmt.Errorf("failed to queue moved issue: %w", err)
 	}
 	return nil
@@ -319,7 +322,7 @@ func ackCommand(ctx context.Context, cmd *models.Command, logger common.Logger) 
 }
 
 // processAlert handles an incoming issue, i.e. an issue moved from another channel.
-func (c *channelManager) processIncomingIssue(ctx context.Context, issue *models.Issue) error {
+func (c *channelManager) processIncomingMovedIssue(ctx context.Context, issue *models.Issue) error {
 	logger := c.logger.WithFields(issue.LogFields())
 
 	body, err := json.Marshal(issue)

@@ -30,6 +30,11 @@ func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.Me
 			logger = logger.WithField("message_id", item.MessageID).WithField("group_id", item.GroupID)
 			logger.Debug("Message received")
 
+			if item.Ack == nil {
+				logger.Error("Message ack function is nil")
+				continue
+			}
+
 			message, err := unmarshalFunc(item)
 			if err != nil {
 				logger.Errorf("Failed to unmarshal message: %s", err)
@@ -37,7 +42,7 @@ func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.Me
 			}
 
 			message.SetAckFunc(item.Ack)
-			message.SetExtendFunc(item.Extend)
+			message.SetExtendVisibilityFunc(item.ExtendVisibility)
 
 			if err := internal.TrySend(ctx, message, sinkCh); err != nil {
 				return err

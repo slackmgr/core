@@ -135,7 +135,7 @@ func (m *Manager) Run(ctx context.Context) error {
 	})
 
 	errg.Go(func() error {
-		return messageExtender(ctx, extenderCh, m.logger)
+		return messageExtender(ctx, extenderCh, m.logger, m.cfg)
 	})
 
 	errg.Go(func() error {

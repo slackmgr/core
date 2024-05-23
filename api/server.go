@@ -128,14 +128,14 @@ func (s *Server) Run(ctx context.Context) error {
 	router.HandleFunc("/prometheus-alert/{slackChannelId}", s.handlePrometheusWebhook).Methods("POST")
 
 	// Test endpoint for stateful alerts, which writes the input message as an info log message
-	router.HandleFunc("/alerts-test", s.testSlackAlertsHandler).Methods("POST")
-	router.HandleFunc("/alerts-test/{slackChannelId}", s.testSlackAlertsHandler).Methods("POST")
+	router.HandleFunc("/alerts-test", s.handleAlertsTest).Methods("POST")
+	router.HandleFunc("/alerts-test/{slackChannelId}", s.handleAlertsTest).Methods("POST")
 
 	// Route mappings
-	router.HandleFunc("/mappings", s.mappings).Methods("GET")
+	router.HandleFunc("/mappings", s.handleMappings).Methods("GET")
 
 	// List channels managed by Slack Manager
-	router.HandleFunc("/channels", s.channels).Methods("GET")
+	router.HandleFunc("/channels", s.handleChannels).Methods("GET")
 
 	// Ping
 	router.HandleFunc("/ping", s.ping).Methods("GET")
