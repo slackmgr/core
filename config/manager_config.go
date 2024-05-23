@@ -13,7 +13,6 @@ type ThrottleConfig struct {
 type ManagerConfig struct {
 	IssueProcessInterval            time.Duration      `json:"issueProcessInterval"            yaml:"issueProcessInterval"`
 	MessageExtensionProcessInterval time.Duration      `json:"messageExtensionProcessInterval" yaml:"messageExtensionProcessInterval"`
-	DefaultArchivingDelay           time.Duration      `json:"defaultArchivingDelay"           yaml:"defaultArchivingDelay"`
 	WebhookTimeout                  time.Duration      `json:"webhookTimeout"                  yaml:"webhookTimeout"`
 	ReorderIssueLimit               int                `json:"reorderIssueLimit"               yaml:"reorderIssueLimit"`
 	EncryptionKey                   string             `json:"encryptionKey"                   yaml:"encryptionKey"`
@@ -29,7 +28,6 @@ func NewDefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
 		IssueProcessInterval:            10 * time.Second,
 		MessageExtensionProcessInterval: 10 * time.Second,
-		DefaultArchivingDelay:           12 * time.Hour,
 		WebhookTimeout:                  2 * time.Second,
 		ReorderIssueLimit:               30,
 		CachePrefix:                     "slack-manager",
@@ -50,10 +48,6 @@ func (c *ManagerConfig) Validate() error {
 
 	if c.MessageExtensionProcessInterval < 5*time.Second || c.MessageExtensionProcessInterval > time.Minute {
 		return fmt.Errorf("message extension process interval must be between 5 seconds and 1 minute")
-	}
-
-	if c.DefaultArchivingDelay < 1*time.Minute || c.DefaultArchivingDelay > 30*24*time.Hour {
-		return fmt.Errorf("default archiving delay must be between 1 minute and 30 days")
 	}
 
 	if c.WebhookTimeout < 1*time.Second || c.WebhookTimeout > 30*time.Second {

@@ -12,13 +12,13 @@ import (
 //go:embed not_admin_view_assets/*
 var notAdminAssets embed.FS
 
-func NotAdminView(user string, conf *config.ManagerConfig) ([]slack.Block, error) {
+func NotAdminView(user string, cfg *config.ManagerConfig) ([]slack.Block, error) {
 	type args struct {
 		User    string
 		DocsURL string
 	}
 
-	tpl, err := renderTemplate(notAdminAssets, "not_admin_view_assets/not_admin.json", args{User: user, DocsURL: conf.DocsURL})
+	tpl, err := renderTemplate(notAdminAssets, "not_admin_view_assets/not_admin.json", args{User: user, DocsURL: cfg.DocsURL})
 	if err != nil {
 		return nil, err
 	}

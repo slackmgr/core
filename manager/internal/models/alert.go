@@ -1,13 +1,12 @@
 package models
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	commonlib "github.com/peteraglen/slack-manager-common"
+	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
 )
 
@@ -40,32 +39,29 @@ func NewAlert(queueItem *commonlib.FifoQueueItem) (Message, error) {
 	}, nil
 }
 
-func (a *Alert) SetDefaultValues(defaultArchivingDelay time.Duration) {
+func (a *Alert) SetDefaultValues(settings *config.ChannelSettings) {
 	if a == nil {
 		return
 	}
 
 	if a.CorrelationID == "" {
-		h := sha256.New()
-		h.Write([]byte(a.Header + a.Author + a.Host + a.Text + a.SlackChannelID))
-		bs := h.Sum(nil)
-		a.CorrelationID = base64.URLEncoding.EncodeToString(bs)
+		a.CorrelationID = internal.Hash(a.Header, a.Author, a.Host, a.Text, a.SlackChannelID)
 	}
 
 	if a.Severity == "" {
-		a.Severity = "error"
+		a.Severity = commonlib.AlertSeverity(settings.DefaultAlertSeverity)
 	}
 
 	if a.Username == "" {
-		a.Username = "Slack Manager"
+		a.Username = settings.DefaultPostUsername
 	}
 
 	if a.IconEmoji == "" {
-		a.IconEmoji = ":female-detective:"
+		a.IconEmoji = settings.DefaultPostIconEmoji
 	}
 
 	if a.ArchivingDelaySeconds <= 0 {
-		a.ArchivingDelaySeconds = int(defaultArchivingDelay.Seconds())
+		a.ArchivingDelaySeconds = int(settings.DefaultIssueArchivingDelay.Seconds())
 	}
 
 	for _, w := range a.Webhooks {

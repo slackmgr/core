@@ -28,6 +28,7 @@ type channelManager struct {
 	logger          common.Logger
 	metrics         common.Metrics
 	cfg             *config.ManagerConfig
+	channelSettings *models.ChannelSettingsWrapper
 	alertCh         chan *models.Alert
 	commandCh       chan *models.Command
 	movedIssueCh    chan *models.Issue
@@ -36,23 +37,24 @@ type channelManager struct {
 	initialized     bool
 }
 
-func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveRequestCh chan<- *models.MoveRequest, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig) *channelManager {
+func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveRequestCh chan<- *models.MoveRequest, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, channelSettings *models.ChannelSettingsWrapper) *channelManager {
 	restyLogger := newRestyLogger(logger)
 	webhookClient := resty.New().SetRetryCount(2).SetRetryWaitTime(time.Second).AddRetryCondition(webhookRetryPolicy).SetLogger(restyLogger).SetTimeout(cfg.WebhookTimeout)
 	logger = logger.WithField("slack_channel_id", channelID)
 
 	c := &channelManager{
-		channelID:     channelID,
-		slackClient:   slackClient,
-		db:            db,
-		webhookClient: webhookClient,
-		moveRequestCh: moveRequestCh,
-		logger:        logger,
-		metrics:       metrics,
-		cfg:           cfg,
-		alertCh:       make(chan *models.Alert, 1000),
-		commandCh:     make(chan *models.Command, 100),
-		movedIssueCh:  make(chan *models.Issue, 10),
+		channelID:       channelID,
+		slackClient:     slackClient,
+		db:              db,
+		webhookClient:   webhookClient,
+		moveRequestCh:   moveRequestCh,
+		logger:          logger,
+		metrics:         metrics,
+		cfg:             cfg,
+		channelSettings: channelSettings,
+		alertCh:         make(chan *models.Alert, 1000),
+		commandCh:       make(chan *models.Command, 100),
+		movedIssueCh:    make(chan *models.Issue, 10),
 	}
 
 	c.cmdFuncs = map[models.CommandAction]cmdFunc{
@@ -221,7 +223,7 @@ func (c *channelManager) FindIssueBySlackPost(ctx context.Context, slackPostID s
 func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) error {
 	c.metrics.AddToCounter(alertsTotal, float64(1), c.channelID)
 
-	alert.SetDefaultValues(c.cfg.DefaultArchivingDelay)
+	alert.SetDefaultValues(c.channelSettings.Settings)
 	alert.SlackChannelName = c.slackClient.GetChannelName(ctx, c.channelID)
 
 	if err := alert.Alert.Validate(); err != nil {

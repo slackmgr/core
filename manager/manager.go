@@ -108,7 +108,7 @@ func (m *Manager) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to connect Slack client: %w", err)
 	}
 
-	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.logger, m.metrics, m.cfg)
+	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.logger, m.metrics, m.cfg, m.channelSettings)
 
 	if err := m.coordinator.init(ctx); err != nil {
 		return fmt.Errorf("failed to initialize coordinator: %w", err)
