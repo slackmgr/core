@@ -16,6 +16,7 @@ type greetingViewArgs struct {
 	User             string
 	IsChannelAdmin   bool
 	DocsURL          string
+	DocsURLExists    bool
 	AppFriendlyName  string
 	TerminateEmoji   string
 	ResolveEmoji     string
@@ -28,6 +29,7 @@ func GreetingView(user string, isChannelAdmin bool, settings *config.ManagerSett
 		User:             user,
 		IsChannelAdmin:   isChannelAdmin,
 		DocsURL:          settings.DocsURL,
+		DocsURLExists:    settings.DocsURL != "",
 		AppFriendlyName:  settings.AppFriendlyName,
 		TerminateEmoji:   settings.IssueReactions.TerminateEmojis[0],
 		ResolveEmoji:     settings.IssueReactions.ResolveEmojis[0],
