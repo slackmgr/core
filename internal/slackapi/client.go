@@ -45,10 +45,14 @@ func New(cacheStore cachestore.StoreInterface, cachePrefix string, logger common
 
 	cache := internal.NewCache(cache.New[string](cacheStore), logger)
 
+	if cachePrefix == "" {
+		cachePrefix = "slack-manager"
+	}
+
 	return &Client{
 		logger:      logger,
 		cache:       cache,
-		cachePrefix: cachePrefix,
+		cachePrefix: fmt.Sprintf("%s::slackapi::", cachePrefix),
 		metrics:     metrics,
 		cfg:         cfg,
 	}
@@ -73,10 +77,6 @@ func (c *Client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
 
 	if c.cfg.BotToken == "" {
 		return nil, fmt.Errorf("client bot token cannot be nil")
-	}
-
-	if c.cachePrefix == "" {
-		c.cachePrefix = "slack-manager"
 	}
 
 	c.metrics.RegisterCounter(slackRequestMetric, "Total number of Slack client requests", "slack_action")
@@ -302,7 +302,7 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("%s-channelInfo-%s", c.cachePrefix, channelID)
+	cacheKey := fmt.Sprintf("%s::GetChannelInfo::%s", c.cachePrefix, channelID)
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackhitMetric, 1, action)
@@ -345,72 +345,10 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 	if err != nil {
 		c.logger.WithField("slack_channel_id", channelID).Errorf("failed to json marshal channel value: %w", err)
 	} else {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 2*time.Minute, time.Minute)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 10*time.Second, 10*time.Second)
 	}
 
 	return channel, nil
-}
-
-func (c *Client) ListAllChannels(ctx context.Context) ([]*internal.ChannelSummary, error) {
-	action := "conversations.list"
-
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
-
-	cacheKey := fmt.Sprintf("%s-listAllChannels", c.cachePrefix)
-
-	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.AddToCounter(slackhitMetric, 1, action)
-
-		channels := []*internal.ChannelSummary{}
-
-		if err := json.Unmarshal([]byte(val), &channels); err != nil {
-			c.logger.Errorf("failed to json unmarshal channel list: %s", err)
-		} else {
-			return channels, nil
-		}
-	}
-
-	params := &slack.GetConversationsParameters{
-		ExcludeArchived: true,
-		Limit:           999,
-		Types:           []string{"public_channel", "private_channel"},
-	}
-
-	f := func(ctx context.Context) ([]slack.Channel, string, error) {
-		return c.api.GetConversationsContext(ctx, params)
-	}
-
-	channels := []*internal.ChannelSummary{}
-
-	for {
-		chs, nextCursor, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, ch := range chs {
-			channels = append(channels, internal.NewChannelSummary(ch))
-		}
-
-		if nextCursor == "" {
-			break
-		}
-
-		params.Cursor = nextCursor
-	}
-
-	slices.SortFunc(channels, func(a, b *internal.ChannelSummary) int {
-		return strings.Compare(a.Name, b.Name)
-	})
-
-	resultJSON, err := json.Marshal(channels)
-	if err != nil {
-		c.logger.Errorf("failed to json marshal channel list: %w", err)
-	} else {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 2*time.Minute, time.Minute)
-	}
-
-	return channels, nil
 }
 
 func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummary, error) {
@@ -418,7 +356,7 @@ func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummar
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("%s-listBotChannel", c.cachePrefix)
+	cacheKey := fmt.Sprintf("%s::ListBotChannels", c.cachePrefix)
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackhitMetric, 1, action)
@@ -469,7 +407,7 @@ func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummar
 	if err != nil {
 		c.logger.Errorf("failed to json marshal bot channel list: %w", err)
 	} else {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 2*time.Minute, time.Minute)
+		c.cache.Set(ctx, cacheKey, string(resultJSON), time.Minute)
 	}
 
 	return channels, nil
@@ -484,7 +422,7 @@ func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("%s-userInfo-%s", c.cachePrefix, userID)
+	cacheKey := fmt.Sprintf("%s::GetUserInfo::%s", c.cachePrefix, userID)
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackhitMetric, 1, action)
@@ -512,7 +450,7 @@ func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 	if err != nil {
 		c.logger.Errorf("failed to json marshal userInfo value: %s", err)
 	} else {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 10*time.Hour, 5*time.Hour)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), time.Hour, time.Hour)
 	}
 
 	return user, nil
@@ -527,7 +465,7 @@ func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("%s-userGroupMembers-%s", c.cachePrefix, groupID)
+	cacheKey := fmt.Sprintf("%s::ListUserGroupMembers::%s", c.cachePrefix, groupID)
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackhitMetric, 1, action)
@@ -564,78 +502,7 @@ func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 	if err != nil {
 		c.logger.Errorf("failed to json marshal user IDs: %s", err)
 	} else {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 3*time.Minute, 2*time.Minute)
-	}
-
-	return result, nil
-}
-
-func (c *Client) GetUserByEmail(ctx context.Context, email string) (*slack.User, error) {
-	if email == "" {
-		return nil, errors.New("email cannot be empty")
-	}
-
-	action := "users.lookupByEmail"
-
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
-
-	cacheKey := fmt.Sprintf("%s-userByEmail-%s", c.cachePrefix, email)
-
-	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.AddToCounter(slackhitMetric, 1, action)
-
-		user := slack.User{}
-
-		if err := json.Unmarshal([]byte(val), &user); err != nil {
-			c.logger.Errorf("failed to json unmarshal userInfo value: %s", err)
-		} else {
-			return &user, nil
-		}
-	}
-
-	f := func(ctx context.Context) (*slack.User, any, error) {
-		val, err := c.api.GetUserByEmailContext(ctx, email)
-		return val, nil, err
-	}
-
-	user, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, "users.lookupByEmail", f, "users_not_found")
-	if err != nil {
-		if err.Error() == "users_not_found" {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to lookup user by email %s: %w", email, err)
-	}
-
-	resultJSON, err := json.Marshal(user)
-	if err != nil {
-		c.logger.Errorf("failed to json marshal userInfo value: %s", err)
-	} else {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 10*time.Hour, 5*time.Hour)
-	}
-
-	return user, nil
-}
-
-func (c *Client) ListAllUsers(ctx context.Context) (map[string]*slack.User, error) {
-	action := "users.list"
-
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
-
-	result := make(map[string]*slack.User)
-
-	f := func(ctx context.Context) ([]slack.User, any, error) {
-		val, err := c.api.GetUsersContext(ctx)
-		return val, nil, err
-	}
-
-	users, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read Slack user list: %w", err)
-	}
-
-	for _, _user := range users {
-		user := _user
-		result[user.ID] = &user
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), time.Minute, 30*time.Second)
 	}
 
 	return result, nil
@@ -650,7 +517,7 @@ func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("%s-userIdsInChannel-%s", c.cachePrefix, channelID)
+	cacheKey := fmt.Sprintf("%s::GetUserIDsInChannel::%s", c.cachePrefix, channelID)
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackhitMetric, 1, action)
@@ -701,7 +568,7 @@ func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 	if err != nil {
 		c.logger.WithField("slack_channel_id", channelID).Errorf("failed to json marshal userIdsInChannel result: %s", err)
 	} else {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), time.Minute, time.Minute)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), time.Minute, 30*time.Second)
 	}
 
 	return result, nil
@@ -712,7 +579,7 @@ func (c *Client) BotIsInChannel(ctx context.Context, channelID string) (bool, er
 		return false, errors.New("channelID cannot be empty")
 	}
 
-	cacheKey := fmt.Sprintf("%s-botIsInChannel-%s", c.cachePrefix, channelID)
+	cacheKey := fmt.Sprintf("%s::BotIsInChannel::%s", c.cachePrefix, channelID)
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		return val == "true", nil
@@ -726,38 +593,12 @@ func (c *Client) BotIsInChannel(ctx context.Context, channelID string) (bool, er
 	_, found := userIDs[c.botUserID]
 
 	if found {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, "true", time.Hour, 30*time.Minute)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, "true", 5*time.Minute, time.Minute)
 	} else {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, "false", time.Minute, time.Minute)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, "false", 30*time.Second, 15*time.Second)
 	}
 
 	return found, nil
-}
-
-func (c *Client) AddUserToChannel(ctx context.Context, user *slack.User, channelID string) error {
-	if user == nil {
-		return fmt.Errorf("user cannot be nil")
-	}
-
-	action := "conversations.invite"
-
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
-
-	if user.IsAppUser || user.IsBot {
-		return fmt.Errorf("cannot add app/bot user %s to channel %s", user.Name, channelID)
-	}
-
-	f := func(ctx context.Context) (any, any, error) {
-		_, err := c.api.InviteUsersToConversationContext(ctx, channelID, user.ID)
-		return nil, nil, err
-	}
-
-	_, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f)
-	if err != nil {
-		return fmt.Errorf("failed to add user %s (%s) to channel %s: %w", user.RealName, user.Profile.Email, channelID, err)
-	}
-
-	return nil
 }
 
 func callAPI[V any, W any](ctx context.Context, logger commonlib.Logger, metrics commonlib.Metrics, cfg *config.SlackClientConfig, action string, f func(ctx context.Context) (V, W, error), expectedErrors ...string) (V, W, error) {
