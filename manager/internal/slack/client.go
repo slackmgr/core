@@ -625,31 +625,31 @@ func getWebhookButtons(issue *models.Issue) []slack.BlockElement {
 func (c *Client) getStatusEmoji(issue *models.Issue, action models.SlackAction, method Method) string {
 	if action == models.ActionResolve {
 		if issue.IsResolvedAsInconclusive() {
-			return ":monitor_unresolved:"
+			return c.managerSettings.Settings.IssueStatus.InconclusiveEmoji
 		}
-		return ":monitor_ok:"
+		return c.managerSettings.Settings.IssueStatus.ResolvedEmoji
 	}
 
 	switch issue.LastAlert.Severity {
 	case common.AlertPanic:
 		if issue.IsEmojiMuted || method == UPDATE_DELETED {
-			return ":monitor_mute_panic:"
+			return c.managerSettings.Settings.IssueStatus.MutePanicEmoji
 		}
-		return ":monitor_panic:"
+		return c.managerSettings.Settings.IssueStatus.PanicEmoji
 	case common.AlertError:
 		if issue.IsEmojiMuted || method == UPDATE_DELETED {
-			return ":monitor_mute_error:"
+			return c.managerSettings.Settings.IssueStatus.MuteErrorEmoji
 		}
-		return ":monitor_error:"
+		return c.managerSettings.Settings.IssueStatus.ErrorEmoji
 	case common.AlertWarning:
 		if issue.IsEmojiMuted || method == UPDATE_DELETED {
-			return ":monitor_mute_warning:"
+			return c.managerSettings.Settings.IssueStatus.MuteWarningEmoji
 		}
-		return ":monitor_warning:"
+		return c.managerSettings.Settings.IssueStatus.WarningEmoji
 	case common.AlertResolved:
-		return ":monitor_ok:"
+		return c.managerSettings.Settings.IssueStatus.ResolvedEmoji
 	case common.AlertInfo:
-		return ":monitor_info:"
+		return c.managerSettings.Settings.IssueStatus.InfoEmoji
 	default:
 		c.logger.WithFields(issue.LogFields()).Errorf("Unknown alert severity %s", issue.LastAlert.Severity)
 		return ""
