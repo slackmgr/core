@@ -28,7 +28,6 @@ type channelInfo struct {
 	ChannelExists      bool
 	ChannelIsArchived  bool
 	ManagerIsInChannel bool
-	UserIDs            map[string]struct{}
 	UserCount          int
 }
 
@@ -184,7 +183,6 @@ func (c *channelInfoSyncer) refreshChannelInfo(ctx context.Context, channel stri
 			ChannelExists:      true,
 			ChannelIsArchived:  slackChannel.IsArchived,
 			ManagerIsInChannel: managerIsInChannel,
-			UserIDs:            users,
 			UserCount:          len(users),
 		}
 	} else {

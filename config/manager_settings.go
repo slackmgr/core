@@ -148,25 +148,25 @@ type IssueReactionSettings struct {
 // IssueStatusSettings contains the settings for Slack post status emojis.
 type IssueStatusSettings struct {
 	// PanicEmoji is the emoji used to indicate a panic status.
-	PanicEmoji string `json:"panicEmoji"        yaml:"panicEmoji"`
+	PanicEmoji string `json:"panicEmoji" yaml:"panicEmoji"`
 
 	// ErrorEmoji is the emoji used to indicate an error status.
-	ErrorEmoji string `json:"errorEmoji"        yaml:"errorEmoji"`
+	ErrorEmoji string `json:"errorEmoji" yaml:"errorEmoji"`
 
 	// WarningEmoji is the emoji used to indicate a warning status.
-	WarningEmoji string `json:"warningEmoji"      yaml:"warningEmoji"`
+	WarningEmoji string `json:"warningEmoji" yaml:"warningEmoji"`
 
 	// InfoEmoji is the emoji used to indicate an info status.
-	InfoEmoji string `json:"infoEmoji"         yaml:"infoEmoji"`
+	InfoEmoji string `json:"infoEmoji" yaml:"infoEmoji"`
 
 	// MutePanicEmoji is the emoji used to indicate a muted panic status.
-	MutePanicEmoji string `json:"mutePanicEmoji"    yaml:"mutePanicEmoji"`
+	MutePanicEmoji string `json:"mutePanicEmoji" yaml:"mutePanicEmoji"`
 
 	// MuteErrorEmoji is the emoji used to indicate a muted error status.
-	MuteErrorEmoji string `json:"muteErrorEmoji"    yaml:"muteErrorEmoji"`
+	MuteErrorEmoji string `json:"muteErrorEmoji" yaml:"muteErrorEmoji"`
 
 	// MuteWarningEmoji is the emoji used to indicate a muted warning status.
-	MuteWarningEmoji string `json:"muteWarningEmoji"  yaml:"muteWarningEmoji"`
+	MuteWarningEmoji string `json:"muteWarningEmoji" yaml:"muteWarningEmoji"`
 
 	// InconclusiveEmoji is the emoji used to indicate an inconclusive status, i.e. an issue that
 	// has been resolved as inconclusive.
