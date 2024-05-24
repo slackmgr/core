@@ -11,7 +11,7 @@
       "type": "section",
       "text": {
         "type": "mrkdwn",
-        "text": "You need to be {{ .AppFriendlyName }} channel admin in order to use emojis for issue management. See {{ .DocsURL }} for more details."
+        "text": "You need to be {{ .AppFriendlyName }} channel admin in order to use emojis for issue management.{{ if .DocsURLExists }} See {{ .DocsURL }} for more details.{{ end }}"
       }
     }
   ]

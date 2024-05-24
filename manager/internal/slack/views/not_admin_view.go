@@ -15,6 +15,7 @@ var notAdminAssets embed.FS
 type notAdminViewArgs struct {
 	User            string
 	DocsURL         string
+	DocsURLExists   bool
 	AppFriendlyName string
 }
 
@@ -22,6 +23,7 @@ func NotAdminView(user string, settings *config.ManagerSettings) ([]slack.Block,
 	templateArgs := notAdminViewArgs{
 		User:            user,
 		DocsURL:         settings.DocsURL,
+		DocsURLExists:   settings.DocsURL != "",
 		AppFriendlyName: settings.AppFriendlyName,
 	}
 
