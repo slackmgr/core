@@ -22,13 +22,22 @@ const (
 	DefaultIssueProcessingIntervalSeconds = 10
 	MinIssueProcessingIntervalSeconds     = 3
 	MaxIssueProcessingIntervalSeconds     = 600
-	DefaultIssueTerminateEmoji            = "firecracker"
-	DefaultIssueResolveEmoji              = "white_check_mark"
-	DefaultIssueInvestigateEmoji          = "eyes"
-	DefaultIssueMuteEmoji                 = "mask"
+	DefaultIssueTerminateEmoji            = ":firecracker:"
+	DefaultIssueResolveEmoji              = ":white_check_mark:"
+	DefaultIssueInvestigateEmoji          = ":eyes:"
+	DefaultIssueMuteEmoji                 = ":mask:"
 	DefaultMinIssueCountForThrottle       = 5
 	DefaultMaxThrottleDurationSeconds     = 90 // 1.5 minutes
 	DefaultAppFriendlyName                = "Slack Manager"
+	DefaultPanicEmoji                     = ":scream:"
+	DefaultErrorEmoji                     = ":x:"
+	DefaultWarningEmoji                   = ":warning:"
+	DefaultInfoEmoji                      = ":information_source:"
+	DefaultMutePanicEmoji                 = ":no_bell:"
+	DefaultMuteErrorEmoji                 = ":no_bell:"
+	DefaultMuteWarningEmoji               = ":no_bell:"
+	DefaultInconclusiveEmoji              = ":grey_question:"
+	DefaultResolvedEmoji                  = ":white_check_mark:"
 )
 
 var allowedDefaultAlertSeverities = map[common.AlertSeverity]struct{}{
@@ -90,6 +99,10 @@ type ManagerSettings struct {
 	// These settings define which specific emojis are used to handle issues.
 	IssueReactions *IssueReactionSettings `json:"issueReactions" yaml:"issueReactions"`
 
+	// IssueStatus contains the settings for Slack post status emojis.
+	// These settings define which specific emojis are used to indicate the status of an individual issue.
+	IssueStatus *IssueStatusSettings `json:"issueStatus" yaml:"issueStatus"`
+
 	// MinIssueCountForThrottle is the minimum number of open issues that must be present in a channel, before throttling is considered.
 	// Throttling is a mechanism to prevent too many Slack post updates, in a short period of time.
 	MinIssueCountForThrottle int `json:"minIssueCountForThrottle" yaml:"minIssueCountForThrottle"`
@@ -130,6 +143,37 @@ type IssueReactionSettings struct {
 
 	// MuteEmojis is a list of emojis used to indicate that an issue should be muted.
 	MuteEmojis []string `json:"muteEmojis" yaml:"muteEmojis"`
+}
+
+// IssueStatusSettings contains the settings for Slack post status emojis.
+type IssueStatusSettings struct {
+	// PanicEmoji is the emoji used to indicate a panic status.
+	PanicEmoji string `json:"panicEmoji"        yaml:"panicEmoji"`
+
+	// ErrorEmoji is the emoji used to indicate an error status.
+	ErrorEmoji string `json:"errorEmoji"        yaml:"errorEmoji"`
+
+	// WarningEmoji is the emoji used to indicate a warning status.
+	WarningEmoji string `json:"warningEmoji"      yaml:"warningEmoji"`
+
+	// InfoEmoji is the emoji used to indicate an info status.
+	InfoEmoji string `json:"infoEmoji"         yaml:"infoEmoji"`
+
+	// MutePanicEmoji is the emoji used to indicate a muted panic status.
+	MutePanicEmoji string `json:"mutePanicEmoji"    yaml:"mutePanicEmoji"`
+
+	// MuteErrorEmoji is the emoji used to indicate a muted error status.
+	MuteErrorEmoji string `json:"muteErrorEmoji"    yaml:"muteErrorEmoji"`
+
+	// MuteWarningEmoji is the emoji used to indicate a muted warning status.
+	MuteWarningEmoji string `json:"muteWarningEmoji"  yaml:"muteWarningEmoji"`
+
+	// InconclusiveEmoji is the emoji used to indicate an inconclusive status, i.e. an issue that
+	// has been resolved as inconclusive.
+	InconclusiveEmoji string `json:"unresolvedEmoji" yaml:"unresolvedEmoji"`
+
+	// ResolvedEmoji is the emoji used to indicate a resolved status, i.e. an issue that has been resolved as OK.
+	ResolvedEmoji string `json:"resolvedEmoji" yaml:"resolvedEmoji"`
 }
 
 // AlertChannelSettings contains the settings for an individual alert channel.
@@ -226,6 +270,20 @@ func (s *ManagerSettings) InitAndValidate() error {
 	s.IssueReactions.InvestigateEmojis = initReactionEmojiSlice(s.IssueReactions.InvestigateEmojis, DefaultIssueInvestigateEmoji)
 	s.IssueReactions.MuteEmojis = initReactionEmojiSlice(s.IssueReactions.MuteEmojis, DefaultIssueMuteEmoji)
 
+	if s.IssueStatus == nil {
+		s.IssueStatus = &IssueStatusSettings{}
+	}
+
+	s.IssueStatus.PanicEmoji = initStatusEmoji(s.IssueStatus.PanicEmoji, DefaultPanicEmoji)
+	s.IssueStatus.ErrorEmoji = initStatusEmoji(s.IssueStatus.ErrorEmoji, DefaultErrorEmoji)
+	s.IssueStatus.WarningEmoji = initStatusEmoji(s.IssueStatus.WarningEmoji, DefaultWarningEmoji)
+	s.IssueStatus.InfoEmoji = initStatusEmoji(s.IssueStatus.InfoEmoji, DefaultInfoEmoji)
+	s.IssueStatus.MutePanicEmoji = initStatusEmoji(s.IssueStatus.MutePanicEmoji, DefaultMutePanicEmoji)
+	s.IssueStatus.MuteErrorEmoji = initStatusEmoji(s.IssueStatus.MuteErrorEmoji, DefaultMuteErrorEmoji)
+	s.IssueStatus.MuteWarningEmoji = initStatusEmoji(s.IssueStatus.MuteWarningEmoji, DefaultMuteWarningEmoji)
+	s.IssueStatus.InconclusiveEmoji = initStatusEmoji(s.IssueStatus.InconclusiveEmoji, DefaultInconclusiveEmoji)
+	s.IssueStatus.ResolvedEmoji = initStatusEmoji(s.IssueStatus.ResolvedEmoji, DefaultResolvedEmoji)
+
 	if s.MinIssueCountForThrottle <= 0 {
 		s.MinIssueCountForThrottle = DefaultMinIssueCountForThrottle
 	}
@@ -304,11 +362,38 @@ func initReactionEmojiSlice(emojis []string, defaultEmoji string) []string {
 		return []string{defaultEmoji}
 	}
 
-	for i, emoji := range emojis {
-		emojis[i] = strings.TrimSpace(strings.Trim(emoji, ":"))
+	cleaned := []string{}
+
+	for _, emoji := range emojis {
+		emoji = strings.TrimSpace(emoji)
+
+		if !common.IconRegex.MatchString(emoji) {
+			continue
+		}
+
+		// When comparing with reaction events, we need to remove the colons from the emojis.
+		emoji = strings.Trim(emoji, ":")
+
+		if emoji != "" {
+			cleaned = append(cleaned, emoji)
+		}
 	}
 
-	return emojis
+	if len(cleaned) == 0 {
+		return []string{defaultEmoji}
+	}
+
+	return cleaned
+}
+
+func initStatusEmoji(emoji, defaultEmoji string) string {
+	emoji = strings.TrimSpace(emoji)
+
+	if !common.IconRegex.MatchString(emoji) {
+		return defaultEmoji
+	}
+
+	return emoji
 }
 
 func (s *ManagerSettings) UserIsGlobalAdmin(userID string) bool {
