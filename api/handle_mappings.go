@@ -10,7 +10,7 @@ import (
 func (s *Server) handleMappings(resp http.ResponseWriter, req *http.Request) {
 	started := time.Now()
 
-	data, err := json.MarshalIndent(s.alertMapping, "", "  ")
+	data, err := json.MarshalIndent(s.apiSettings, "", "  ")
 	if err != nil {
 		err = fmt.Errorf("failed to marshal alert mappings: %w", err)
 		s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, nil, "", resp, req, started)

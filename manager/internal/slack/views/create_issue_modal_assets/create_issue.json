@@ -4,7 +4,7 @@
       "type": "section",
       "text": {
         "type": "mrkdwn",
-        "text": "You can create a new issue in any channel managed by the Slack Manager (where you are also channel admin)."
+        "text": "You can create a new issue in any channel managed by {{ .AppFriendlyName }} (where you are also channel admin)."
       }
     },
     {

@@ -39,7 +39,7 @@ func NewAlert(queueItem *commonlib.FifoQueueItem) (Message, error) {
 	}, nil
 }
 
-func (a *Alert) SetDefaultValues(settings *config.ChannelSettings) {
+func (a *Alert) SetDefaultValues(settings *config.ManagerSettings) {
 	if a == nil {
 		return
 	}
@@ -49,7 +49,7 @@ func (a *Alert) SetDefaultValues(settings *config.ChannelSettings) {
 	}
 
 	if a.Severity == "" {
-		a.Severity = commonlib.AlertSeverity(settings.DefaultAlertSeverity)
+		a.Severity = settings.DefaultAlertSeverity
 	}
 
 	if a.Username == "" {
@@ -61,7 +61,7 @@ func (a *Alert) SetDefaultValues(settings *config.ChannelSettings) {
 	}
 
 	if a.ArchivingDelaySeconds <= 0 {
-		a.ArchivingDelaySeconds = int(settings.DefaultIssueArchivingDelay.Seconds())
+		a.ArchivingDelaySeconds = settings.DefaultIssueArchivingDelaySeconds
 	}
 
 	for _, w := range a.Webhooks {

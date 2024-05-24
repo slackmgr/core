@@ -14,10 +14,9 @@ func TestTrySend(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(1)
-	var err1 error
+	err1 := TrySend(ctx, 42, sinkCh)
 	var err2 error
 	go func() {
-		err1 = TrySend(ctx, 42, sinkCh)
 		err2 = TrySend(ctx, 43, sinkCh)
 		wg.Done()
 	}()

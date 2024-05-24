@@ -1,0 +1,421 @@
+package config
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	common "github.com/peteraglen/slack-manager-common"
+)
+
+const (
+	DefaultPostIconEmoji                  = ":female-detective:"
+	DefaultPostUsername                   = "Slack Manager"
+	DefaultAlertSeverity                  = common.AlertError
+	DefaultIssueArchivingDelaySeconds     = 12 * 3600 // 12 hours
+	MinIssueArchivingDelaySeconds         = 60
+	MaxIssueArchivingDelaySeconds         = 30 * 24 * 3600 // 30 days
+	DefaultIssueReorderingLimit           = 30
+	MinIssueReorderingLimit               = 5
+	MaxIssueReorderingLimit               = 100
+	DefaultIssueProcessingIntervalSeconds = 10
+	MinIssueProcessingIntervalSeconds     = 3
+	MaxIssueProcessingIntervalSeconds     = 600
+	DefaultIssueTerminateEmoji            = "firecracker"
+	DefaultIssueResolveEmoji              = "white_check_mark"
+	DefaultIssueInvestigateEmoji          = "eyes"
+	DefaultIssueMuteEmoji                 = "mask"
+	DefaultMinIssueCountForThrottle       = 5
+	DefaultMaxThrottleDurationSeconds     = 90 // 1.5 minutes
+	DefaultAppFriendlyName                = "Slack Manager"
+)
+
+var allowedDefaultAlertSeverities = map[common.AlertSeverity]struct{}{
+	common.AlertPanic:   {},
+	common.AlertError:   {},
+	common.AlertWarning: {},
+}
+
+// ManagerSettings contains the settings for the Slack Manager system,
+// both global settings and settings for individual channels.
+// Nothing in this struct is mandatory, but some settings have default values (see constants above).
+type ManagerSettings struct {
+	// AppFriendlyName is the friendly name of the Slack Manager app.
+	// It is used in messages and alerts. If not set, DefaultAppFriendlyName is used.
+	AppFriendlyName string `json:"appFriendlyName" yaml:"appFriendlyName"`
+
+	// GlobalAdmins is a list of Slack user IDs that have global Slack Manager admin rights,
+	// including using emojis to handle issues, and invoking all alert webhooks.
+	// Not to be confused with the Slack workspace's global admins!
+	// This list should be kept as short as possible.
+	GlobalAdmins []string `json:"globalAdmins" yaml:"globalAdmins"`
+
+	// DefaultPostIconEmoji is the Slack post emoji to use for alerts where no icon emoji is specified.
+	// The value must be on the format ":emoji:".
+	// https://api.slack.com/methods/chat.postMessage#arg_icon_emoji
+	DefaultPostIconEmoji string `json:"defaultPostIconEmoji" yaml:"defaultPostIconEmoji"`
+
+	// DefaultPostUsername is the Slack post username to use for alerts where no username is specified.
+	// https://api.slack.com/methods/chat.postMessage#arg_username
+	DefaultPostUsername string `json:"defaultPostUsername" yaml:"defaultPostUsername"`
+
+	// DefaultAlertSeverity is the severity to use for alerts where no severity is specified.
+	// The value must be one of allowedDefaultAlertSeverities.
+	DefaultAlertSeverity common.AlertSeverity `json:"defaultAlertSeverity" yaml:"defaultAlertSeverity"`
+
+	// DefaultIssueArchivingDelaySeconds is the archiving delay (in seconds) to use for alerts where no archiving delay is specified.
+	// The value must be between MinIssueArchivingDelaySeconds and MaxIssueArchivingDelaySeconds.
+	DefaultIssueArchivingDelaySeconds int `json:"defaultIssueArchivingDelaySeconds" yaml:"defaultIssueArchivingDelaySeconds"`
+
+	// DisableIssueReordering can be used to turn off the standard reordering of issues by severity (in each alert channel).
+	// When true, issues are displayed in the order they were created, regardless of severity.
+	// When false, issues are automatically reordered and displayed in order of severity.
+	// This setting can be overridden for individual alert channels.
+	DisableIssueReordering bool `json:"disableIssueReordering" yaml:"disableIssueReordering"`
+
+	// IssueReorderingLimit is the maximum number of open issues (in a single channel) that can be reordered by severity.
+	// This setting is used to prevent reordering from becoming too slow when there are many open issues, and to avoid hitting Slack rate limits.
+	// If the number of open issues exceeds this limit, issues are displayed in the order they were created, regardless of severity.
+	// When the number of open issues drops below this limit, issues are again reordered by severity.
+	// The value must be between MinIssueReorderingLimit and MaxIssueReorderingLimit, and may be overridden for individual alert channels.
+	IssueReorderingLimit int `json:"issueReorderingLimit" yaml:"issueReorderingLimit"`
+
+	// IssueProcessingIntervalSeconds is the interval (in seconds) between issue processing runs in each channel.
+	// An issue processing run includes reordering issues by severity, escalating issues, and archiving resolved issues.
+	// The value must be between MinIssueProcessingIntervalSeconds and MaxIssueProcessingIntervalSeconds, and may be overridden for individual alert channels.
+	IssueProcessingIntervalSeconds int `json:"issueProcessingIntervalSeconds" yaml:"issueProcessingIntervalSeconds"`
+
+	// IssueReactions contains the settings for Slack post reactions.
+	// These settings define which specific emojis are used to handle issues.
+	IssueReactions *IssueReactionSettings `json:"issueReactions" yaml:"issueReactions"`
+
+	// MinIssueCountForThrottle is the minimum number of open issues that must be present in a channel, before throttling is considered.
+	// Throttling is a mechanism to prevent too many Slack post updates, in a short period of time.
+	MinIssueCountForThrottle int `json:"minIssueCountForThrottle" yaml:"minIssueCountForThrottle"`
+
+	// MaxThrottleDurationSeconds is the maximum duration (in seconds) that a particular Slack post can be throttled.
+	// After this duration, the Slack post is again allowed to be updated.
+	MaxThrottleDurationSeconds int `json:"maxThrottleDurationSeconds" yaml:"maxThrottleDurationSeconds"`
+
+	// DocsURL is the URL to the Slack Manager documentation (if any).
+	DocsURL string `json:"docsURL" yaml:"docsURL"`
+
+	// AlertChannels is an optional list of settings for individual alert channels.
+	// Each alert channel can potentially have its own list of admins, and some settings that affect how alerts are handled.
+	// If no settings are specified for a channel, the default settings are used.
+	AlertChannels []*AlertChannelSettings `json:"alertChannels" yaml:"alertChannels"`
+
+	// InfoChannels is a list of channels defined as "info channels".
+	// These channels are used to display information about the Slack Manager system, but cannot be used to handle alerts.
+	InfoChannels []*InfoChannelSettings `json:"infoChannels" yaml:"infoChannels"`
+
+	globalAdmins     map[string]struct{}
+	alertChannels    map[string]*AlertChannelSettings
+	infoChannels     map[string]*InfoChannelSettings
+	issueReactionMap map[string]IssueReaction
+	initialized      bool
+}
+
+// IssueReactionSettings contains the settings for Slack post reactions.
+type IssueReactionSettings struct {
+	// TerminateEmojis is a list of emojis used to indicate that an issue should be terminated.
+	TerminateEmojis []string `json:"terminateEmojis" yaml:"terminateEmojis"`
+
+	// ResolveEmojis is a list of emojis used to indicate that an issue should be resolved.
+	ResolveEmojis []string `json:"resolveEmojis" yaml:"resolveEmojis"`
+
+	// InvestigateEmojis is a list of emojis used to indicate that an issue is being investigated by the current user.
+	InvestigateEmojis []string `json:"investigateEmojis" yaml:"investigateEmojis"`
+
+	// MuteEmojis is a list of emojis used to indicate that an issue should be muted.
+	MuteEmojis []string `json:"muteEmojis" yaml:"muteEmojis"`
+}
+
+// AlertChannelSettings contains the settings for an individual alert channel.
+type AlertChannelSettings struct {
+	ID                             string   `json:"id"                             yaml:"id"`
+	AdminUsers                     []string `json:"adminUsers"                     yaml:"adminUsers"`
+	AdminGroups                    []string `json:"adminGroups"                    yaml:"adminGroups"`
+	DisableIssueReordering         bool     `json:"disableIssueReordering"         yaml:"disableIssueReordering"`
+	IssueReorderingLimit           int      `json:"issueReorderingLimit"           yaml:"issueReorderingLimit"`
+	IssueProcessingIntervalSeconds int      `json:"issueProcessingIntervalSeconds" yaml:"issueProcessingIntervalSeconds"`
+
+	adminUsers  map[string]struct{}
+	adminGroups map[string]struct{}
+}
+
+// InfoChannelSettings contains the settings for an individual info channel.
+type InfoChannelSettings struct {
+	ID           string `json:"channelID"    yaml:"channelID"`
+	TemplatePath string `json:"templatePath" yaml:"templatePath"`
+}
+
+// InitAndValidate initializes the settings and validates them.
+// Missing or empty settings are set to their default values (using the constants above).
+// An error is returned if any settings are invalid.
+// This function is called from inside the manager, so it is not necessary to call it from the outside.
+func (s *ManagerSettings) InitAndValidate() error {
+	if s.initialized {
+		return nil
+	}
+
+	s.globalAdmins = make(map[string]struct{})
+	s.alertChannels = make(map[string]*AlertChannelSettings)
+	s.infoChannels = make(map[string]*InfoChannelSettings)
+	s.issueReactionMap = make(map[string]IssueReaction)
+
+	if s.AppFriendlyName == "" {
+		s.AppFriendlyName = DefaultAppFriendlyName
+	}
+
+	for i, userID := range s.GlobalAdmins {
+		userID = strings.TrimSpace(userID)
+
+		if userID == "" {
+			return fmt.Errorf("globalAdmins[%d] cannot be empty", i)
+		}
+
+		s.globalAdmins[userID] = struct{}{}
+	}
+
+	if s.DefaultPostIconEmoji != "" && !strings.HasPrefix(s.DefaultPostIconEmoji, ":") && !strings.HasSuffix(s.DefaultPostIconEmoji, ":") {
+		s.DefaultPostIconEmoji = ":" + s.DefaultPostIconEmoji + ":"
+	}
+
+	if s.DefaultPostIconEmoji == "" {
+		s.DefaultPostIconEmoji = DefaultPostIconEmoji
+	} else if !common.IconRegex.MatchString(s.DefaultPostIconEmoji) {
+		return fmt.Errorf("default icon emoji must be on the format \":emoji:\"")
+	}
+
+	if s.DefaultPostUsername == "" {
+		s.DefaultPostUsername = DefaultPostUsername
+	}
+
+	if s.DefaultAlertSeverity == "" {
+		s.DefaultAlertSeverity = DefaultAlertSeverity
+	} else if _, ok := allowedDefaultAlertSeverities[s.DefaultAlertSeverity]; !ok {
+		return fmt.Errorf("default alert severity must be one of %v", allowedDefaultAlertSeverities)
+	}
+
+	if s.DefaultIssueArchivingDelaySeconds <= 0 {
+		s.DefaultIssueArchivingDelaySeconds = DefaultIssueArchivingDelaySeconds
+	} else if s.DefaultIssueArchivingDelaySeconds < MinIssueArchivingDelaySeconds || s.DefaultIssueArchivingDelaySeconds > MaxIssueArchivingDelaySeconds {
+		return fmt.Errorf("default archiving delay must be between MinIssueArchivingDelaySeconds and MaxIssueArchivingDelaySeconds")
+	}
+
+	if s.IssueReorderingLimit <= 0 {
+		s.IssueReorderingLimit = DefaultIssueReorderingLimit
+	} else if s.IssueReorderingLimit < MinIssueReorderingLimit || s.IssueReorderingLimit > MaxIssueReorderingLimit {
+		return fmt.Errorf("issue reordering limit must be between MinIssueReorderingLimit and MaxIssueReorderingLimit (use DisableIssueReordering to turn off reordering)")
+	}
+
+	if s.IssueProcessingIntervalSeconds <= 0 {
+		s.IssueProcessingIntervalSeconds = DefaultIssueProcessingIntervalSeconds
+	} else if s.IssueProcessingIntervalSeconds < MinIssueProcessingIntervalSeconds || s.IssueProcessingIntervalSeconds > MaxIssueProcessingIntervalSeconds {
+		return fmt.Errorf("issue processing interval must be between MinIssueProcessingIntervalSeconds and MaxIssueProcessingIntervalSeconds")
+	}
+
+	if s.IssueReactions == nil {
+		s.IssueReactions = &IssueReactionSettings{}
+	}
+
+	s.IssueReactions.TerminateEmojis = initReactionEmojiSlice(s.IssueReactions.TerminateEmojis, DefaultIssueTerminateEmoji)
+	s.IssueReactions.ResolveEmojis = initReactionEmojiSlice(s.IssueReactions.ResolveEmojis, DefaultIssueResolveEmoji)
+	s.IssueReactions.InvestigateEmojis = initReactionEmojiSlice(s.IssueReactions.InvestigateEmojis, DefaultIssueInvestigateEmoji)
+	s.IssueReactions.MuteEmojis = initReactionEmojiSlice(s.IssueReactions.MuteEmojis, DefaultIssueMuteEmoji)
+
+	if s.MinIssueCountForThrottle <= 0 {
+		s.MinIssueCountForThrottle = DefaultMinIssueCountForThrottle
+	}
+
+	if s.MaxThrottleDurationSeconds <= 0 {
+		s.MaxThrottleDurationSeconds = DefaultMaxThrottleDurationSeconds
+	}
+
+	for i, a := range s.AlertChannels {
+		a.ID = strings.TrimSpace(a.ID)
+
+		if a.ID == "" {
+			return fmt.Errorf("alertChannels[%d].id cannot be empty", i)
+		}
+
+		a.adminUsers = make(map[string]struct{})
+		a.adminGroups = make(map[string]struct{})
+
+		for j, userID := range a.AdminUsers {
+			userID = strings.TrimSpace(userID)
+
+			if userID == "" {
+				return fmt.Errorf("alertChannels[%d].adminUsers[%d] cannot be empty", i, j)
+			}
+
+			a.adminUsers[userID] = struct{}{}
+		}
+
+		for j, groupID := range a.AdminGroups {
+			groupID = strings.TrimSpace(groupID)
+
+			if groupID == "" {
+				return fmt.Errorf("alertChannels[%d].adminGroups[%d] cannot be empty", i, j)
+			}
+
+			a.adminGroups[groupID] = struct{}{}
+		}
+
+		if a.IssueReorderingLimit <= 0 {
+			a.IssueReorderingLimit = s.IssueReorderingLimit
+		} else if a.IssueReorderingLimit < MinIssueReorderingLimit || a.IssueReorderingLimit > MaxIssueReorderingLimit {
+			return fmt.Errorf("alertChannels[%d].issueReorderingLimit must be between MinIssueReorderingLimit and MaxIssueReorderingLimit (use DisableIssueReordering to turn off reordering)", i)
+		}
+
+		if a.IssueProcessingIntervalSeconds <= 0 {
+			a.IssueProcessingIntervalSeconds = s.IssueProcessingIntervalSeconds
+		} else if a.IssueProcessingIntervalSeconds < MinIssueProcessingIntervalSeconds || a.IssueProcessingIntervalSeconds > MaxIssueProcessingIntervalSeconds {
+			return fmt.Errorf("alertChannels[%d].issueProcessingIntervalSeconds must be between MinIssueProcessingIntervalSeconds and MaxIssueProcessingIntervalSeconds", i)
+		}
+
+		s.alertChannels[a.ID] = a
+	}
+
+	for i, a := range s.InfoChannels {
+		a.ID = strings.TrimSpace(a.ID)
+		a.TemplatePath = strings.TrimSpace(a.TemplatePath)
+
+		if a.ID == "" {
+			return fmt.Errorf("infoChannels[%d].id cannot be empty", i)
+		}
+
+		if a.TemplatePath == "" {
+			return fmt.Errorf("infoChannels[%d].templatePath cannot be empty", i)
+		}
+
+		s.infoChannels[a.ID] = a
+	}
+
+	s.initialized = true
+
+	return nil
+}
+
+func initReactionEmojiSlice(emojis []string, defaultEmoji string) []string {
+	if len(emojis) == 0 {
+		return []string{defaultEmoji}
+	}
+
+	for i, emoji := range emojis {
+		emojis[i] = strings.TrimSpace(strings.Trim(emoji, ":"))
+	}
+
+	return emojis
+}
+
+func (s *ManagerSettings) UserIsGlobalAdmin(userID string) bool {
+	if _, ok := s.globalAdmins[userID]; ok {
+		return true
+	}
+
+	return false
+}
+
+func (s *ManagerSettings) UserIsChannelAdmin(ctx context.Context, channelID, userID string, userIsInGroup func(ctx context.Context, groupID, userID string) bool) bool {
+	if userID == "" || channelID == "" {
+		return false
+	}
+
+	if _, ok := s.globalAdmins[userID]; ok {
+		return true
+	}
+
+	channelConfig, channelFound := s.alertChannels[channelID]
+
+	if !channelFound {
+		return false
+	}
+
+	if _, ok := channelConfig.adminUsers[userID]; ok {
+		return true
+	}
+
+	if userIsInGroup != nil {
+		for _, groupID := range channelConfig.AdminGroups {
+			if userIsInGroup(ctx, groupID, userID) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (s *ManagerSettings) IsInfoChannel(channelID string) bool {
+	if _, ok := s.infoChannels[channelID]; ok {
+		return true
+	}
+
+	return false
+}
+
+func (s *ManagerSettings) GetInfoChannelConfig(channelID string) (*InfoChannelSettings, bool) {
+	if c, ok := s.infoChannels[channelID]; ok {
+		return c, true
+	}
+
+	return nil, false
+}
+
+func (s *ManagerSettings) OrderIssuesBySeverity(channelID string, openIssueCount int) bool {
+	if a, ok := s.alertChannels[channelID]; ok {
+		return !a.DisableIssueReordering && openIssueCount <= a.IssueReorderingLimit
+	}
+
+	return !s.DisableIssueReordering && openIssueCount <= s.IssueReorderingLimit
+}
+
+func (s *ManagerSettings) IssueProcessingInterval(channelID string) time.Duration {
+	if a, ok := s.alertChannels[channelID]; ok {
+		return time.Duration(a.IssueProcessingIntervalSeconds) * time.Second
+	}
+
+	return time.Duration(s.IssueProcessingIntervalSeconds) * time.Second
+}
+
+func (s *ManagerSettings) MapSlackPostReaction(reaction string) IssueReaction {
+	if reaction == "" {
+		return ""
+	}
+
+	if val, ok := s.issueReactionMap[reaction]; ok {
+		return val
+	}
+
+	var r IssueReaction
+
+	switch {
+	case containsString(s.IssueReactions.TerminateEmojis, reaction):
+		r = IssueReactionTerminate
+	case containsString(s.IssueReactions.ResolveEmojis, reaction):
+		r = IssueReactionResolve
+	case containsString(s.IssueReactions.InvestigateEmojis, reaction):
+		r = IssueReactionInvestigate
+	case containsString(s.IssueReactions.MuteEmojis, reaction):
+		r = IssueReactionMute
+	default:
+		r = ""
+	}
+
+	s.issueReactionMap[reaction] = r
+
+	return r
+}
+
+func containsString(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+
+	return false
+}

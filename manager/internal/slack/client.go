@@ -34,21 +34,17 @@ type Client struct {
 	logger          common.Logger
 	metrics         common.Metrics
 	cfg             *config.ManagerConfig
-	channelSettings *models.ChannelSettingsWrapper
+	managerSettings *models.ManagerSettingsWrapper
 }
 
-var location *time.Location
-
-func New(commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, channelSettings *models.ChannelSettingsWrapper) *Client {
-	location = cfg.Location
-
+func New(commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *Client {
 	return &Client{
 		commandHandler:  commandHandler,
 		cacheStore:      cacheStore,
 		logger:          logger,
 		metrics:         metrics,
 		cfg:             cfg,
-		channelSettings: channelSettings,
+		managerSettings: managerSettings,
 	}
 }
 
@@ -77,7 +73,7 @@ func (c *Client) Connect(ctx context.Context) error {
 		return fmt.Errorf("config must be set before connecting")
 	}
 
-	if c.channelSettings == nil {
+	if c.managerSettings == nil {
 		return fmt.Errorf("channel settings must be set before connecting")
 	}
 
@@ -105,16 +101,16 @@ func (c *Client) RunSocketMode(ctx context.Context) error {
 	controllers.NewInternalEventsController(handler, c.logger)
 
 	// Interactive actions
-	controllers.NewInteractiveController(handler, c, c.commandHandler, c.issueFinder, c.logger, c.cfg, c.channelSettings)
+	controllers.NewInteractiveController(handler, c, c.commandHandler, c.issueFinder, c.logger, c.cfg, c.managerSettings)
 
 	// Slash commands actions
 	controllers.NewSlashCommandsController(handler, c.logger)
 
 	// Post reactions (emojis)
-	controllers.NewReactionsController(handler, c, c.commandHandler, c.cacheStore, c.logger, c.cfg, c.channelSettings)
+	controllers.NewReactionsController(handler, c, c.commandHandler, c.cacheStore, c.logger, c.cfg, c.managerSettings)
 
 	// Greeting situations (joined channel etc)
-	controllers.NewGreetingsController(handler, c, c.logger, c.cfg, c.channelSettings)
+	controllers.NewGreetingsController(handler, c, c.logger, c.cfg, c.managerSettings)
 
 	// Events API
 	controllers.NewEventsAPIController(handler, c.logger)
@@ -164,7 +160,7 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 	})
 
 	// Reordering is allowed when the channel config allows it AND the number of active issues in the channel is small enough
-	allowIssueReordering := c.channelSettings.Settings.OrderIssuesBySeverity(channelID) && openIssueCount <= c.cfg.ReorderIssueLimit
+	allowIssueReordering := c.managerSettings.Settings.OrderIssuesBySeverity(channelID, openIssueCount)
 	atLeastOnePostDeleted := false
 
 	sem := semaphore.NewWeighted(int64(c.cfg.SlackClient.Concurrency))
@@ -320,17 +316,17 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, updateIfMessag
 }
 
 func (c *Client) IsAlertChannel(ctx context.Context, channelID string) (bool, string, error) {
-	if c.channelSettings.Settings.IsInfoChannel(channelID) {
+	if c.managerSettings.Settings.IsInfoChannel(channelID) {
 		return false, "channel is defined as 'info channel' (no alerts allowed)", nil
 	}
 
 	botIsInChannel, err := c.api.BotIsInChannel(ctx, channelID)
 	if err != nil {
-		return false, "", err
+		return false, "", fmt.Errorf("failed to check if Slack App integration is in channel: %w", err)
 	}
 
 	if !botIsInChannel {
-		return false, "Slack Manager is not in channel", nil
+		return false, "Slack App integration is not in channel", nil
 	}
 
 	return true, "", nil
@@ -409,7 +405,7 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, action models.
 			return nil
 		}
 
-		// Slack Manager is not in channel. Should only happen in race conditions, since the alert API checks this.
+		// Slack App is not added as integration in channel. Should only happen in race conditions, since the alert API checks this.
 		// Log error and reset post ID.
 		if err.Error() == "not_in_channel" {
 			logger.Error(errMsg)
@@ -463,7 +459,7 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, action models.
 			return nil
 		}
 
-		// Slack Manager is not in channel. Should only happen in race conditions, since the alert API checks this.
+		// Slack App integration is not in channel. Should only happen in race conditions, since the alert API checks this.
 		// Log error and reset post ID.
 		if err.Error() == "not_in_channel" {
 			logger.Error(errMsg)
@@ -540,27 +536,27 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 
 	if issue.FollowUpEnabled() {
 		fields := []slack.MixedElement{}
-		fields = append(fields, slack.NewTextBlockObject("plain_text", fmt.Sprintf("First: %s", issue.Created.In(location).Format("01-02 15:04:05")), false, false))
-		fields = append(fields, slack.NewTextBlockObject("plain_text", fmt.Sprintf("Last: %s", issue.LastAlertReceived.In(location).Format("01-02 15:04:05")), false, false))
+		fields = append(fields, slack.NewTextBlockObject("plain_text", fmt.Sprintf("First: %s", issue.Created.In(c.cfg.Location).Format("01-02 15:04:05")), false, false))
+		fields = append(fields, slack.NewTextBlockObject("plain_text", fmt.Sprintf("Last: %s", issue.LastAlertReceived.In(c.cfg.Location).Format("01-02 15:04:05")), false, false))
 		fields = append(fields, slack.NewTextBlockObject("plain_text", fmt.Sprintf("#%d", issue.AlertCount), false, false))
 		blocks = append(blocks, slack.NewContextBlock("", fields...))
 	}
 
 	// Issue is manually resolved by user
 	if method != UPDATE_DELETED && issue.IsInfoOrResolved() && issue.IsEmojiResolved {
-		text := newMrkdwnTextBlock(fmt.Sprintf(":raising_hand: The issue was resolved by *%s* at %s", issue.ResolvedByUser, issue.ResolveTime.In(location).Format("2006-01-02 15:04:05")))
+		text := newMrkdwnTextBlock(fmt.Sprintf(":raising_hand: The issue was resolved by *%s* at %s", issue.ResolvedByUser, issue.ResolveTime.In(c.cfg.Location).Format("2006-01-02 15:04:05")))
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 
 	// Issue is not resolved AND being investigated by user
 	if method != UPDATE_DELETED && !issue.IsInfoOrResolved() && issue.IsEmojiInvestigated {
-		text := newMrkdwnTextBlock(fmt.Sprintf(":cop: The issue is investigated by *%s* since %s", issue.InvestigatedByUser, issue.InvestigatedSince.In(location).Format("2006-01-02 15:04:05")))
+		text := newMrkdwnTextBlock(fmt.Sprintf(":cop: The issue is investigated by *%s* since %s", issue.InvestigatedByUser, issue.InvestigatedSince.In(c.cfg.Location).Format("2006-01-02 15:04:05")))
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 
 	// Issue is not resolved AND muted by user
 	if method != UPDATE_DELETED && !issue.IsInfoOrResolved() && issue.IsEmojiMuted {
-		text := newMrkdwnTextBlock(fmt.Sprintf(":mask: The issue was muted by *%s* at %s", issue.MutedByUser, issue.MutedSince.In(location).Format("2006-01-02 15:04:05")))
+		text := newMrkdwnTextBlock(fmt.Sprintf(":mask: The issue was muted by *%s* at %s", issue.MutedByUser, issue.MutedSince.In(c.cfg.Location).Format("2006-01-02 15:04:05")))
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 
@@ -732,8 +728,8 @@ func getTextBlocks(alertText, statusEmoji string, method Method) []slack.Block {
 }
 
 func (c *Client) throttleIssue(issue *models.Issue, action models.SlackAction, issuesInChannel int) bool {
-	// Don't throttle if total number of open issues in channel is less than configured value
-	if issuesInChannel < c.cfg.Throttle.MinIssueCountForThrottle {
+	// Don't throttle if total number of open issues in channel is less than the configured minimum
+	if issuesInChannel < c.managerSettings.Settings.MinIssueCountForThrottle {
 		return false
 	}
 
@@ -764,8 +760,9 @@ func (c *Client) throttleIssue(issue *models.Issue, action models.SlackAction, i
 	limit := time.Duration(2*issue.AlertCount) * time.Second
 
 	// Limit is never more than the configured upper limit
-	if limit > c.cfg.Throttle.UpperLimit {
-		limit = c.cfg.Throttle.UpperLimit
+	upperLimitInSettings := time.Second * time.Duration(c.managerSettings.Settings.MaxThrottleDurationSeconds)
+	if limit > upperLimitInSettings {
+		limit = upperLimitInSettings
 	}
 
 	// Reduce the upper limit if the alert text has changed

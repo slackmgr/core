@@ -5,14 +5,23 @@ import (
 	"encoding/json"
 	"io"
 
+	"github.com/peteraglen/slack-manager/config"
 	"github.com/slack-go/slack"
 )
 
 //go:embed create_issue_modal_assets/*
 var createIssueAssets embed.FS
 
-func CreateIssueModal() (slack.Blocks, error) {
-	tpl, err := renderTemplate(createIssueAssets, "create_issue_modal_assets/create_issue.json", struct{}{})
+type createIssueViewArgs struct {
+	AppFriendlyName string
+}
+
+func CreateIssueModal(settings *config.ManagerSettings) (slack.Blocks, error) {
+	templateArgs := createIssueViewArgs{
+		AppFriendlyName: settings.AppFriendlyName,
+	}
+
+	tpl, err := renderTemplate(createIssueAssets, "create_issue_modal_assets/create_issue.json", templateArgs)
 	if err != nil {
 		return slack.Blocks{}, err
 	}

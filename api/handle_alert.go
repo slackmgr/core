@@ -397,7 +397,7 @@ func (s *Server) findChannelForRouteKey(ctx context.Context, routeKey string) (s
 		return val, true
 	}
 
-	channel, found := s.alertMapping.Match(routeKey)
+	channel, found := s.apiSettings.Match(routeKey)
 
 	if found {
 		s.cache.Set(ctx, cacheKey, channel, 30*time.Second)

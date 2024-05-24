@@ -11,14 +11,14 @@
       "type": "section",
       "text": {
         "type": "mrkdwn",
-        "text": "Great to see you here! *Slack Manager* is also in this channel, which means that status messages may be updated and rearranged at any time. The manager will ensure that the most important messages are always at the top of the feed."
+        "text": "Great to see you here! *{{ .AppFriendlyName }}* is also in this channel, which means that status messages may be updated and rearranged at any time. The manager will ensure that the most important messages are always at the top of the feed (unless disabled by an admin)."
       }
     },
     {
       "type": "section",
       "text": {
         "type": "mrkdwn",
-        "text": "{{if .IsChannelAdmin}}You have been assigned *Slack Manager* admin status in this channel, allowing you to use emojis for issue management.\n\n• Add :eyes: in order to acknowledge that you are looking into a particular issue.\n• Add :monitor_ok: to manually resolve an issue. Remove the emoji to revert the decision. New alerts will automatically re-open the issue.\n• Add :firecracker: to manually archive an issue and remove the corresponding Slack post. This is typically used when the alert should not have been posted in the first place.\n• Add :mask: to mute an issue indefinitely. The issue will remain visible in the Slack channel, but the status icon will be greyed out, and the issue is considered “resolved” when it comes to rearranging posts in the channel. New alerts will still be registered on the issue, even while muted.{{else}}You need to be Slack Manager channel admin in order to use emojis for issue management.{{end}}\n\nSee {{ .DocsURL }} for more details."
+        "text": "{{if .IsChannelAdmin}}You have been assigned *{{ .AppFriendlyName }}* admin status in this channel, allowing you to use emojis for issue management.\n\n• Add :{{ .InvestigateEmoji }}: in order to acknowledge that you are looking into a particular issue.\n• Add :{{ .ResolveEmoji }}: to manually resolve an issue. Remove the emoji to revert the decision. New alerts will automatically re-open the issue.\n• Add :{{ .TerminateEmoji }}: to manually archive an issue and remove the corresponding Slack post. This is typically used when the alert should not have been posted in the first place.\n• Add :{{ .MuteEmoji }}: to mute an issue indefinitely. The issue will remain visible in the Slack channel, but the status icon will be greyed out, and the issue is considered “resolved” when it comes to rearranging posts in the channel. New alerts will still be registered on the issue, even while muted.{{else}}You need to be *{{ .AppFriendlyName }}* channel admin in order to use emojis for issue management.{{end}}\n\nSee {{ .DocsURL }} for more details."
       }
     }
   ]

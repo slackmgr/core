@@ -7,12 +7,12 @@ import (
 	"github.com/slack-go/slack"
 )
 
-func InfoChannelView(templatePath, user string) ([]slack.Block, error) {
-	type args struct {
-		User string
-	}
+type infoChannelViewArgs struct {
+	User string
+}
 
-	tpl, err := renderTemplateFromPath(templatePath, args{User: user})
+func InfoChannelView(templatePath, user string) ([]slack.Block, error) {
+	tpl, err := renderTemplateFromPath(templatePath, infoChannelViewArgs{User: user})
 	if err != nil {
 		return nil, err
 	}

@@ -38,11 +38,11 @@ type Server struct {
 	channelInfoSyncer *channelInfoSyncer
 	logger            common.Logger
 	metrics           common.Metrics
-	alertMapping      *config.AlertMapping
+	apiSettings       *config.APISettings
 	cfg               *config.APIConfig
 }
 
-func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.APIConfig, alertMapping *config.AlertMapping) *Server {
+func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.APIConfig, settings *config.APISettings) *Server {
 	if cacheStore == nil {
 		gocacheClient := gocache.New(5*time.Minute, time.Minute)
 		cacheStore = gocache_store.NewGoCache(gocacheClient)
@@ -52,8 +52,8 @@ func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, log
 		metrics = &common.NoopMetrics{}
 	}
 
-	if alertMapping == nil {
-		alertMapping = &config.AlertMapping{}
+	if settings == nil {
+		settings = &config.APISettings{}
 	}
 
 	return &Server{
@@ -63,24 +63,9 @@ func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, log
 		cacheStore:        cacheStore,
 		logger:            logger,
 		metrics:           metrics,
-		alertMapping:      alertMapping,
+		apiSettings:       settings,
 		cfg:               cfg,
 	}
-}
-
-func (s *Server) UpdateAlertMapping(alertMapping *config.AlertMapping) error {
-	if alertMapping == nil {
-		s.alertMapping = &config.AlertMapping{}
-		return nil
-	}
-
-	if err := alertMapping.InitAndValidate(); err != nil {
-		return fmt.Errorf("failed to update alert mapping: %w", err)
-	}
-
-	s.alertMapping = alertMapping
-
-	return nil
 }
 
 // Run starts the server and handles incoming requests. This method blocks until the context is cancelled, or a server error occurs.
@@ -97,7 +82,7 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to validate manager configuration: %w", err)
 	}
 
-	if err := s.alertMapping.InitAndValidate(); err != nil {
+	if err := s.apiSettings.InitAndValidate(); err != nil {
 		return fmt.Errorf("failed to initialize alert mapping: %w", err)
 	}
 
@@ -196,6 +181,20 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 		return err
 	}
+
+	return nil
+}
+
+func (s *Server) UpdateSettings(settings *config.APISettings) error {
+	if settings == nil {
+		settings = &config.APISettings{}
+	}
+
+	if err := settings.InitAndValidate(); err != nil {
+		return fmt.Errorf("failed to update API settings (the existing settings will continue to be used): %w", err)
+	}
+
+	s.apiSettings = settings
 
 	return nil
 }
