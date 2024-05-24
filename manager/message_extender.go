@@ -7,16 +7,15 @@ import (
 	"time"
 
 	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/manager/internal/models"
 	"golang.org/x/sync/semaphore"
 )
 
-func messageExtender(ctx context.Context, sourceCh <-chan models.Message, logger common.Logger, cfg *config.ManagerConfig) error {
+func messageExtender(ctx context.Context, sourceCh <-chan models.Message, logger common.Logger) error {
 	logger.Debug("messageExtender started")
 	defer logger.Debug("messageExtender exited")
 
-	interval := cfg.MessageExtensionProcessInterval
+	interval := 10 * time.Second
 	inFlightMessages := make(map[string]models.Message)
 	timeout := time.After(interval)
 

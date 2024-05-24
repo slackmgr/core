@@ -28,7 +28,7 @@ type channelManager struct {
 	logger          common.Logger
 	metrics         common.Metrics
 	cfg             *config.ManagerConfig
-	channelSettings *models.ChannelSettingsWrapper
+	managerSettings *models.ManagerSettingsWrapper
 	alertCh         chan *models.Alert
 	commandCh       chan *models.Command
 	movedIssueCh    chan *models.Issue
@@ -37,7 +37,7 @@ type channelManager struct {
 	initialized     bool
 }
 
-func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveRequestCh chan<- *models.MoveRequest, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, channelSettings *models.ChannelSettingsWrapper) *channelManager {
+func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveRequestCh chan<- *models.MoveRequest, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *channelManager {
 	restyLogger := newRestyLogger(logger)
 	webhookClient := resty.New().SetRetryCount(2).SetRetryWaitTime(time.Second).AddRetryCondition(webhookRetryPolicy).SetLogger(restyLogger).SetTimeout(cfg.WebhookTimeout)
 	logger = logger.WithField("slack_channel_id", channelID)
@@ -51,7 +51,7 @@ func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveR
 		logger:          logger,
 		metrics:         metrics,
 		cfg:             cfg,
-		channelSettings: channelSettings,
+		managerSettings: managerSettings,
 		alertCh:         make(chan *models.Alert, 1000),
 		commandCh:       make(chan *models.Command, 100),
 		movedIssueCh:    make(chan *models.Issue, 10),
@@ -153,7 +153,7 @@ func (c *channelManager) Run(ctx context.Context, waitGroup *sync.WaitGroup) {
 				c.logger.Errorf("Failed to process active issues: %s", err)
 			}
 
-			processorTimeout = time.After(c.cfg.IssueProcessInterval)
+			processorTimeout = time.After(c.managerSettings.Settings.IssueProcessingInterval(c.channelID))
 		}
 	}
 }
@@ -223,7 +223,7 @@ func (c *channelManager) FindIssueBySlackPost(ctx context.Context, slackPostID s
 func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) error {
 	c.metrics.AddToCounter(alertsTotal, float64(1), c.channelID)
 
-	alert.SetDefaultValues(c.channelSettings.Settings)
+	alert.SetDefaultValues(c.managerSettings.Settings)
 	alert.SlackChannelName = c.slackClient.GetChannelName(ctx, c.channelID)
 
 	if err := alert.Alert.Validate(); err != nil {
@@ -232,20 +232,8 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 
 	logger := c.logger.WithFields(alert.LogFields())
 
-	for _, escalation := range alert.Escalation {
-		if escalation.MoveToChannel == "" {
-			continue
-		}
-
-		validChannel, reason, err := c.slackClient.IsAlertChannel(ctx, escalation.MoveToChannel)
-		if err != nil {
-			return fmt.Errorf("failed to check if Slack manager is in channel %s: %w", escalation.MoveToChannel, err)
-		}
-
-		if !validChannel {
-			logger.Infof("Ignoring alert escalation move to invalid channel %s: %s", escalation.MoveToChannel, reason)
-			escalation.MoveToChannel = ""
-		}
+	if err := c.cleanAlertEscalations(ctx, alert, logger); err != nil {
+		logger.Errorf("Failed to clean alert escalations: %s", err)
 	}
 
 	if issue, ok := c.issueCollection.Find(alert.Alert.CorrelationID); ok {
@@ -269,6 +257,26 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 
 	if err := alert.Ack(ctx); err != nil {
 		return fmt.Errorf("failed to ack alert: %w", err)
+	}
+
+	return nil
+}
+
+func (c *channelManager) cleanAlertEscalations(ctx context.Context, alert *models.Alert, logger common.Logger) error {
+	for _, escalation := range alert.Escalation {
+		if escalation.MoveToChannel == "" {
+			continue
+		}
+
+		validChannel, reason, err := c.slackClient.IsAlertChannel(ctx, escalation.MoveToChannel)
+		if err != nil {
+			return fmt.Errorf("failed to check if channel %s is a valid alert channel: %w", escalation.MoveToChannel, err)
+		}
+
+		if !validChannel {
+			logger.Infof("Ignoring alert escalation move to invalid channel %s: %s", escalation.MoveToChannel, reason)
+			escalation.MoveToChannel = ""
+		}
 	}
 
 	return nil
@@ -402,11 +410,10 @@ func (c *channelManager) processActiveIssues(ctx context.Context) error {
 }
 
 // moveEscalatedIssue moves the specified issue to the channel indicated by the escalation result.
-// The method returns an error if the target channel is not valid (e.g. the Slack Manager is not a channel member).
 func (c *channelManager) moveEscalatedIssue(ctx context.Context, escalationResult *models.EscalationResult) error {
 	validChannel, reason, err := c.slackClient.IsAlertChannel(ctx, escalationResult.MoveToChannel)
 	if err != nil {
-		return fmt.Errorf("failed to check if Slack manager is in channel %s: %w", escalationResult.MoveToChannel, err)
+		return fmt.Errorf("failed to check if channel %s is a valid alert channel: %w", escalationResult.MoveToChannel, err)
 	}
 
 	logger := c.logger.WithFields(escalationResult.Issue.LogFields())
@@ -415,7 +422,7 @@ func (c *channelManager) moveEscalatedIssue(ctx context.Context, escalationResul
 		return fmt.Errorf("failed to move issue to channel %s: %s", escalationResult.MoveToChannel, reason)
 	}
 
-	return c.moveIssue(ctx, escalationResult.Issue, escalationResult.MoveToChannel, "Slack Manager Escalation", logger)
+	return c.moveIssue(ctx, escalationResult.Issue, escalationResult.MoveToChannel, "Issue escalation", logger)
 }
 
 // addAlertToExistingIssue adds a new alert to an existing issue, updates the issue in the database and finally updates the corresponding Slack post.

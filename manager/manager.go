@@ -41,10 +41,10 @@ type Manager struct {
 	logger          common.Logger
 	metrics         common.Metrics
 	cfg             *config.ManagerConfig
-	channelSettings *models.ChannelSettingsWrapper
+	managerSettings *models.ManagerSettingsWrapper
 }
 
-func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, channelSettings *config.ChannelSettings) *Manager {
+func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
 	if cacheStore == nil {
 		gocacheClient := gocache.New(5*time.Minute, time.Minute)
 		cacheStore = gocache_store.NewGoCache(gocacheClient)
@@ -54,8 +54,8 @@ func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.S
 		metrics = &common.NoopMetrics{}
 	}
 
-	if channelSettings == nil {
-		channelSettings = &config.ChannelSettings{}
+	if managerSettings == nil {
+		managerSettings = &config.ManagerSettings{}
 	}
 
 	return &Manager{
@@ -66,7 +66,7 @@ func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.S
 		logger:          logger,
 		metrics:         metrics,
 		cfg:             cfg,
-		channelSettings: &models.ChannelSettingsWrapper{Settings: channelSettings},
+		managerSettings: &models.ManagerSettingsWrapper{Settings: managerSettings},
 	}
 }
 
@@ -98,17 +98,17 @@ func (m *Manager) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to validate configuration: %w", err)
 	}
 
-	if err := m.channelSettings.Settings.InitAndValidate(); err != nil {
+	if err := m.managerSettings.Settings.InitAndValidate(); err != nil {
 		return fmt.Errorf("failed to initialize channel settings: %w", err)
 	}
 
-	m.slackClient = slack.New(m.commandQueue, m.cacheStore, m.logger, m.metrics, m.cfg, m.channelSettings)
+	m.slackClient = slack.New(m.commandQueue, m.cacheStore, m.logger, m.metrics, m.cfg, m.managerSettings)
 
 	if err := m.slackClient.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect Slack client: %w", err)
 	}
 
-	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.logger, m.metrics, m.cfg, m.channelSettings)
+	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.logger, m.metrics, m.cfg, m.managerSettings)
 
 	if err := m.coordinator.init(ctx); err != nil {
 		return fmt.Errorf("failed to initialize coordinator: %w", err)
@@ -135,7 +135,7 @@ func (m *Manager) Run(ctx context.Context) error {
 	})
 
 	errg.Go(func() error {
-		return messageExtender(ctx, extenderCh, m.logger, m.cfg)
+		return messageExtender(ctx, extenderCh, m.logger)
 	})
 
 	errg.Go(func() error {
@@ -149,17 +149,16 @@ func (m *Manager) Run(ctx context.Context) error {
 	return errg.Wait()
 }
 
-func (m *Manager) UpdateChannelSettings(channelSettings *config.ChannelSettings) error {
-	if channelSettings == nil {
-		m.channelSettings.Settings = &config.ChannelSettings{}
-		return nil
+func (m *Manager) UpdateSettings(settings *config.ManagerSettings) error {
+	if settings == nil {
+		settings = &config.ManagerSettings{}
 	}
 
-	if err := channelSettings.InitAndValidate(); err != nil {
-		return fmt.Errorf("failed to update channel settings: %w", err)
+	if err := settings.InitAndValidate(); err != nil {
+		return fmt.Errorf("failed to update manager settings (the existing settings will continue to be used): %w", err)
 	}
 
-	m.channelSettings.Settings = channelSettings
+	m.managerSettings.Settings = settings
 
 	return nil
 }

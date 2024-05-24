@@ -25,13 +25,13 @@ type coordinator struct {
 	logger                   common.Logger
 	metrics                  common.Metrics
 	cfg                      *config.ManagerConfig
-	channelSettings          *models.ChannelSettingsWrapper
+	managerSettings          *models.ManagerSettingsWrapper
 	mappingsLock             *sync.Mutex
 	moveRequestCh            chan *models.MoveRequest
 	moveMappings             map[string]map[string]*models.MoveMapping
 }
 
-func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, channelSettings *models.ChannelSettingsWrapper) *coordinator {
+func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *coordinator {
 	return &coordinator{
 		channelManagers:          make(map[string]*channelManager),
 		channelManagersWaitGroup: &sync.WaitGroup{},
@@ -42,7 +42,7 @@ func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, logger com
 		logger:                   logger,
 		metrics:                  metrics,
 		cfg:                      cfg,
-		channelSettings:          channelSettings,
+		managerSettings:          managerSettings,
 		mappingsLock:             &sync.Mutex{},
 		moveRequestCh:            make(chan *models.MoveRequest, 10),
 		moveMappings:             make(map[string]map[string]*models.MoveMapping),
@@ -305,7 +305,7 @@ func (c *coordinator) findOrCreateChannelManager(ctx context.Context, channelID 
 		return manager, nil
 	}
 
-	manager := newChannelManager(channelID, c.slack, c.db, c.moveRequestCh, c.logger, c.metrics, c.cfg, c.channelSettings)
+	manager := newChannelManager(channelID, c.slack, c.db, c.moveRequestCh, c.logger, c.metrics, c.cfg, c.managerSettings)
 
 	if err := manager.init(ctx, existingIssues); err != nil {
 		return nil, fmt.Errorf("failed to initialize channel manager: %w", err)

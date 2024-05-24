@@ -8,9 +8,9 @@ import (
 
 var slackChannelIDRegex = regexp.MustCompile(`^[0-9a-zA-Z]{9,15}$`)
 
-type AlertMapping struct {
-	Rules       []*RoutingRule `json:"rules" yaml:"rules"`
-	initialized bool
+type APISettings struct {
+	RoutingRules []*RoutingRule `json:"routingRules" yaml:"routingRules"`
+	initialized  bool
 }
 
 type RoutingRule struct {
@@ -25,12 +25,12 @@ type RoutingRule struct {
 	regex []*regexp.Regexp
 }
 
-func (a *AlertMapping) InitAndValidate() error {
-	if a.initialized {
+func (s *APISettings) InitAndValidate() error {
+	if s.initialized {
 		return nil
 	}
 
-	for i, r := range a.Rules {
+	for i, r := range s.RoutingRules {
 		r.TeamName = strings.TrimSpace(r.TeamName)
 
 		if r.TeamName == "" {
@@ -100,21 +100,21 @@ func (a *AlertMapping) InitAndValidate() error {
 		}
 	}
 
-	a.initialized = true
+	s.initialized = true
 
 	return nil
 }
 
-func (a *AlertMapping) Match(key string) (string, bool) {
-	if rule := a.matchMappingRule(key); rule != nil {
+func (s *APISettings) Match(key string) (string, bool) {
+	if rule := s.matchMappingRule(key); rule != nil {
 		return rule.Channel, true
 	}
 
 	return "", false
 }
 
-func (a *AlertMapping) matchMappingRule(key string) *RoutingRule {
-	if len(a.Rules) == 0 {
+func (s *APISettings) matchMappingRule(key string) *RoutingRule {
+	if len(s.RoutingRules) == 0 {
 		return nil
 	}
 
@@ -125,28 +125,28 @@ func (a *AlertMapping) matchMappingRule(key string) *RoutingRule {
 	}
 
 	// Evaluate exact (equals) matches first
-	for _, rule := range a.Rules {
+	for _, rule := range s.RoutingRules {
 		if rule.matchEquals(key) {
 			return rule
 		}
 	}
 
 	// Then evaluate prefix matches
-	for _, rule := range a.Rules {
+	for _, rule := range s.RoutingRules {
 		if rule.matchPrefix(key) {
 			return rule
 		}
 	}
 
 	// Then evalute regex matches
-	for _, rule := range a.Rules {
+	for _, rule := range s.RoutingRules {
 		if rule.matchRegex(key) {
 			return rule
 		}
 	}
 
 	// Then try to find a match-all rule
-	for _, rule := range a.Rules {
+	for _, rule := range s.RoutingRules {
 		if rule.MatchAll {
 			return rule
 		}
@@ -156,8 +156,8 @@ func (a *AlertMapping) matchMappingRule(key string) *RoutingRule {
 	return nil
 }
 
-func (m *RoutingRule) matchEquals(key string) bool {
-	for _, s := range m.Equals {
+func (r *RoutingRule) matchEquals(key string) bool {
+	for _, s := range r.Equals {
 		if s != "" && key == s {
 			return true
 		}
@@ -166,8 +166,8 @@ func (m *RoutingRule) matchEquals(key string) bool {
 	return false
 }
 
-func (m *RoutingRule) matchPrefix(key string) bool {
-	for _, s := range m.HasPrefix {
+func (r *RoutingRule) matchPrefix(key string) bool {
+	for _, s := range r.HasPrefix {
 		if s != "" && strings.HasPrefix(key, s) {
 			return true
 		}
@@ -176,8 +176,8 @@ func (m *RoutingRule) matchPrefix(key string) bool {
 	return false
 }
 
-func (m *RoutingRule) matchRegex(key string) bool {
-	for _, regex := range m.regex {
+func (r *RoutingRule) matchRegex(key string) bool {
+	for _, regex := range r.regex {
 		if regex != nil && regex.MatchString(key) {
 			return true
 		}

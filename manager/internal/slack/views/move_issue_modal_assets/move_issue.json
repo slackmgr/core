@@ -4,7 +4,7 @@
       "type": "section",
       "text": {
         "type": "mrkdwn",
-        "text": "You may move the issue to any channel managed by the Slack Manager."
+        "text": "You may move the issue to any channel managed by {{ .AppFriendlyName }}."
       }
     },
     {

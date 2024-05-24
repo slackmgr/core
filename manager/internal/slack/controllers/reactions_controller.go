@@ -18,31 +18,16 @@ import (
 	"github.com/slack-go/slack/socketmode"
 )
 
-// TerminationEmoji is the emoji (reaction) used to indicate that a post should be terminated/deleted
-const TerminationEmoji = "firecracker"
-
-// ResolveEmoji is the emoji (reaction) used to indicate that an issue has been resolved
-const (
-	ResolveEmoji    = "monitor_ok"
-	ResolveEmojiAlt = "white_check_mark"
-)
-
-// InvestigateEmoji is the emoji (reaction) used to indicate that an issue is being investigated
-const InvestigateEmoji = "eyes"
-
-// MuteEmoji is the emoji (reaction) used to indicate that an issue has been muted
-const MuteEmoji = "mask"
-
 type ReactionsController struct {
 	client          handler.SocketClient
 	commandHandler  handler.FifoQueueProducer
 	cache           *internal.Cache[string]
 	logger          common.Logger
 	cfg             *config.ManagerConfig
-	channelSettings *models.ChannelSettingsWrapper
+	managerSettings *models.ManagerSettingsWrapper
 }
 
-func NewReactionsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, cfg *config.ManagerConfig, channelSettings *models.ChannelSettingsWrapper) *ReactionsController {
+func NewReactionsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *ReactionsController {
 	cache := internal.NewCache(cache.New[string](cacheStore), logger)
 
 	c := &ReactionsController{
@@ -51,7 +36,7 @@ func NewReactionsController(eventhandler *handler.SocketModeHandler, client hand
 		cache:           cache,
 		logger:          logger,
 		cfg:             cfg,
-		channelSettings: channelSettings,
+		managerSettings: managerSettings,
 	}
 
 	eventhandler.HandleEventsAPI(string(slackevents.ReactionAdded), c.reactionAdded)
@@ -71,14 +56,16 @@ func (c *ReactionsController) reactionAdded(ctx context.Context, evt *socketmode
 		return
 	}
 
-	switch reactionAddedEvent.Reaction {
-	case TerminationEmoji:
+	reaction := c.managerSettings.Settings.MapSlackPostReaction(reactionAddedEvent.Reaction)
+
+	switch reaction {
+	case config.IssueReactionTerminate:
 		c.sendReactionAddedCommand(ctx, reactionAddedEvent, models.CommandActionTerminateIssue, true)
-	case ResolveEmoji, ResolveEmojiAlt:
+	case config.IssueReactionResolve:
 		c.sendReactionAddedCommand(ctx, reactionAddedEvent, models.CommandActionResolveIssue, true)
-	case InvestigateEmoji:
+	case config.IssueReactionInvestigate:
 		c.sendReactionAddedCommand(ctx, reactionAddedEvent, models.CommandActionInvestigateIssue, false)
-	case MuteEmoji:
+	case config.IssueReactionMute:
 		c.sendReactionAddedCommand(ctx, reactionAddedEvent, models.CommandActionMuteIssue, true)
 	default:
 	}
@@ -95,13 +82,17 @@ func (c *ReactionsController) reactionRemoved(ctx context.Context, evt *socketmo
 		return
 	}
 
-	switch reactionRemovedEvent.Reaction {
-	case ResolveEmoji, ResolveEmojiAlt:
+	reaction := c.managerSettings.Settings.MapSlackPostReaction(reactionRemovedEvent.Reaction)
+
+	switch reaction {
+	case config.IssueReactionResolve:
 		c.sendReactionRemovedCommand(ctx, reactionRemovedEvent, models.CommandActionUnresolveIssue, true)
-	case InvestigateEmoji:
+	case config.IssueReactionInvestigate:
 		c.sendReactionRemovedCommand(ctx, reactionRemovedEvent, models.CommandActionUninvestigateIssue, false)
-	case MuteEmoji:
+	case config.IssueReactionMute:
 		c.sendReactionRemovedCommand(ctx, reactionRemovedEvent, models.CommandActionUnmuteIssue, true)
+	case config.IssueReactionTerminate:
+		// This can't really happen (we can't un-terminate an issue)
 	default:
 	}
 }
@@ -153,12 +144,12 @@ func (c *ReactionsController) sendReactionRemovedCommand(ctx context.Context, ev
 }
 
 func (c *ReactionsController) getUserInfo(ctx context.Context, channel, userID string, requireChannelAdmin bool, logger common.Logger) (*slack.User, error) {
-	managedChannel, _, err := c.client.IsAlertChannel(ctx, channel)
+	isAlertChannel, _, err := c.client.IsAlertChannel(ctx, channel)
 	if err != nil {
-		return nil, fmt.Errorf("failed to verify if Slack manager is in channel: %w", err)
+		return nil, fmt.Errorf("failed to verify if channel %s is a valid alert channel: %w", channel, err)
 	}
 
-	if !managedChannel {
+	if !isAlertChannel {
 		logger.Debug("User reaction to message in un-managed channel")
 		return nil, nil
 	}
@@ -173,7 +164,7 @@ func (c *ReactionsController) getUserInfo(ctx context.Context, channel, userID s
 	logger.Info("User reaction to message in managed channel")
 
 	if requireChannelAdmin {
-		userIsChannelAdmin := c.channelSettings.Settings.UserIsChannelAdmin(ctx, channel, userInfo.ID, c.client.UserIsInGroup)
+		userIsChannelAdmin := c.managerSettings.Settings.UserIsChannelAdmin(ctx, channel, userInfo.ID, c.client.UserIsInGroup)
 
 		if !userIsChannelAdmin {
 			logger.Info("User is not admin in channel")
@@ -192,7 +183,7 @@ func (c *ReactionsController) postNotAdminAlert(ctx context.Context, channel, us
 		return
 	}
 
-	blocks, err := views.NotAdminView(userRealName, c.cfg)
+	blocks, err := views.NotAdminView(userRealName, c.managerSettings.Settings)
 	if err != nil {
 		logger.Errorf("Failed to generate view: %s", err)
 		return

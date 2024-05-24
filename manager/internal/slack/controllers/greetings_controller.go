@@ -17,15 +17,15 @@ type GreetingsController struct {
 	client          handler.SocketClient
 	logger          common.Logger
 	cfg             *config.ManagerConfig
-	channelSettings *models.ChannelSettingsWrapper
+	managerSettings *models.ManagerSettingsWrapper
 }
 
-func NewGreetingsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, logger common.Logger, cfg *config.ManagerConfig, channelSettings *models.ChannelSettingsWrapper) *GreetingsController {
+func NewGreetingsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, logger common.Logger, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *GreetingsController {
 	c := &GreetingsController{
 		client:          client,
 		logger:          logger,
 		cfg:             cfg,
-		channelSettings: channelSettings,
+		managerSettings: managerSettings,
 	}
 
 	eventhandler.HandleEventsAPI(string(slackevents.MemberJoinedChannel), c.memberJoinedChannel)
@@ -57,7 +57,7 @@ func (c *GreetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 
 	isAlertChannel, _, err := c.client.IsAlertChannel(ctx, joinedEvent.Channel)
 	if err != nil {
-		c.logger.Errorf("Failed to verify if Slack Manager is in channel: %s", err)
+		c.logger.Errorf("Failed to verify if channel %s is a valid alert channel: %s", joinedEvent.Channel, err)
 		return
 	}
 
@@ -69,7 +69,7 @@ func (c *GreetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 		logger.Info("User joined un-managed channel")
 	}
 
-	infoChannelConfig, isInfoChannel := c.channelSettings.Settings.GetInfoChannelConfig(joinedEvent.Channel)
+	infoChannelConfig, isInfoChannel := c.managerSettings.Settings.GetInfoChannelConfig(joinedEvent.Channel)
 
 	if isInfoChannel {
 		blocks, err := views.InfoChannelView(infoChannelConfig.TemplatePath, userInfo.RealName)
@@ -86,9 +86,9 @@ func (c *GreetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 
 		logger.WithField("reason", "Greeting message in info channel").Info("Post ephemeral message")
 	} else if isAlertChannel {
-		userIsChannelAdmin := c.channelSettings.Settings.UserIsChannelAdmin(ctx, joinedEvent.Channel, userInfo.ID, c.client.UserIsInGroup)
+		userIsChannelAdmin := c.managerSettings.Settings.UserIsChannelAdmin(ctx, joinedEvent.Channel, userInfo.ID, c.client.UserIsInGroup)
 
-		blocks, err := views.GreetingView(userInfo.RealName, userIsChannelAdmin, c.cfg)
+		blocks, err := views.GreetingView(userInfo.RealName, userIsChannelAdmin, c.managerSettings.Settings)
 		if err != nil {
 			logger.Errorf("Failed to generate view: %s", err)
 			return
@@ -135,7 +135,7 @@ func (c *GreetingsController) memberLeftChannel(ctx context.Context, evt *socket
 
 	isAlertChannel, _, err := c.client.IsAlertChannel(ctx, leftChannelEvent.Channel)
 	if err != nil {
-		logger.Errorf("Failed to verify if Slack manager is in channel: %s", err)
+		logger.Errorf("Failed to verify if channel %s is a valid alert channel: %s", leftChannelEvent.Channel, err)
 		return
 	}
 
