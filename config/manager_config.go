@@ -6,7 +6,7 @@ import (
 )
 
 type ManagerConfig struct {
-	WebhookTimeout        time.Duration      `json:"webhookTimeout"        yaml:"webhookTimeout"`
+	WebhookTimeoutSeconds int                `json:"webhookTimeoutSeconds" yaml:"webhookTimeoutSeconds"`
 	EncryptionKey         string             `json:"encryptionKey"         yaml:"encryptionKey"`
 	CachePrefix           string             `json:"cachePrefix"           yaml:"cachePrefix"`
 	IgnoreCacheReadErrors bool               `json:"ignoreCacheReadErrors" yaml:"ignoreCacheReadErrors"`
@@ -16,7 +16,7 @@ type ManagerConfig struct {
 
 func NewDefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
-		WebhookTimeout:        2 * time.Second,
+		WebhookTimeoutSeconds: 2,
 		CachePrefix:           "slack-manager",
 		IgnoreCacheReadErrors: true,
 		Location:              time.UTC,
@@ -25,7 +25,7 @@ func NewDefaultManagerConfig() *ManagerConfig {
 }
 
 func (c *ManagerConfig) Validate() error {
-	if c.WebhookTimeout < 1*time.Second || c.WebhookTimeout > 30*time.Second {
+	if c.WebhookTimeoutSeconds < 1 || time.Duration(c.WebhookTimeoutSeconds) > 30 {
 		return fmt.Errorf("webhook timeout must be between 1 and 30 seconds")
 	}
 

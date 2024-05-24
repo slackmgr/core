@@ -85,7 +85,7 @@ func (c *Client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
 	c.metrics.RegisterCounter(slackAPIErrorMetric, "Total number of Slack API call errors", "slack_action")
 
 	httpClient := &http.Client{
-		Timeout: c.cfg.HTTPTimeout,
+		Timeout: time.Duration(c.cfg.HTTPTimeoutSeconds) * time.Second,
 	}
 
 	c.api = slack.New(
@@ -645,7 +645,7 @@ func waitForAPIError(ctx context.Context, started time.Time, logger commonlib.Lo
 	var rateLimitError *slack.RateLimitedError
 
 	if errors.As(err, &rateLimitError) {
-		remainingWaitTime := time.Until(started.Add(cfg.MaxRateLimitErrorWaitTime))
+		remainingWaitTime := time.Until(started.Add(time.Duration(cfg.MaxRateLimitErrorWaitTimeSeconds) * time.Second))
 
 		if attempt >= cfg.MaxAttemtsForRateLimitError || remainingWaitTime < time.Second {
 			return fmt.Errorf("failed to call Slack API %s after %d attempts and %d seconds: rate limit error: %w", action, attempt, int(time.Since(started).Seconds()), err)
@@ -655,7 +655,7 @@ func waitForAPIError(ctx context.Context, started time.Time, logger commonlib.Lo
 	}
 
 	if isTransientError(err) {
-		remainingWaitTime := time.Until(started.Add(cfg.MaxTransientErrorWaitTime))
+		remainingWaitTime := time.Until(started.Add(time.Duration(cfg.MaxTransientErrorWaitTimeSeconds) * time.Second))
 
 		if attempt >= cfg.MaxAttemptsForTransientError || remainingWaitTime < time.Second {
 			return fmt.Errorf("failed to call Slack API %s after %d attempts and %d seconds: transient error: %w", action, attempt, int(time.Since(started).Seconds()), err)
@@ -664,7 +664,7 @@ func waitForAPIError(ctx context.Context, started time.Time, logger commonlib.Lo
 		return waitForTransientError(ctx, logger, err, attempt, action, remainingWaitTime)
 	}
 
-	remainingWaitTime := time.Until(started.Add(cfg.MaxFatalErrorWaitTime))
+	remainingWaitTime := time.Until(started.Add(time.Duration(cfg.MaxFatalErrorWaitTimeSeconds) * time.Second))
 
 	if attempt >= cfg.MaxAttemptsForFatalError || remainingWaitTime < time.Second {
 		return fmt.Errorf("failed to call Slack API %s after %d attempts and %d seconds: fatal error: %w", action, attempt, int(time.Since(started).Seconds()), err)

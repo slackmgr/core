@@ -255,7 +255,8 @@ func (s *Server) waitForRateLimit(ctx context.Context, channel string, count int
 	attempt := 1
 
 	for {
-		ctx, cancel := context.WithTimeout(ctx, s.cfg.RateLimit.MaxWaitPerAttempt)
+		timeout := time.Duration(s.cfg.RateLimit.MaxWaitPerAttemptSeconds) * time.Second
+		ctx, cancel := context.WithTimeout(ctx, timeout)
 
 		defer cancel()
 
@@ -303,12 +304,20 @@ func (s *Server) debugLogRequest(req *http.Request, body []byte) {
 }
 
 func (s *Server) getRequestTimeout() time.Duration {
-	apiRateLimitMaxTime := s.cfg.RateLimit.MaxWaitPerAttempt * time.Duration(s.cfg.RateLimit.MaxAttempts)
-	return max(apiRateLimitMaxTime, s.cfg.SlackClient.MaxRateLimitErrorWaitTime, s.cfg.SlackClient.MaxTransientErrorWaitTime, s.cfg.SlackClient.MaxFatalErrorWaitTime) + time.Second
+	apiRateLimitMaxTimeSeconds := s.cfg.RateLimit.MaxWaitPerAttemptSeconds * s.cfg.RateLimit.MaxAttempts
+
+	timeoutSeconds := max(
+		apiRateLimitMaxTimeSeconds,
+		s.cfg.SlackClient.MaxRateLimitErrorWaitTimeSeconds,
+		s.cfg.SlackClient.MaxTransientErrorWaitTimeSeconds,
+		s.cfg.SlackClient.MaxFatalErrorWaitTimeSeconds,
+	)
+
+	return time.Duration(timeoutSeconds+1) * time.Second
 }
 
-func max(values ...time.Duration) time.Duration {
-	max := time.Duration(0)
+func max(values ...int) int {
+	max := 0
 
 	for _, v := range values {
 		if v > max {
