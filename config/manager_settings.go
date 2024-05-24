@@ -358,11 +358,7 @@ func (s *ManagerSettings) InitAndValidate() error {
 }
 
 func initReactionEmojiSlice(emojis []string, defaultEmoji string) []string {
-	if len(emojis) == 0 {
-		return []string{defaultEmoji}
-	}
-
-	cleaned := []string{}
+	result := []string{}
 
 	for _, emoji := range emojis {
 		emoji = strings.TrimSpace(emoji)
@@ -371,19 +367,21 @@ func initReactionEmojiSlice(emojis []string, defaultEmoji string) []string {
 			continue
 		}
 
-		// When comparing with reaction events, we need to remove the colons from the emojis.
-		emoji = strings.Trim(emoji, ":")
-
 		if emoji != "" {
-			cleaned = append(cleaned, emoji)
+			result = append(result, emoji)
 		}
 	}
 
-	if len(cleaned) == 0 {
-		return []string{defaultEmoji}
+	if len(result) == 0 {
+		result = []string{defaultEmoji}
 	}
 
-	return cleaned
+	// When comparing with reaction events, we need to remove the colons from the emojis.
+	for i, emoji := range result {
+		result[i] = strings.Trim(emoji, ":")
+	}
+
+	return result
 }
 
 func initStatusEmoji(emoji, defaultEmoji string) string {
