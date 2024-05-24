@@ -44,6 +44,11 @@ func messageExtender(ctx context.Context, sourceCh <-chan models.Message, logger
 }
 
 func processInFlightMessages(ctx context.Context, messages map[string]models.Message, logger common.Logger) {
+	if len(messages) == 0 {
+		logger.Debug("No in-flight messages to process")
+		return
+	}
+
 	logger.WithField("count", len(messages)).Debug("Starting in-flight message processing")
 
 	started := time.Now()
