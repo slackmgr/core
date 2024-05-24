@@ -58,6 +58,8 @@ func (c *ReactionsController) reactionAdded(ctx context.Context, evt *socketmode
 
 	reaction := c.managerSettings.Settings.MapSlackPostReaction(reactionAddedEvent.Reaction)
 
+	c.logger.Debugf("Registered added reaction %s, mapped to %s", reactionAddedEvent.Reaction, reaction)
+
 	switch reaction {
 	case config.IssueReactionTerminate:
 		c.sendReactionAddedCommand(ctx, reactionAddedEvent, models.CommandActionTerminateIssue, true)
