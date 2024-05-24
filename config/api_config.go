@@ -2,14 +2,13 @@ package config
 
 import (
 	"fmt"
-	"time"
 )
 
 type RateLimitConfig struct {
-	AlertsPerSecond   float64       `json:"alertsPerSecond"   yaml:"alertsPerSecond"`
-	AllowedBurst      int           `json:"allowedBurst"      yaml:"allowedBurst"`
-	MaxWaitPerAttempt time.Duration `json:"maxWaitPerAttempt" yaml:"maxWaitPerAttempt"`
-	MaxAttempts       int           `json:"maxAttempts"       yaml:"maxAttempts"`
+	AlertsPerSecond          float64 `json:"alertsPerSecond"          yaml:"alertsPerSecond"`
+	AllowedBurst             int     `json:"allowedBurst"             yaml:"allowedBurst"`
+	MaxWaitPerAttemptSeconds int     `json:"maxWaitPerAttemptSeconds" yaml:"maxWaitPerAttemptSeconds"`
+	MaxAttempts              int     `json:"maxAttempts"              yaml:"maxAttempts"`
 }
 
 type APIConfig struct {
@@ -30,10 +29,10 @@ func NewDefaultAPIConfig() *APIConfig {
 		ErrorReportChannelID:   "",
 		MaxUsersInAlertChannel: 100,
 		RateLimit: &RateLimitConfig{
-			AlertsPerSecond:   0.5,
-			AllowedBurst:      10,
-			MaxWaitPerAttempt: 10 * time.Second,
-			MaxAttempts:       3,
+			AlertsPerSecond:          0.5,
+			AllowedBurst:             10,
+			MaxWaitPerAttemptSeconds: 10,
+			MaxAttempts:              3,
 		},
 		SlackClient: NewDefaultSlackClientConfig(),
 	}

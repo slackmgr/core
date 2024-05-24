@@ -39,7 +39,14 @@ type channelManager struct {
 
 func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveRequestCh chan<- *models.MoveRequest, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *channelManager {
 	restyLogger := newRestyLogger(logger)
-	webhookClient := resty.New().SetRetryCount(2).SetRetryWaitTime(time.Second).AddRetryCondition(webhookRetryPolicy).SetLogger(restyLogger).SetTimeout(cfg.WebhookTimeout)
+
+	webhookClient := resty.New().
+		SetRetryCount(2).
+		SetRetryWaitTime(time.Second).
+		AddRetryCondition(webhookRetryPolicy).
+		SetLogger(restyLogger).
+		SetTimeout(time.Duration(cfg.WebhookTimeoutSeconds) * time.Second)
+
 	logger = logger.WithField("slack_channel_id", channelID)
 
 	c := &channelManager{

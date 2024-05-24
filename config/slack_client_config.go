@@ -2,22 +2,21 @@ package config
 
 import (
 	"fmt"
-	"time"
 )
 
 type SlackClientConfig struct {
-	AppToken                     string        `json:"appToken"                     yaml:"appToken"`
-	BotToken                     string        `json:"botToken"                     yaml:"botToken"`
-	DebugLogging                 bool          `json:"debugLogging"                 yaml:"debugLogging"`
-	DryRun                       bool          `json:"dryRun"                       yaml:"dryRun"`
-	Concurrency                  int           `json:"concurrency"                  yaml:"concurrency"`
-	MaxAttemtsForRateLimitError  int           `json:"maxAttemtsForRateLimitError"  yaml:"maxAttemtsForRateLimitError"`
-	MaxAttemptsForTransientError int           `json:"maxAttemptsForTransientError" yaml:"maxAttemptsForTransientError"`
-	MaxAttemptsForFatalError     int           `json:"maxAttemptsForFatalError"     yaml:"maxAttemptsForFatalError"`
-	MaxRateLimitErrorWaitTime    time.Duration `json:"maxRateLimitErrorWaitTime"    yaml:"maxRateLimitErrorWaitTime"`
-	MaxTransientErrorWaitTime    time.Duration `json:"maxTransientErrorWaitTime"    yaml:"maxTransientErrorWaitTime"`
-	MaxFatalErrorWaitTime        time.Duration `json:"maxFatalErrorWaitTime"        yaml:"maxFatalErrorWaitTime"`
-	HTTPTimeout                  time.Duration `json:"httpTimeout"                  yaml:"httpTimeout"`
+	AppToken                         string `json:"appToken"                         yaml:"appToken"`
+	BotToken                         string `json:"botToken"                         yaml:"botToken"`
+	DebugLogging                     bool   `json:"debugLogging"                     yaml:"debugLogging"`
+	DryRun                           bool   `json:"dryRun"                           yaml:"dryRun"`
+	Concurrency                      int    `json:"concurrency"                      yaml:"concurrency"`
+	MaxAttemtsForRateLimitError      int    `json:"maxAttemtsForRateLimitError"      yaml:"maxAttemtsForRateLimitError"`
+	MaxAttemptsForTransientError     int    `json:"maxAttemptsForTransientError"     yaml:"maxAttemptsForTransientError"`
+	MaxAttemptsForFatalError         int    `json:"maxAttemptsForFatalError"         yaml:"maxAttemptsForFatalError"`
+	MaxRateLimitErrorWaitTimeSeconds int    `json:"maxRateLimitErrorWaitTimeSeconds" yaml:"maxRateLimitErrorWaitTimeSeconds"`
+	MaxTransientErrorWaitTimeSeconds int    `json:"maxTransientErrorWaitTimeSeconds" yaml:"maxTransientErrorWaitTimeSeconds"`
+	MaxFatalErrorWaitTimeSeconds     int    `json:"maxFatalErrorWaitTimeSeconds"     yaml:"maxFatalErrorWaitTimeSeconds"`
+	HTTPTimeoutSeconds               int    `json:"httpTimeoutSeconds"               yaml:"httpTimeoutSeconds"`
 }
 
 func NewDefaultSlackClientConfig() *SlackClientConfig {
@@ -43,20 +42,20 @@ func (c *SlackClientConfig) SetDefaults() {
 		c.MaxAttemptsForFatalError = 5
 	}
 
-	if c.MaxRateLimitErrorWaitTime <= 0 {
-		c.MaxRateLimitErrorWaitTime = 2 * time.Minute
+	if c.MaxRateLimitErrorWaitTimeSeconds <= 0 {
+		c.MaxRateLimitErrorWaitTimeSeconds = 120
 	}
 
-	if c.MaxTransientErrorWaitTime <= 0 {
-		c.MaxTransientErrorWaitTime = 30 * time.Second
+	if c.MaxTransientErrorWaitTimeSeconds <= 0 {
+		c.MaxTransientErrorWaitTimeSeconds = 30
 	}
 
-	if c.MaxFatalErrorWaitTime <= 0 {
-		c.MaxFatalErrorWaitTime = 30 * time.Second
+	if c.MaxFatalErrorWaitTimeSeconds <= 0 {
+		c.MaxFatalErrorWaitTimeSeconds = 30
 	}
 
-	if c.HTTPTimeout <= 0 {
-		c.HTTPTimeout = 30 * time.Second
+	if c.HTTPTimeoutSeconds <= 0 {
+		c.HTTPTimeoutSeconds = 30
 	}
 }
 
@@ -69,7 +68,7 @@ func (c *SlackClientConfig) Validate() error {
 		return fmt.Errorf("bot token is empty")
 	}
 
-	if c.HTTPTimeout <= 0 {
+	if c.HTTPTimeoutSeconds <= 0 {
 		return fmt.Errorf("http timeout must be greater than 0")
 	}
 
