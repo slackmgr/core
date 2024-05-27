@@ -117,7 +117,8 @@ func (c *channelManager) init(ctx context.Context, issues []*models.Issue) error
 
 // Run waits for and handles incoming alerts, commands and issues.
 // It processes existing issues at given intervals, e.g. for archiving and escalation.
-// This method blocks until the context is cancelled (all errors are logged, not returned).
+// This method blocks until the context is cancelled.
+// All errors are logged and not returned.
 func (c *channelManager) Run(ctx context.Context, waitGroup *sync.WaitGroup) {
 	c.logger.Info("Channel manager started")
 	defer c.logger.Info("Channel manager exited")
@@ -356,6 +357,10 @@ func (c *channelManager) processIncomingMovedIssue(ctx context.Context, issue *m
 
 // processActiveIssues processes all active issues. It handles escalations, archiving and Slack updates (where needed).
 func (c *channelManager) processActiveIssues(ctx context.Context) error {
+	if c.issueCollection.Count() == 0 {
+		return nil
+	}
+
 	started := time.Now()
 
 	c.logger.WithField("count", c.issueCollection.Count()).Debug("Issue processing started")
@@ -521,7 +526,7 @@ func (c *channelManager) saveIssuesToDB(ctx context.Context, issues []*models.Is
 }
 
 func hashIssue(id string, body []byte) (string, string) {
-	key := "issue-hash::" + id
+	key := "hashIssue::" + id
 	return key, string(internal.HashBytes(body))
 }
 

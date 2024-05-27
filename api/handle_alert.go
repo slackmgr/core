@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -376,37 +375,15 @@ func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) e
 			continue
 		}
 
-		// Find an alert mapping rule matching the route key (if any)
-		if channel, ok := s.findChannelForRouteKey(req.Context(), alert.RouteKey); ok {
+		// Find an alert mapping rule matching the route key and alert type (if any)
+		if channel, ok := s.apiSettings.Match(alert.RouteKey, alert.Type); ok {
 			alert.SlackChannelID = channel
 		} else {
-			return fmt.Errorf("no mapping exists for route key %s", alert.RouteKey)
+			return fmt.Errorf("no mapping exists for route key %s and alert type %s", alert.RouteKey, alert.Type)
 		}
 	}
 
 	return nil
-}
-
-func (s *Server) findChannelForRouteKey(ctx context.Context, routeKey string) (string, bool) {
-	cacheKey := "slack-manager::findChannelForRouteKey::" + routeKey
-
-	if val, found := s.cache.Get(ctx, cacheKey); found {
-		if val == "N/A" {
-			return "", false
-		}
-		return val, true
-	}
-
-	channel, found := s.apiSettings.Match(routeKey)
-
-	if found {
-		s.cache.Set(ctx, cacheKey, channel, 30*time.Second)
-		return channel, true
-	}
-
-	s.cache.Set(ctx, cacheKey, "N/A", 30*time.Second)
-
-	return "", false
 }
 
 func ignoreAlert(alert *common.Alert) (bool, string) {

@@ -18,12 +18,13 @@ var (
 type Issue struct {
 	ID                        string        `json:"id"`
 	CorrelationID             string        `json:"correlationId"`
+	Created                   time.Time     `json:"created"`
+	FirstAlert                *Alert        `json:"firstAlert"`
 	LastAlert                 *Alert        `json:"lastAlert"`
 	AlertCount                int           `json:"alertCount"`
 	LastAlertReceived         time.Time     `json:"lastAlertReceived"`
 	LastSlackMention          string        `json:"lastSlackMention"`
 	LastSlackMentionTime      time.Time     `json:"lastSlackMentionTime"`
-	Created                   time.Time     `json:"created"`
 	AutoResolvePeriod         time.Duration `json:"autoResolvePeriod"`
 	ArchiveDelay              time.Duration `json:"archiveDelay"`
 	ArchiveTime               time.Time     `json:"archiveTime"`
@@ -64,6 +65,7 @@ func NewIssue(alert *Alert, logger common.Logger) *Issue {
 		AlertCount:           1,
 		Created:              now,
 		LastAlertReceived:    now,
+		FirstAlert:           alert,
 		LastAlert:            alert,
 		AutoResolvePeriod:    time.Duration(alert.AutoResolveSeconds) * time.Second,
 		ArchiveDelay:         time.Duration(alert.ArchivingDelaySeconds) * time.Second,
