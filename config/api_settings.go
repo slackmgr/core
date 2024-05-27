@@ -10,12 +10,15 @@ var slackChannelIDRegex = regexp.MustCompile(`^[0-9a-zA-Z]{9,15}$`)
 
 type APISettings struct {
 	RoutingRules []*RoutingRule `json:"routingRules" yaml:"routingRules"`
-	initialized  bool
+
+	ruleMatchCache map[string]string
+	initialized    bool
 }
 
 type RoutingRule struct {
 	TeamName     string   `json:"teamName"     yaml:"teamName"`
 	Description  string   `json:"description"  yaml:"description"`
+	AlertType    string   `json:"alertType"    yaml:"alertType"`
 	Equals       []string `json:"equals"       yaml:"equals"`
 	HasPrefix    []string `json:"hasPrefix"    yaml:"hasPrefix"`
 	MatchesRegex []string `json:"matchesRegex" yaml:"matchesRegex"`
@@ -42,6 +45,8 @@ func (s *APISettings) InitAndValidate() error {
 		if r.Description == "" {
 			return fmt.Errorf("rule[%d].description cannot be empty", i)
 		}
+
+		r.AlertType = strings.ToLower(strings.TrimSpace(r.AlertType))
 
 		for j, s := range r.Equals {
 			s = strings.ToLower(strings.TrimSpace(s))
@@ -100,60 +105,123 @@ func (s *APISettings) InitAndValidate() error {
 		}
 	}
 
+	s.ruleMatchCache = make(map[string]string)
 	s.initialized = true
 
 	return nil
 }
 
-func (s *APISettings) Match(key string) (string, bool) {
-	if rule := s.matchMappingRule(key); rule != nil {
+func (s *APISettings) Match(key, alertType string) (string, bool) {
+	cacheKey := key + "::" + alertType
+
+	if channel, ok := s.ruleMatchCache[cacheKey]; ok {
+		return channel, channel != ""
+	}
+
+	if rule := s.matchMappingRule(key, alertType); rule != nil {
+		s.ruleMatchCache[cacheKey] = rule.Channel
 		return rule.Channel, true
 	}
+
+	s.ruleMatchCache[cacheKey] = ""
 
 	return "", false
 }
 
-func (s *APISettings) matchMappingRule(key string) *RoutingRule {
+func (s *APISettings) matchMappingRule(key, alertType string) *RoutingRule {
 	if len(s.RoutingRules) == 0 {
 		return nil
 	}
-
-	key = strings.ToLower(strings.TrimSpace(key))
 
 	if key == "" {
 		return nil
 	}
 
 	// Evaluate exact (equals) matches first
-	for _, rule := range s.RoutingRules {
-		if rule.matchEquals(key) {
-			return rule
-		}
+	if rule := s.findRuleWithEqualsMatch(key, alertType); rule != nil {
+		return rule
 	}
 
 	// Then evaluate prefix matches
-	for _, rule := range s.RoutingRules {
-		if rule.matchPrefix(key) {
-			return rule
-		}
+	if rule := s.findRuleWithPrefixMatch(key, alertType); rule != nil {
+		return rule
 	}
 
 	// Then evalute regex matches
+	if rule := s.findRuleWithRegexMatch(key, alertType); rule != nil {
+		return rule
+	}
+
+	// Then try to find a match-all rule with the correct alert type
 	for _, rule := range s.RoutingRules {
-		if rule.matchRegex(key) {
+		if alertType == rule.AlertType && rule.MatchAll {
 			return rule
 		}
 	}
 
-	// Then try to find a match-all rule
+	// Finally, try to find a match-all rule with an empty alert type
 	for _, rule := range s.RoutingRules {
-		if rule.MatchAll {
+		if rule.AlertType == "" && rule.MatchAll {
 			return rule
 		}
 	}
 
 	// Nothing found - return nil
 	return nil
+}
+
+func (s *APISettings) findRuleWithEqualsMatch(key, alertType string) *RoutingRule {
+	var emptyAlertTypeMatch *RoutingRule
+
+	// If we find a rule that matches both key and alert type, return it immediately
+	// If we find a rule that matches the key, but has an empty alert type, return it if no other rule matches both key and alert type
+	for _, rule := range s.RoutingRules {
+		if rule.matchEquals(key) {
+			if alertType == rule.AlertType {
+				return rule
+			} else if rule.AlertType == "" && emptyAlertTypeMatch == nil {
+				emptyAlertTypeMatch = rule
+			}
+		}
+	}
+
+	return emptyAlertTypeMatch
+}
+
+func (s *APISettings) findRuleWithPrefixMatch(key, alertType string) *RoutingRule {
+	var emptyAlertTypeMatch *RoutingRule
+
+	// If we find a rule that matches both key prefix and alert type, return it immediately
+	// If we find a rule that matches the key prefix, but has an empty alert type, return it if no other rule matches both key prefix and alert type
+	for _, rule := range s.RoutingRules {
+		if rule.matchPrefix(key) {
+			if alertType == rule.AlertType {
+				return rule
+			} else if rule.AlertType == "" && emptyAlertTypeMatch == nil {
+				emptyAlertTypeMatch = rule
+			}
+		}
+	}
+
+	return emptyAlertTypeMatch
+}
+
+func (s *APISettings) findRuleWithRegexMatch(key, alertType string) *RoutingRule {
+	var emptyAlertTypeMatch *RoutingRule
+
+	// If we find a rule that regex matches both key and alert type, return it immediately
+	// If we find a rule that regex matches the key, but has an empty alert type, return it if no other rule matches both key regex and alert type
+	for _, rule := range s.RoutingRules {
+		if rule.matchRegex(key) {
+			if alertType == rule.AlertType {
+				return rule
+			} else if rule.AlertType == "" && emptyAlertTypeMatch == nil {
+				emptyAlertTypeMatch = rule
+			}
+		}
+	}
+
+	return emptyAlertTypeMatch
 }
 
 func (r *RoutingRule) matchEquals(key string) bool {

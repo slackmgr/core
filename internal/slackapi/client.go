@@ -401,7 +401,7 @@ func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummar
 
 	resultJSON, err := json.Marshal(channels)
 	if err != nil {
-		c.logger.Errorf("failed to json marshal bot channel list: %w", err)
+		c.logger.Errorf("failed to json marshal channel list: %w", err)
 	} else {
 		c.cache.Set(ctx, cacheKey, string(resultJSON), time.Minute)
 	}

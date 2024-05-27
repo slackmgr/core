@@ -32,7 +32,6 @@ type Server struct {
 	limitersByChannel map[string]*rate.Limiter
 	limitersLock      *sync.Mutex
 	cacheStore        cachestore.StoreInterface
-	cache             *internal.Cache[string]
 	slackAPI          *slackapi.Client
 	channelInfoSyncer *channelInfoSyncer
 	logger            common.Logger
@@ -90,9 +89,6 @@ func (s *Server) Run(ctx context.Context) error {
 	if _, err := s.slackAPI.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to Slack API: %w", err)
 	}
-
-	cacheKeyPrefix := s.cfg.CacheKeyPrefix + "api::"
-	s.cache = internal.NewCache[string](s.cacheStore, cacheKeyPrefix, s.logger)
 
 	s.channelInfoSyncer = newChannelInfoSyncer(s.slackAPI, s.logger)
 
