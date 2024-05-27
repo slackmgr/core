@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/eko/gocache/lib/v4/cache"
 	cachestore "github.com/eko/gocache/lib/v4/store"
 	commonlib "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
@@ -21,40 +20,37 @@ import (
 
 const (
 	slackRequestMetric   = "slack_request"
-	slackhitMetric       = "slack_cache_hit"
+	slackCacheHitMetric  = "slack_cache_hit"
 	slackAPICallMetric   = "slack_api_call"
 	slackAPIErrorMetric  = "slack_api_error"
 	ChannelNotFoundError = "channel_not_found"
+	ThreadNotFoundError  = "thread_not_found"
+	NoSuchSubTeamError   = "no_such_subteam"
 )
 
 type retryable interface{ Retryable() bool }
 
 type Client struct {
-	api         *slack.Client
-	logger      commonlib.Logger
-	cache       *internal.Cache[string]
-	cachePrefix string
-	metrics     commonlib.Metrics
-	cfg         *config.SlackClientConfig
-	connected   bool
-	botUserID   string
+	api       *slack.Client
+	logger    commonlib.Logger
+	cache     *internal.Cache[string]
+	metrics   commonlib.Metrics
+	cfg       *config.SlackClientConfig
+	connected bool
+	botUserID string
 }
 
-func New(cacheStore cachestore.StoreInterface, cachePrefix string, logger commonlib.Logger, metrics commonlib.Metrics, cfg *config.SlackClientConfig) *Client {
+func New(cacheStore cachestore.StoreInterface, cacheKeyPrefix string, logger commonlib.Logger, metrics commonlib.Metrics, cfg *config.SlackClientConfig) *Client {
 	cfg.SetDefaults()
 
-	cache := internal.NewCache(cache.New[string](cacheStore), logger)
-
-	if cachePrefix == "" {
-		cachePrefix = "slack-manager"
-	}
+	cacheKeyPrefix += "slack-api-client::"
+	cache := internal.NewCache[string](cacheStore, cacheKeyPrefix, logger)
 
 	return &Client{
-		logger:      logger,
-		cache:       cache,
-		cachePrefix: fmt.Sprintf("%s::slackapi::", cachePrefix),
-		metrics:     metrics,
-		cfg:         cfg,
+		logger:  logger,
+		cache:   cache,
+		metrics: metrics,
+		cfg:     cfg,
 	}
 }
 
@@ -80,7 +76,7 @@ func (c *Client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
 	}
 
 	c.metrics.RegisterCounter(slackRequestMetric, "Total number of Slack client requests", "slack_action")
-	c.metrics.RegisterCounter(slackhitMetric, "Total number of Slack client cache hits", "slack_action")
+	c.metrics.RegisterCounter(slackCacheHitMetric, "Total number of Slack client cache hits", "slack_action")
 	c.metrics.RegisterCounter(slackAPICallMetric, "Total number of Slack API calls", "slack_action")
 	c.metrics.RegisterCounter(slackAPIErrorMetric, "Total number of Slack API call errors", "slack_action")
 
@@ -282,9 +278,9 @@ func (c *Client) MessageHasReplies(ctx context.Context, channelID, ts string) (b
 		return msgs, nil, err
 	}
 
-	msgs, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f, ChannelNotFoundError, "thread_not_found")
+	msgs, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f, ChannelNotFoundError, ThreadNotFoundError)
 	if err != nil {
-		if err.Error() == ChannelNotFoundError || err.Error() == "thread_not_found" {
+		if err.Error() == ChannelNotFoundError || err.Error() == ThreadNotFoundError {
 			return false, nil
 		}
 		return false, fmt.Errorf("failed to read Slack message %s replies in channel %s: %w", ts, channelID, err)
@@ -302,10 +298,10 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("%s::GetChannelInfo::%s", c.cachePrefix, channelID)
+	cacheKey := fmt.Sprintf("GetChannelInfo::%s", channelID)
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.AddToCounter(slackhitMetric, 1, action)
+		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
 
 		info := slack.Channel{}
 
@@ -356,10 +352,10 @@ func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummar
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("%s::ListBotChannels", c.cachePrefix)
+	cacheKey := "ListBotChannels"
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.AddToCounter(slackhitMetric, 1, action)
+		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
 
 		channels := []*internal.ChannelSummary{}
 
@@ -422,10 +418,10 @@ func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("%s::GetUserInfo::%s", c.cachePrefix, userID)
+	cacheKey := fmt.Sprintf("GetUserInfo::%s", userID)
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.AddToCounter(slackhitMetric, 1, action)
+		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
 
 		user := slack.User{}
 
@@ -465,10 +461,10 @@ func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("%s::ListUserGroupMembers::%s", c.cachePrefix, groupID)
+	cacheKey := fmt.Sprintf("ListUserGroupMembers::%s", groupID)
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.AddToCounter(slackhitMetric, 1, action)
+		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
 
 		var result map[string]struct{}
 
@@ -486,9 +482,9 @@ func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 		return val, nil, err
 	}
 
-	userIDs, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f, "no_such_subteam")
+	userIDs, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f, NoSuchSubTeamError)
 	if err != nil {
-		if err.Error() == "no_such_subteam" {
+		if err.Error() == NoSuchSubTeamError {
 			return result, nil
 		}
 		return nil, fmt.Errorf("failed to list Slack user group members for %s: %w", groupID, err)
@@ -517,10 +513,10 @@ func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("%s::GetUserIDsInChannel::%s", c.cachePrefix, channelID)
+	cacheKey := fmt.Sprintf("GetUserIDsInChannel::%s", channelID)
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.AddToCounter(slackhitMetric, 1, action)
+		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
 
 		var result map[string]struct{}
 
@@ -579,7 +575,7 @@ func (c *Client) BotIsInChannel(ctx context.Context, channelID string) (bool, er
 		return false, errors.New("channelID cannot be empty")
 	}
 
-	cacheKey := fmt.Sprintf("%s::BotIsInChannel::%s", c.cachePrefix, channelID)
+	cacheKey := fmt.Sprintf("BotIsInChannel::%s", channelID)
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		return val == "true", nil

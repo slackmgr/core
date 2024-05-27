@@ -8,7 +8,7 @@ import (
 type ManagerConfig struct {
 	WebhookTimeoutSeconds int                `json:"webhookTimeoutSeconds" yaml:"webhookTimeoutSeconds"`
 	EncryptionKey         string             `json:"encryptionKey"         yaml:"encryptionKey"`
-	CachePrefix           string             `json:"cachePrefix"           yaml:"cachePrefix"`
+	CacheKeyPrefix        string             `json:"cacheKeyPrefix"        yaml:"cacheKeyPrefix"`
 	IgnoreCacheReadErrors bool               `json:"ignoreCacheReadErrors" yaml:"ignoreCacheReadErrors"`
 	Location              *time.Location     `json:"location"              yaml:"location"`
 	SlackClient           *SlackClientConfig `json:"slackClient"           yaml:"slackClient"`
@@ -17,7 +17,7 @@ type ManagerConfig struct {
 func NewDefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
 		WebhookTimeoutSeconds: 2,
-		CachePrefix:           "slack-manager",
+		CacheKeyPrefix:        "slack-manager::",
 		IgnoreCacheReadErrors: true,
 		Location:              time.UTC,
 		SlackClient:           NewDefaultSlackClientConfig(),

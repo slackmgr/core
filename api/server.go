@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eko/gocache/lib/v4/cache"
 	cachestore "github.com/eko/gocache/lib/v4/store"
 	gocache_store "github.com/eko/gocache/store/go_cache/v4"
 	"github.com/gorilla/handlers"
@@ -86,13 +85,14 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize alert mapping: %w", err)
 	}
 
-	s.slackAPI = slackapi.New(s.cacheStore, s.cfg.CachePrefix, s.logger, s.metrics, s.cfg.SlackClient)
+	s.slackAPI = slackapi.New(s.cacheStore, s.cfg.CacheKeyPrefix, s.logger, s.metrics, s.cfg.SlackClient)
 
 	if _, err := s.slackAPI.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect to Slack API: %w", err)
 	}
 
-	s.cache = internal.NewCache(cache.New[string](s.cacheStore), s.logger)
+	cacheKeyPrefix := s.cfg.CacheKeyPrefix + "api::"
+	s.cache = internal.NewCache[string](s.cacheStore, cacheKeyPrefix, s.logger)
 
 	s.channelInfoSyncer = newChannelInfoSyncer(s.slackAPI, s.logger)
 

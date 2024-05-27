@@ -40,3 +40,9 @@ func Hash(input ...string) string {
 
 	return base64.URLEncoding.EncodeToString(bs)
 }
+
+func HashBytes(b []byte) []byte {
+	h := sha256.New()
+	h.Write(b)
+	return h.Sum(nil)
+}

@@ -14,7 +14,7 @@ type RateLimitConfig struct {
 type APIConfig struct {
 	RestPort               string             `json:"restPort"               yaml:"restPort"`
 	EncryptionKey          string             `json:"encryptionKey"          yaml:"encryptionKey"`
-	CachePrefix            string             `json:"cachePrefix"            yaml:"cachePrefix"`
+	CacheKeyPrefix         string             `json:"cacheKeyPrefix"         yaml:"cacheKeyPrefix"`
 	ErrorReportChannelID   string             `json:"errorReportChannelID"   yaml:"errorReportChannelID"`
 	MaxUsersInAlertChannel int                `json:"maxUsersInAlertChannel" yaml:"maxUsersInAlertChannel"`
 	RateLimit              *RateLimitConfig   `json:"rateLimit"              yaml:"rateLimit"`
@@ -25,7 +25,7 @@ func NewDefaultAPIConfig() *APIConfig {
 	return &APIConfig{
 		RestPort:               "8080",
 		EncryptionKey:          "",
-		CachePrefix:            "slack-manager",
+		CacheKeyPrefix:         "slack-manager::",
 		ErrorReportChannelID:   "",
 		MaxUsersInAlertChannel: 100,
 		RateLimit: &RateLimitConfig{

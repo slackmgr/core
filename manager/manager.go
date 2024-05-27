@@ -18,11 +18,11 @@ import (
 
 type DB interface {
 	SaveAlert(ctx context.Context, id string, body json.RawMessage) error
-	LoadAllActiveIssues(ctx context.Context) (map[string]json.RawMessage, error)
 	CreateOrUpdateIssue(ctx context.Context, id string, body json.RawMessage) error
-	UpdateIssues(ctx context.Context, issues map[string]json.RawMessage) (int, error)
-	FindSingleIssue(ctx context.Context, filterTerms map[string]interface{}) (string, json.RawMessage, error)
-	GetMoveMappings(ctx context.Context, filterTerms map[string]interface{}) ([]json.RawMessage, error)
+	UpdateIssues(ctx context.Context, issues map[string]json.RawMessage) error
+	FindSingleIssue(ctx context.Context, opts ...common.FindOption) (string, json.RawMessage, error)
+	LoadIssues(ctx context.Context, opts ...common.FindOption) (map[string]json.RawMessage, error)
+	GetMoveMappings(ctx context.Context, opts ...common.FindOption) ([]json.RawMessage, error)
 	SaveMoveMapping(ctx context.Context, id string, body json.RawMessage) error
 }
 
@@ -108,7 +108,7 @@ func (m *Manager) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to connect Slack client: %w", err)
 	}
 
-	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.logger, m.metrics, m.cfg, m.managerSettings)
+	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.cacheStore, m.logger, m.metrics, m.cfg, m.managerSettings)
 
 	if err := m.coordinator.init(ctx); err != nil {
 		return fmt.Errorf("failed to initialize coordinator: %w", err)

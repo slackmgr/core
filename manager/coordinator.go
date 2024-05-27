@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/eko/gocache/lib/v4/store"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
@@ -22,6 +23,7 @@ type coordinator struct {
 	db                       DB
 	alertQueue               FifoQueue
 	slack                    *slack.Client
+	cacheStore               store.StoreInterface
 	logger                   common.Logger
 	metrics                  common.Metrics
 	cfg                      *config.ManagerConfig
@@ -31,7 +33,7 @@ type coordinator struct {
 	moveMappings             map[string]map[string]*models.MoveMapping
 }
 
-func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *coordinator {
+func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *coordinator {
 	return &coordinator{
 		channelManagers:          make(map[string]*channelManager),
 		channelManagersWaitGroup: &sync.WaitGroup{},
@@ -39,6 +41,7 @@ func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, logger com
 		db:                       db,
 		alertQueue:               alertQueue,
 		slack:                    slack,
+		cacheStore:               cacheStore,
 		logger:                   logger,
 		metrics:                  metrics,
 		cfg:                      cfg,
@@ -50,7 +53,8 @@ func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, logger com
 }
 
 func (c *coordinator) init(ctx context.Context) error {
-	issueBodies, err := c.db.LoadAllActiveIssues(ctx)
+	// Load all active issues from the database (i.e. issues that are not archived)
+	issueBodies, err := c.db.LoadIssues(ctx, common.WithFieldNotEquals("archived", true))
 	if err != nil {
 		return err
 	}
@@ -64,8 +68,10 @@ func (c *coordinator) init(ctx context.Context) error {
 			return fmt.Errorf("failed to unmarshal issue %s: %w", id, err)
 		}
 
-		// Backwards compatibility for issues without populated ID
-		issue.ID = id
+		// Sanity check: we asked the database for non-archived issues, but we should check that the filter actually worked
+		if issue.Archived {
+			return fmt.Errorf("database filter failed when loading active issues: issue %s is archived", id)
+		}
 
 		issues[issue.SlackChannelID()] = append(issues[issue.SlackChannelID()], issue)
 	}
@@ -250,11 +256,7 @@ func (c *coordinator) getOrCreateMoveMappingsForChannel(ctx context.Context, cha
 		return mappings, nil
 	}
 
-	filterTerms := map[string]interface{}{
-		"originalChannelId": channelID,
-	}
-
-	mappingsList, err := c.db.GetMoveMappings(ctx, filterTerms)
+	mappingsList, err := c.db.GetMoveMappings(ctx, common.WithFieldEquals("originalChannelId", channelID))
 	if err != nil {
 		return nil, err
 	}
@@ -268,6 +270,7 @@ func (c *coordinator) getOrCreateMoveMappingsForChannel(ctx context.Context, cha
 			return nil, fmt.Errorf("failed to unmarshal move mapping: %w", err)
 		}
 
+		// Sanity check
 		if mapping.OriginalChannelID != channelID {
 			return nil, fmt.Errorf("move mapping for channel %s has incorrect original channel ID %s", channelID, mapping.OriginalChannelID)
 		}
@@ -305,7 +308,7 @@ func (c *coordinator) findOrCreateChannelManager(ctx context.Context, channelID 
 		return manager, nil
 	}
 
-	manager := newChannelManager(channelID, c.slack, c.db, c.moveRequestCh, c.logger, c.metrics, c.cfg, c.managerSettings)
+	manager := newChannelManager(channelID, c.slack, c.db, c.moveRequestCh, c.cacheStore, c.logger, c.metrics, c.cfg, c.managerSettings)
 
 	if err := manager.init(ctx, existingIssues); err != nil {
 		return nil, fmt.Errorf("failed to initialize channel manager: %w", err)

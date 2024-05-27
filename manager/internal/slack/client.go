@@ -77,7 +77,7 @@ func (c *Client) Connect(ctx context.Context) error {
 		return fmt.Errorf("channel settings must be set before connecting")
 	}
 
-	c.api = slackapi.New(c.cacheStore, c.cfg.CachePrefix, c.logger, c.metrics, c.cfg.SlackClient)
+	c.api = slackapi.New(c.cacheStore, c.cfg.CacheKeyPrefix, c.logger, c.metrics, c.cfg.SlackClient)
 
 	if _, err := c.api.Connect(ctx); err != nil {
 		return err

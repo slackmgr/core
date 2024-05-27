@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/eko/gocache/lib/v4/cache"
 	"github.com/eko/gocache/lib/v4/store"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
@@ -28,7 +27,8 @@ type ReactionsController struct {
 }
 
 func NewReactionsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *ReactionsController {
-	cache := internal.NewCache(cache.New[string](cacheStore), logger)
+	cacheKeyPrefix := cfg.CacheKeyPrefix + "reactions-controller::"
+	cache := internal.NewCache[string](cacheStore, cacheKeyPrefix, logger)
 
 	c := &ReactionsController{
 		client:          client,
