@@ -12,20 +12,24 @@ import (
 )
 
 type Cache[T any] struct {
-	cache  cache.CacheInterface[T]
-	logger common.Logger
-	rng    *rand.Rand
+	cache     cache.CacheInterface[T]
+	keyPrefix string
+	logger    common.Logger
+	rng       *rand.Rand
 }
 
-func NewCache[T any](cache cache.CacheInterface[T], logger common.Logger) *Cache[T] {
+func NewCache[T any](cacheStore store.StoreInterface, keyPrefix string, logger common.Logger) *Cache[T] {
 	return &Cache[T]{
-		cache:  cache,
-		logger: logger,
-		rng:    rand.New(rand.NewSource(time.Now().UnixNano())), // #nosec
+		cache:     cache.New[T](cacheStore),
+		keyPrefix: keyPrefix,
+		logger:    logger,
+		rng:       rand.New(rand.NewSource(time.Now().UnixNano())), // #nosec
 	}
 }
 
 func (c *Cache[T]) Get(ctx context.Context, key string) (T, bool) {
+	key = c.keyPrefix + key
+
 	value, err := c.cache.Get(ctx, key)
 	if err != nil {
 		if err.Error() == store.NOT_FOUND_ERR {
@@ -41,12 +45,16 @@ func (c *Cache[T]) Get(ctx context.Context, key string) (T, bool) {
 }
 
 func (c *Cache[T]) Set(ctx context.Context, key string, value T, expiration time.Duration) {
+	key = c.keyPrefix + key
+
 	if err := c.cache.Set(ctx, key, value, store.WithExpiration(expiration)); err != nil {
 		c.logger.Errorf("Cache write failed: %s", err)
 	}
 }
 
 func (c *Cache[T]) SetWithRandomExpiration(ctx context.Context, key string, value T, minExpiration time.Duration, variation time.Duration) {
+	key = c.keyPrefix + key
+
 	variationSeconds := int(math.Abs(variation.Seconds()))
 	expiration := minExpiration
 

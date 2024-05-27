@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/eko/gocache/lib/v4/store"
 	"github.com/go-resty/resty/v2"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
@@ -25,6 +26,7 @@ type channelManager struct {
 	slackClient     *slack.Client
 	db              DB
 	webhookClient   *resty.Client
+	cache           *internal.Cache[string]
 	logger          common.Logger
 	metrics         common.Metrics
 	cfg             *config.ManagerConfig
@@ -37,7 +39,10 @@ type channelManager struct {
 	initialized     bool
 }
 
-func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveRequestCh chan<- *models.MoveRequest, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *channelManager {
+func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveRequestCh chan<- *models.MoveRequest, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *channelManager {
+	cacheKeyPrefix := cfg.CacheKeyPrefix + "channel-manager::" + channelID + "::"
+	cache := internal.NewCache[string](cacheStore, cacheKeyPrefix, logger)
+
 	restyLogger := newRestyLogger(logger)
 
 	webhookClient := resty.New().
@@ -55,6 +60,7 @@ func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveR
 		db:              db,
 		webhookClient:   webhookClient,
 		moveRequestCh:   moveRequestCh,
+		cache:           cache,
 		logger:          logger,
 		metrics:         metrics,
 		cfg:             cfg,
@@ -94,16 +100,11 @@ func (c *channelManager) init(ctx context.Context, issues []*models.Issue) error
 	// The channel name may have changed since the issue(s) where created. We update where needed.
 	updated := c.issueCollection.UpdateChannelName(currentChannelName)
 
+	if err := c.saveIssuesToDB(ctx, updated); err != nil {
+		return fmt.Errorf("failed to save issues with updated Slack channel name: %w", err)
+	}
+
 	for _, issue := range updated {
-		body, err := json.Marshal(issue)
-		if err != nil {
-			return fmt.Errorf("failed to marshal body for existing issue %s: %w", issue.ID, err)
-		}
-
-		if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, body); err != nil {
-			return fmt.Errorf("failed to update Slack channel name for existing issue %s: %w", issue.ID, err)
-		}
-
 		c.logger.WithFields(issue.LogFields()).Info("Updated Slack channel name")
 	}
 
@@ -202,13 +203,7 @@ func (c *channelManager) FindIssueBySlackPost(ctx context.Context, slackPostID s
 		return nil, nil
 	}
 
-	// Search the database for archived issues
-	filterTerms := map[string]interface{}{
-		"lastAlert.slackChannelId": c.channelID,
-		"slackPostId":              slackPostID,
-	}
-
-	id, issueBody, err := c.db.FindSingleIssue(ctx, filterTerms)
+	_, issueBody, err := c.db.FindSingleIssue(ctx, common.WithFieldEquals("lastAlert.slackChannelId", c.channelID), common.WithFieldEquals("slackPostId", slackPostID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for issue in database: %w", err)
 	}
@@ -219,8 +214,15 @@ func (c *channelManager) FindIssueBySlackPost(ctx context.Context, slackPostID s
 		return nil, fmt.Errorf("failed to unmarshal issue body: %w", err)
 	}
 
-	// Backwards compatibility: Set the ID if it is missing
-	issue.ID = id
+	// Sanity check
+	if issue.LastAlert.SlackChannelID != c.channelID {
+		return nil, fmt.Errorf("issue found in database is not associated with the current channel")
+	}
+
+	// Sanity check
+	if issue.SlackPostID != slackPostID {
+		return nil, fmt.Errorf("issue found in database does not match the specified Slack post ID")
+	}
 
 	return issue, nil
 }
@@ -320,12 +322,7 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 		return fmt.Errorf("failed to execute command: %w", err)
 	}
 
-	body, err := json.Marshal(issue)
-	if err != nil {
-		return fmt.Errorf("failed to marshal issue body: %w", err)
-	}
-
-	if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, body); err != nil {
+	if err := c.saveIssueToDB(ctx, issue); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
@@ -342,12 +339,7 @@ func ackCommand(ctx context.Context, cmd *models.Command, logger common.Logger) 
 func (c *channelManager) processIncomingMovedIssue(ctx context.Context, issue *models.Issue) error {
 	logger := c.logger.WithFields(issue.LogFields())
 
-	body, err := json.Marshal(issue)
-	if err != nil {
-		return fmt.Errorf("failed to marshal issue body: %w", err)
-	}
-
-	if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, body); err != nil {
+	if err := c.saveIssueToDB(ctx, issue); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
@@ -387,23 +379,9 @@ func (c *channelManager) processActiveIssues(ctx context.Context) error {
 		return fmt.Errorf("failed to update issues in Slack: %w", err)
 	}
 
-	issueBodies := make(map[string]json.RawMessage, len(allIssues))
-
-	for _, issue := range allIssues {
-		body, err := json.Marshal(issue)
-		if err != nil {
-			return fmt.Errorf("failed to marshal issue body: %w", err)
-		}
-
-		issueBodies[issue.ID] = body
+	if err := c.saveIssuesToDB(ctx, allIssues); err != nil {
+		return fmt.Errorf("failed to save issues to database: %w", err)
 	}
-
-	updated, err := c.db.UpdateIssues(ctx, issueBodies)
-	if err != nil {
-		return fmt.Errorf("failed to update issues in database: %w", err)
-	}
-
-	c.logger.WithField("count", len(allIssues)).WithField("updated", updated).WithField("skipped", len(allIssues)-updated).Debug("Updated issue collection in database")
 
 	// Remove the archived issues (if any) from the issues collection. They remain in the database with an archived flag.
 	for _, issue := range archivedIssues {
@@ -441,12 +419,7 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 		return nil
 	}
 
-	body, err := json.Marshal(issue)
-	if err != nil {
-		return fmt.Errorf("failed to marshal issue body: %w", err)
-	}
-
-	if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, body); err != nil {
+	if err := c.saveIssueToDB(ctx, issue); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
@@ -469,12 +442,7 @@ func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert
 	issue := models.NewIssue(alert, c.logger)
 	logger = logger.WithFields(issue.LogFields())
 
-	body, err := json.Marshal(issue)
-	if err != nil {
-		return fmt.Errorf("failed to marshal issue body: %w", err)
-	}
-
-	if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, body); err != nil {
+	if err := c.saveIssueToDB(ctx, issue); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
@@ -487,6 +455,74 @@ func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert
 	logger.Info("Create issue")
 
 	return nil
+}
+
+func (c *channelManager) saveIssueToDB(ctx context.Context, issue *models.Issue) error {
+	body, err := json.Marshal(issue)
+	if err != nil {
+		return fmt.Errorf("failed to marshal issue body: %w", err)
+	}
+
+	cacheKey, issueHash := hashIssue(issue.ID, body)
+
+	if existingHash, ok := c.cache.Get(ctx, cacheKey); ok && existingHash == issueHash {
+		return nil
+	}
+
+	if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, body); err != nil {
+		return fmt.Errorf("failed to save issue to database: %w", err)
+	}
+
+	c.cache.Set(ctx, cacheKey, issueHash, 24*time.Hour)
+
+	return nil
+}
+
+func (c *channelManager) saveIssuesToDB(ctx context.Context, issues []*models.Issue) error {
+	if len(issues) == 0 {
+		return nil
+	}
+
+	if len(issues) == 1 {
+		return c.saveIssueToDB(ctx, issues[0])
+	}
+
+	issueBodies := make(map[string]json.RawMessage)
+	issueHashes := make(map[string]string)
+
+	for _, issue := range issues {
+		body, err := json.Marshal(issue)
+		if err != nil {
+			return fmt.Errorf("failed to marshal issue body: %w", err)
+		}
+
+		cacheKey, issueHash := hashIssue(issue.ID, body)
+
+		if existingHash, ok := c.cache.Get(ctx, cacheKey); ok && existingHash == issueHash {
+			return nil
+		}
+
+		issueBodies[issue.ID] = body
+		issueHashes[cacheKey] = issueHash
+	}
+
+	if err := c.db.UpdateIssues(ctx, issueBodies); err != nil {
+		return fmt.Errorf("failed to update issues in database: %w", err)
+	}
+
+	updated := len(issueBodies)
+	c.logger.WithField("count", len(issues)).WithField("updated", updated).WithField("skipped", len(issues)-updated).Debug("Updated issue collection in database")
+
+	for cacheKey, issueHash := range issueHashes {
+		c.cache.Set(ctx, cacheKey, issueHash, 24*time.Hour)
+	}
+
+	return nil
+}
+
+func hashIssue(id string, body []byte) (string, string) {
+	key := "issue-hash::" + id
+	return key, string(internal.HashBytes(body))
 }
 
 func (c *channelManager) terminateIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) error {
