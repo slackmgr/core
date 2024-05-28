@@ -311,12 +311,11 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, updateIfMessag
 	}
 
 	if deleteOrUpdateErr != nil {
-		if deleteOrUpdateErr.Error() == SlackErrChannelNotFound || deleteOrUpdateErr.Error() == SlackErrIsArchived || deleteOrUpdateErr.Error() == SlackErrMessageNotFound || deleteOrUpdateErr.Error() == SlackErrCantDelete {
-			logger.WithField("error", deleteOrUpdateErr.Error()).Error("Failed to delete Slack post for issue")
-			return nil
+		if deleteOrUpdateErr.Error() != SlackErrChannelNotFound && deleteOrUpdateErr.Error() != SlackErrIsArchived && deleteOrUpdateErr.Error() != SlackErrMessageNotFound && deleteOrUpdateErr.Error() != SlackErrCantDelete {
+			return fmt.Errorf("failed to delete Slack post for issue %s and message %s in channel %s: %w", issue.CorrelationID, issue.SlackPostID, issue.LastAlert.SlackChannelID, deleteOrUpdateErr)
 		}
 
-		return fmt.Errorf("failed to delete Slack post for issue %s and message %s in channel %s: %w", issue.CorrelationID, issue.SlackPostID, issue.LastAlert.SlackChannelID, deleteOrUpdateErr)
+		logger.WithField("error", deleteOrUpdateErr.Error()).Info("Failed to delete Slack post for issue")
 	} else {
 		logger.Info("Delete Slack post")
 	}
@@ -340,12 +339,11 @@ func (c *Client) DeletePost(ctx context.Context, channelID, ts string) error {
 
 	err := c.api.ChatDeleteMessage(ctx, channelID, ts)
 	if err != nil {
-		if err.Error() == SlackErrChannelNotFound || err.Error() == SlackErrIsArchived || err.Error() == SlackErrMessageNotFound || err.Error() == SlackErrCantDelete {
-			logger.WithField("error", err.Error()).Error("Failed to delete Slack post")
-			return nil
+		if err.Error() != SlackErrChannelNotFound && err.Error() != SlackErrIsArchived && err.Error() != SlackErrMessageNotFound && err.Error() != SlackErrCantDelete {
+			return fmt.Errorf("failed to delete Slack post %s in channel %s: %w", ts, channelID, err)
 		}
 
-		return fmt.Errorf("failed to delete Slack post %s in channel %s: %w", ts, channelID, err)
+		logger.WithField("error", err.Error()).Info("Failed to delete Slack post")
 	} else {
 		logger.Info("Delete Slack post")
 	}
