@@ -300,7 +300,7 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, updateIfMessag
 		case deleteOrUpdateErr.Error() == SlackErrChannelNotFound || deleteOrUpdateErr.Error() == SlackErrIsArchived:
 			logger.WithField("error", "channel is private, archived or does not exist").Error("Failed to delete Slack post for issue")
 		case deleteOrUpdateErr.Error() == "message_not_found":
-			logger.WithField("error", "message not found").Info("Failed to deleted Slack post for issue")
+			logger.WithField("error", "message not found").Info("Failed to delete Slack post for issue")
 		case deleteOrUpdateErr.Error() == "cant_delete_message":
 			logger.WithField("error", "can't delete message").Info("Failed to delete Slack post for issue")
 		default:
@@ -311,6 +311,37 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, updateIfMessag
 	}
 
 	issue.RegisterSlackPostDeleted()
+
+	return nil
+}
+
+func (c *Client) DeletePost(ctx context.Context, channelID, ts string) error {
+	if ts == PostIDInvalidChannel {
+		return nil
+	}
+
+	if c.cfg.SlackClient.DryRun {
+		c.logger.Infof("DRYRUN: Slack DELETE post %s", ts)
+		return nil
+	}
+
+	logger := c.logger.WithField("slack_channel_id", channelID).WithField("slack_post_id", ts)
+
+	err := c.api.ChatDeleteMessage(ctx, channelID, ts)
+	if err != nil {
+		switch {
+		case err.Error() == SlackErrChannelNotFound || err.Error() == SlackErrIsArchived:
+			logger.WithField("error", "channel is private, archived or does not exist").Error("Failed to delete Slack post")
+		case err.Error() == "message_not_found":
+			logger.WithField("error", "message not found").Info("Failed to delete Slack post")
+		case err.Error() == "cant_delete_message":
+			logger.WithField("error", "can't delete message").Info("Failed to delete Slack post")
+		default:
+			return fmt.Errorf("failed to delete Slack post %s in channel %s: %w", ts, channelID, err)
+		}
+	} else {
+		logger.Info("Delete Slack post")
+	}
 
 	return nil
 }
