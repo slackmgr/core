@@ -24,6 +24,8 @@ const (
 	PostIDInvalidChannel    = "INVALID_CHANNEL_ID"
 	SlackErrIsArchived      = "is_archived"
 	SlackErrChannelNotFound = "channel_not_found"
+	SlackErrMessageNotFound = "message_not_found"
+	SlackErrCantDelete      = "cant_delete_message"
 )
 
 type Client struct {
@@ -309,16 +311,12 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, updateIfMessag
 	}
 
 	if deleteOrUpdateErr != nil {
-		switch {
-		case deleteOrUpdateErr.Error() == SlackErrChannelNotFound || deleteOrUpdateErr.Error() == SlackErrIsArchived:
-			logger.WithField("error", "channel is private, archived or does not exist").Error("Failed to delete Slack post for issue")
-		case deleteOrUpdateErr.Error() == "message_not_found":
-			logger.WithField("error", "message not found").Info("Failed to delete Slack post for issue")
-		case deleteOrUpdateErr.Error() == "cant_delete_message":
-			logger.WithField("error", "can't delete message").Info("Failed to delete Slack post for issue")
-		default:
-			return fmt.Errorf("failed to delete Slack post for issue %s and message %s in channel %s: %w", issue.CorrelationID, issue.SlackPostID, issue.LastAlert.SlackChannelID, deleteOrUpdateErr)
+		if deleteOrUpdateErr.Error() == SlackErrChannelNotFound || deleteOrUpdateErr.Error() == SlackErrIsArchived || deleteOrUpdateErr.Error() == SlackErrMessageNotFound || deleteOrUpdateErr.Error() == SlackErrCantDelete {
+			logger.WithField("error", deleteOrUpdateErr.Error()).Error("Failed to delete Slack post for issue")
+			return nil
 		}
+
+		return fmt.Errorf("failed to delete Slack post for issue %s and message %s in channel %s: %w", issue.CorrelationID, issue.SlackPostID, issue.LastAlert.SlackChannelID, deleteOrUpdateErr)
 	} else {
 		logger.Info("Delete Slack post")
 	}
@@ -342,16 +340,12 @@ func (c *Client) DeletePost(ctx context.Context, channelID, ts string) error {
 
 	err := c.api.ChatDeleteMessage(ctx, channelID, ts)
 	if err != nil {
-		switch {
-		case err.Error() == SlackErrChannelNotFound || err.Error() == SlackErrIsArchived:
-			logger.WithField("error", "channel is private, archived or does not exist").Error("Failed to delete Slack post")
-		case err.Error() == "message_not_found":
-			logger.WithField("error", "message not found").Info("Failed to delete Slack post")
-		case err.Error() == "cant_delete_message":
-			logger.WithField("error", "can't delete message").Info("Failed to delete Slack post")
-		default:
-			return fmt.Errorf("failed to delete Slack post %s in channel %s: %w", ts, channelID, err)
+		if err.Error() == SlackErrChannelNotFound || err.Error() == SlackErrIsArchived || err.Error() == SlackErrMessageNotFound || err.Error() == SlackErrCantDelete {
+			logger.WithField("error", err.Error()).Error("Failed to delete Slack post")
+			return nil
 		}
+
+		return fmt.Errorf("failed to delete Slack post %s in channel %s: %w", ts, channelID, err)
 	} else {
 		logger.Info("Delete Slack post")
 	}
