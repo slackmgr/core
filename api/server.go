@@ -17,14 +17,13 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
 	"github.com/peteraglen/slack-manager/internal/slackapi"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 )
 
 type FifoQueueProducer interface {
-	Send(ctx context.Context, groupID, dedupID, body string) error
+	Send(ctx context.Context, channelID, dedupID, body string) error
 }
 
 type Server struct {
@@ -236,10 +235,7 @@ func (s *Server) queueAlert(ctx context.Context, alert *common.Alert) error {
 		return fmt.Errorf("failed to marshal alert: %w", err)
 	}
 
-	groupID := alert.SlackChannelID
-	dedupID := internal.Hash("alert", alert.SlackChannelID, alert.CorrelationID, alert.Timestamp.Format(time.RFC3339Nano))
-
-	if err := s.alertQueue.Send(ctx, groupID, dedupID, string(body)); err != nil {
+	if err := s.alertQueue.Send(ctx, alert.SlackChannelID, alert.DedupID(), string(body)); err != nil {
 		return fmt.Errorf("failed to send message to queue: %w", err)
 	}
 

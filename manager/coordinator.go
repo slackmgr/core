@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/eko/gocache/lib/v4/store"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
 	"github.com/peteraglen/slack-manager/manager/internal/models"
 	"github.com/peteraglen/slack-manager/manager/internal/slack"
 	"github.com/segmentio/ksuid"
@@ -124,7 +122,7 @@ func (c *coordinator) AddCommand(ctx context.Context, cmd *models.Command) error
 		return nil
 	}
 
-	manager, err := c.findOrCreateChannelManager(ctx, cmd.ChannelID)
+	manager, err := c.findOrCreateChannelManager(ctx, cmd.SlackChannelID)
 	if err != nil {
 		return fmt.Errorf("failed to find or create channel manager: %w", err)
 	}
@@ -335,7 +333,7 @@ func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.
 	alert := common.NewAlert(common.AlertSeverity(cmd.ParamAsString("severity")))
 
 	alert.CorrelationID = ksuid.New().String()
-	alert.SlackChannelID = cmd.ChannelID
+	alert.SlackChannelID = cmd.SlackChannelID
 	alert.Header = cmd.ParamAsString("header")
 	alert.Text = cmd.ParamAsString("text")
 	alert.IssueFollowUpEnabled = cmd.ParamAsBool("followUpEnabled")
@@ -358,8 +356,5 @@ func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.
 		return fmt.Errorf("failed to marshal alert: %w", err)
 	}
 
-	groupID := alert.SlackChannelID
-	dedupID := internal.Hash("alert", alert.SlackChannelID, alert.CorrelationID, alert.Timestamp.Format(time.RFC3339Nano))
-
-	return c.alertQueue.Send(ctx, groupID, dedupID, string(body))
+	return c.alertQueue.Send(ctx, alert.SlackChannelID, alert.DedupID(), string(body))
 }

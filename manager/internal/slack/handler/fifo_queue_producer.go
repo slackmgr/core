@@ -3,5 +3,5 @@ package handler
 import "context"
 
 type FifoQueueProducer interface {
-	Send(ctx context.Context, groupID, dedupID, body string) error
+	Send(ctx context.Context, slackChannelID, dedupID, body string) error
 }

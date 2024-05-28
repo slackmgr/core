@@ -26,7 +26,6 @@ type Message interface {
 
 type message struct {
 	messageID         string
-	groupID           string
 	receiveTimestamp  time.Time
 	visibilityTimeout time.Duration
 
@@ -35,7 +34,7 @@ type message struct {
 	ackFunc func(ctx context.Context) error
 
 	// extendVisibilityFunc is used to extend the visibility timeout of the message. This is to prevent the ack from failing due to the visibilty timeout expiring.
-	// The extend function is optional, and is only set if the message can in fact be extended.
+	// The extend function is optional, and is only set if the message can in fact be extended (such as for SQS messages).
 	extendVisibilityFunc func(ctx context.Context) error
 	extendCount          int
 
@@ -49,7 +48,6 @@ type message struct {
 func newMessage(queueItem *commonlib.FifoQueueItem) message {
 	return message{
 		messageID:         queueItem.MessageID,
-		groupID:           queueItem.GroupID,
 		receiveTimestamp:  queueItem.ReceiveTimestamp,
 		visibilityTimeout: queueItem.VisibilityTimeout,
 		processingLock:    &sync.Mutex{},

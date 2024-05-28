@@ -27,7 +27,7 @@ func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.Me
 		for _item := range queueCh {
 			item := _item
 
-			logger = logger.WithField("message_id", item.MessageID).WithField("group_id", item.GroupID)
+			logger = logger.WithField("message_id", item.MessageID).WithField("slack_channel_id", item.SlackChannelID)
 			logger.Debug("Message received")
 
 			if item.Ack == nil {
