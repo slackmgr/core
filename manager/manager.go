@@ -16,18 +16,68 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// DB is an interface for interacting with the database.
 type DB interface {
+	// SaveAlert saves an alert to the database (for auditing purposes).
+	// The same alert may be saved multiple times, in case of errors and retries.
+	//
+	// A database implementation can choose to skip saving the alerts, since they are never read by the manager.
+	//
+	// id is the unique identifier for the alert, and body is the json formatted alert.
 	SaveAlert(ctx context.Context, id string, body json.RawMessage) error
+
+	// CreateOrUpdateIssue creates or updates a single issue in the database.
+	//
+	// id is the unique identifier for the issue, and body is the json formatted issue.
 	CreateOrUpdateIssue(ctx context.Context, id string, body json.RawMessage) error
+
+	// UpdateIssues updates multiple existing issues in the database.
+	//
+	// issues is a map of issue IDs to json formatted issue bodies.
 	UpdateIssues(ctx context.Context, issues map[string]json.RawMessage) error
+
+	// FindSingleIssue finds a single issue in the database, based on the provided find options, and returns the issue ID and the issue body.
+	// The find options specify conditions on individual json fields, which may be nested.
+	//
+	// For example; [common.WithFieldEquals("lastAlert.slackChannelId", "C12345678"), common.WithFieldEquals("slackPostId", "1234567890")]
+	// will find an issue where the 'lastAlert.slackChannelId' field is "C12345678" and the 'slackPostId' field is "1234567890".
+	//
+	// The database implementation should return an error if the query matches multiple issues, and ["", nil, nil] if no issue is found.
 	FindSingleIssue(ctx context.Context, opts ...common.FindOption) (string, json.RawMessage, error)
+
+	// LoadIssues loads multiple issues from the database, based on the provided find options.
+	// See FindSingleIssue for more information on find options.
 	LoadIssues(ctx context.Context, opts ...common.FindOption) (map[string]json.RawMessage, error)
+
+	// GetMoveMappings returns all move mappings from the database, matching the provided find options.
+	//
+	// For example; [common.WithFieldEquals("originalChannelId", "C12345678")] will return all move mappings
+	// where the 'originalChannelId' field is "C12345678".
 	GetMoveMappings(ctx context.Context, opts ...common.FindOption) ([]json.RawMessage, error)
+
+	// SaveMoveMapping saves a move mapping to the database.
+	//
+	// id is the unique identifier for the move mapping, and body is the json formatted move mapping.
 	SaveMoveMapping(ctx context.Context, id string, body json.RawMessage) error
 }
 
+// FifoQueue is an interface for interacting with a fifo queue.
 type FifoQueue interface {
-	Send(ctx context.Context, groupID, dedupID, body string) error
+	// Send sends a single message to the queue.
+	//
+	// slackChannelID is the Slack channel to which the message belongs.
+	// A queue implementation should use this value to partition the queue (i.e. group ID in an AWS SQS Fifo queue),
+	// but it is not required.
+	//
+	// dedupID is a unique identifier for the message.
+	// A queue implementation should use this value to deduplicate messages, but it is not required.
+	//
+	// body is the json formatted message body.
+	Send(ctx context.Context, slackChannelID, dedupID, body string) error
+
+	// Receive receives messages from the queue, until the context is cancelled.
+	// Messages are sent to the provided channel.
+	// The channel must be closed when Receive returns.
 	Receive(ctx context.Context, sinkCh chan<- *common.FifoQueueItem) error
 }
 

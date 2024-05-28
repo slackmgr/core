@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/peteraglen/slack-manager/manager/internal/models"
 	"github.com/peteraglen/slack-manager/manager/internal/slack/handler"
@@ -35,8 +34,5 @@ func sendCommand(ctx context.Context, fifoQueue handler.FifoQueueProducer, cmd *
 		return fmt.Errorf("failed to marshal command: %w", err)
 	}
 
-	groupID := cmd.ChannelID
-	dedupID := fmt.Sprintf("command::%s::%s", cmd.ChannelID, cmd.Timestamp.Format(time.RFC3339Nano))
-
-	return fifoQueue.Send(ctx, groupID, dedupID, string(body))
+	return fifoQueue.Send(ctx, cmd.SlackChannelID, cmd.DedupID(), string(body))
 }

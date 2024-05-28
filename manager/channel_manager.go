@@ -193,6 +193,7 @@ func (c *channelManager) QueueMovedIssue(ctx context.Context, issue *models.Issu
 
 // FindIssueBySlackPost attempts to find an existing issue by the specified Slack post ID.
 // If archived issues should be included in the search, it will search the database for older issues after first searching for active issues in memory.
+// If no issue is found, nil is returned.
 func (c *channelManager) FindIssueBySlackPost(ctx context.Context, slackPostID string, includeArchived bool) (*models.Issue, error) {
 	// Search the active issues first
 	if activeIssue, found := c.issueCollection.FindActiveIssueBySlackPost(slackPostID); found {
@@ -207,6 +208,10 @@ func (c *channelManager) FindIssueBySlackPost(ctx context.Context, slackPostID s
 	_, issueBody, err := c.db.FindSingleIssue(ctx, common.WithFieldEquals("lastAlert.slackChannelId", c.channelID), common.WithFieldEquals("slackPostId", slackPostID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for issue in database: %w", err)
+	}
+
+	if issueBody == nil {
+		return nil, nil
 	}
 
 	issue := &models.Issue{}
@@ -652,7 +657,7 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 		Timestamp:     time.Now(),
 		UserID:        cmd.UserID,
 		UserRealName:  cmd.UserRealName,
-		ChannelID:     cmd.ChannelID,
+		ChannelID:     cmd.SlackChannelID,
 		MessageID:     cmd.SlackPostID,
 		Input:         cmd.WebhookParameters.Input,
 		CheckboxInput: cmd.WebhookParameters.CheckboxInput,

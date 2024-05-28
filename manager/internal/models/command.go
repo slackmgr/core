@@ -26,7 +26,7 @@ const (
 type Command struct {
 	IDValue               string                 `json:"id,omitempty"`
 	Timestamp             time.Time              `json:"timestamp,omitempty"`
-	ChannelID             string                 `json:"channelId,omitempty"`
+	SlackChannelID        string                 `json:"slackChannelId,omitempty"`
 	SlackPostID           string                 `json:"ts,omitempty"`
 	Reaction              string                 `json:"reaction,omitempty"`
 	UserID                string                 `json:"userId,omitempty"`
@@ -61,25 +61,29 @@ func NewCommandFromQueue(queueItem *commonlib.FifoQueueItem) (Message, error) {
 	return &cmd, nil
 }
 
-func NewCommand(channelID, ts, reaction, userID, userRealName string, action CommandAction, parameters map[string]interface{}) *Command {
+func NewCommand(slackChannelID, ts, reaction, userID, userRealName string, action CommandAction, parameters map[string]interface{}) *Command {
 	timestamp := time.Now()
-	id := fmt.Sprintf("%s-%s", channelID, timestamp.Format(time.RFC3339Nano))
+	id := fmt.Sprintf("%s-%s", slackChannelID, timestamp.Format(time.RFC3339Nano))
 
 	return &Command{
-		IDValue:      id,
-		Timestamp:    timestamp,
-		ChannelID:    channelID,
-		SlackPostID:  ts,
-		Reaction:     reaction,
-		UserID:       userID,
-		UserRealName: userRealName,
-		Action:       action,
-		Parameters:   parameters,
+		IDValue:        id,
+		Timestamp:      timestamp,
+		SlackChannelID: slackChannelID,
+		SlackPostID:    ts,
+		Reaction:       reaction,
+		UserID:         userID,
+		UserRealName:   userRealName,
+		Action:         action,
+		Parameters:     parameters,
 	}
 }
 
 func (c *Command) ID() string {
 	return c.IDValue
+}
+
+func (c *Command) DedupID() string {
+	return fmt.Sprintf("command::%s::%s", c.SlackChannelID, c.Timestamp.Format(time.RFC3339Nano))
 }
 
 func (c *Command) LogFields() map[string]interface{} {
@@ -88,7 +92,7 @@ func (c *Command) LogFields() map[string]interface{} {
 	}
 
 	fields := map[string]interface{}{
-		"slack_channel_id": c.ChannelID,
+		"slack_channel_id": c.SlackChannelID,
 		"message_ts":       c.SlackPostID,
 		"reaction":         c.Reaction,
 		"action":           c.Action,
