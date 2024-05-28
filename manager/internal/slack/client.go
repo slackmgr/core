@@ -122,11 +122,19 @@ func (c *Client) RunSocketMode(ctx context.Context) error {
 }
 
 func (c *Client) SendResponse(ctx context.Context, channelID, responseURL, responseType, text string) error {
-	return c.api.SendResponse(ctx, channelID, responseURL, responseType, text)
+	if err := c.api.SendResponse(ctx, channelID, responseURL, responseType, text); err != nil {
+		return fmt.Errorf("failed to send Slack response in channel %s: %w", channelID, err)
+	}
+
+	return nil
 }
 
 func (c *Client) OpenModal(ctx context.Context, triggerID string, request slack.ModalViewRequest) error {
-	return c.api.OpenModal(ctx, triggerID, request)
+	if err := c.api.OpenModal(ctx, triggerID, request); err != nil {
+		return fmt.Errorf("failed to open modal Slack view: %w", err)
+	}
+
+	return nil
 }
 
 func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error) {
@@ -135,7 +143,12 @@ func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, op
 		return "", nil
 	}
 
-	return c.api.PostEphemeral(ctx, channelID, userID, options...)
+	ts, err := c.api.PostEphemeral(ctx, channelID, userID, options...)
+	if err != nil {
+		return "", fmt.Errorf("failed to post ephemeral Slack message to user %s in channel %s: %w", userID, channelID, err)
+	}
+
+	return ts, nil
 }
 
 func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues []*models.Issue) error {
@@ -276,7 +289,7 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, updateIfMessag
 	if updateIfMessageHasReplies {
 		hasReplies, err := c.api.MessageHasReplies(ctx, issue.LastAlert.SlackChannelID, issue.SlackPostID)
 		if err != nil {
-			logger.Errorf("Failed to check if Slack message has replies: %s", err)
+			logger.Errorf("Failed to check if Slack message %s has replies in channel %s: %s", issue.SlackPostID, issue.LastAlert.SlackChannelID, err)
 			hasReplies = false
 		}
 
@@ -364,13 +377,18 @@ func (c *Client) IsAlertChannel(ctx context.Context, channelID string) (bool, st
 }
 
 func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, error) {
-	return c.api.GetUserInfo(ctx, userID)
+	user, err := c.api.GetUserInfo(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Slack user info for %s: %w", userID, err)
+	}
+
+	return user, nil
 }
 
 func (c *Client) UserIsInGroup(ctx context.Context, groupID, userID string) bool {
 	userIDs, err := c.api.ListUserGroupMembers(ctx, groupID)
 	if err != nil {
-		c.logger.Errorf("Failed to list user group members: %s", err)
+		c.logger.Errorf("Failed to list user group members for %s: %s", groupID, err)
 		return false
 	}
 
@@ -392,7 +410,10 @@ func (c *Client) GetChannelName(ctx context.Context, channelID string) string {
 
 	info, err := c.api.GetChannelInfo(ctx, channelID)
 	if err != nil {
-		c.logger.Errorf("Failed to find Slack channel info: %s", err)
+		// We log the error unless it's a channel not found error, which is expected in some cases.
+		if err.Error() != slackapi.ChannelNotFoundError {
+			c.logger.Errorf("Failed to find Slack channel info for %s: %s", channelID, err)
+		}
 		return ""
 	}
 

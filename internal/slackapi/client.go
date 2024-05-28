@@ -133,11 +133,8 @@ func (c *Client) ChatPostMessage(ctx context.Context, channelID string, options 
 	}
 
 	ts, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f)
-	if err != nil {
-		return "", err
-	}
 
-	return ts, nil
+	return ts, err
 }
 
 func (c *Client) ChatUpdateMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
@@ -151,11 +148,8 @@ func (c *Client) ChatUpdateMessage(ctx context.Context, channelID string, option
 	}
 
 	ts, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f)
-	if err != nil {
-		return "", err
-	}
 
-	return ts, nil
+	return ts, err
 }
 
 func (c *Client) ChatDeleteMessage(ctx context.Context, channelID string, ts string) error {
@@ -168,11 +162,9 @@ func (c *Client) ChatDeleteMessage(ctx context.Context, channelID string, ts str
 		return nil, nil, err
 	}
 
-	if _, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f); err != nil {
-		return err
-	}
+	_, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f)
 
-	return nil
+	return err
 }
 
 func (c *Client) SendResponse(ctx context.Context, channelID, responseURL, responseType, text string) error {
@@ -203,11 +195,9 @@ func (c *Client) SendResponse(ctx context.Context, channelID, responseURL, respo
 		return nil, nil, err
 	}
 
-	if _, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f); err != nil {
-		return fmt.Errorf("failed to send Slack response in channel %s: %w", channelID, err)
-	}
+	_, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f)
 
-	return nil
+	return err
 }
 
 func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error) {
@@ -229,11 +219,8 @@ func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, op
 	}
 
 	ts, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f)
-	if err != nil {
-		return "", fmt.Errorf("failed to post ephemeral Slack message to user %s in channel %s: %w", userID, channelID, err)
-	}
 
-	return ts, nil
+	return ts, err
 }
 
 func (c *Client) OpenModal(ctx context.Context, triggerID string, request slack.ModalViewRequest) error {
@@ -246,11 +233,8 @@ func (c *Client) OpenModal(ctx context.Context, triggerID string, request slack.
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
 	_, err := c.api.OpenViewContext(ctx, triggerID, request)
-	if err != nil {
-		return fmt.Errorf("failed to open modal Slack view: %w", err)
-	}
 
-	return nil
+	return err
 }
 
 func (c *Client) MessageHasReplies(ctx context.Context, channelID, ts string) (bool, error) {
@@ -283,7 +267,7 @@ func (c *Client) MessageHasReplies(ctx context.Context, channelID, ts string) (b
 		if err.Error() == ChannelNotFoundError || err.Error() == ThreadNotFoundError {
 			return false, nil
 		}
-		return false, fmt.Errorf("failed to read Slack message %s replies in channel %s: %w", ts, channelID, err)
+		return false, err
 	}
 
 	return len(msgs) > 1, nil
@@ -303,10 +287,15 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
 
+		// If we cached a ChannelNotFoundError, return it as an error
+		if val == ChannelNotFoundError {
+			return nil, errors.New(ChannelNotFoundError)
+		}
+
 		info := slack.Channel{}
 
 		if err := json.Unmarshal([]byte(val), &info); err != nil {
-			c.logger.WithField("slack_channel_id", channelID).Errorf("failed to json unmarshal channel value: %s", err)
+			c.logger.WithField("slack_channel_id", channelID).Errorf("Failed to json unmarshal channel info: %s", err)
 		} else {
 			return &info, nil
 		}
@@ -322,24 +311,26 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 	}
 
 	channel, _, err := callAPI(ctx, c.logger.WithField("slack_channel_id", channelID), c.metrics, c.cfg, action, f, ChannelNotFoundError)
+	unknownChannel := false
+
 	if err != nil {
 		if err.Error() == ChannelNotFoundError {
-			channel = &slack.Channel{
-				GroupConversation: slack.GroupConversation{
-					Conversation: slack.Conversation{
-						ID: channelID,
-					},
-					Name: "UNKNOWN_CHANNEL",
-				},
-			}
+			unknownChannel = true
 		} else {
-			return nil, fmt.Errorf("failed to read Slack channel info for %s: %w", channelID, err)
+			return nil, err
 		}
 	}
 
+	// No channel found, cache the error to avoid repeated API calls, and then return the error
+	if unknownChannel {
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, ChannelNotFoundError, 10*time.Second, 10*time.Second)
+		return nil, err
+	}
+
+	// Otherwise cache and return the channel info
 	resultJSON, err := json.Marshal(channel)
 	if err != nil {
-		c.logger.WithField("slack_channel_id", channelID).Errorf("failed to json marshal channel value: %w", err)
+		c.logger.WithField("slack_channel_id", channelID).Errorf("Failed to json marshal channel info: %s", err)
 	} else {
 		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 10*time.Second, 10*time.Second)
 	}
@@ -439,7 +430,7 @@ func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 
 	user, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read Slack user info for %s: %w", userID, err)
+		return nil, err
 	}
 
 	resultJSON, err := json.Marshal(user)
@@ -487,7 +478,7 @@ func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 		if err.Error() == NoSuchSubTeamError {
 			return result, nil
 		}
-		return nil, fmt.Errorf("failed to list Slack user group members for %s: %w", groupID, err)
+		return nil, err
 	}
 
 	for _, userID := range userIDs {
@@ -521,7 +512,7 @@ func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 		var result map[string]struct{}
 
 		if err := json.Unmarshal([]byte(val), &result); err != nil {
-			c.logger.WithField("slack_channel_id", channelID).Errorf("failed to json unmarshal userIdsInChannel value: %s", err)
+			c.logger.WithField("slack_channel_id", channelID).Errorf("failed to json unmarshal userIdsInChannel: %s", err)
 		} else {
 			return result, nil
 		}

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 
@@ -159,7 +158,7 @@ func (c *channelInfoSyncer) refreshChannelInfo(ctx context.Context, channel stri
 
 	slackChannel, err := c.slackClient.GetChannelInfo(ctx, channel)
 	if err != nil {
-		if strings.Contains(err.Error(), "channel_not_found") {
+		if err.Error() == slackapi.ChannelNotFoundError {
 			channelFound = false
 		} else {
 			return nil, err
