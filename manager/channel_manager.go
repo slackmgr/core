@@ -312,12 +312,14 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 		return fmt.Errorf("failed to find issue by Slack post ID: %w", err)
 	}
 
-	if issue == nil {
+	if issue == nil && !cmd.ExecuteWhenNoIssueFound {
 		logger.Info("No issue found for Slack message command")
 		return nil
 	}
 
-	logger = logger.WithFields(issue.LogFields())
+	if issue != nil {
+		logger = logger.WithFields(issue.LogFields())
+	}
 
 	cmdFunc, ok := c.cmdFuncs[cmd.Action]
 	if !ok {
@@ -328,8 +330,10 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 		return fmt.Errorf("failed to execute command: %w", err)
 	}
 
-	if err := c.saveIssueToDB(ctx, issue); err != nil {
-		return fmt.Errorf("failed to save issue to database: %w", err)
+	if issue != nil {
+		if err := c.saveIssueToDB(ctx, issue); err != nil {
+			return fmt.Errorf("failed to save issue to database: %w", err)
+		}
 	}
 
 	return nil
@@ -538,9 +542,12 @@ func hashIssue(id string, body []byte) (string, string) {
 func (c *channelManager) terminateIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) error {
 	logger.Info("Cmd: terminate issue")
 
-	issue.RegisterTerminationRequest(cmd.UserRealName)
+	if issue != nil {
+		issue.RegisterTerminationRequest(cmd.UserRealName)
+		return c.slackClient.Delete(ctx, issue, false, nil)
+	}
 
-	return c.slackClient.Delete(ctx, issue, false, nil)
+	return c.slackClient.DeletePost(ctx, cmd.SlackChannelID, cmd.SlackPostID)
 }
 
 func (c *channelManager) resolveIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) error {

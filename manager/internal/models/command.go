@@ -24,17 +24,18 @@ const (
 )
 
 type Command struct {
-	IDValue               string                 `json:"id,omitempty"`
-	Timestamp             time.Time              `json:"timestamp,omitempty"`
-	SlackChannelID        string                 `json:"slackChannelId,omitempty"`
-	SlackPostID           string                 `json:"ts,omitempty"`
-	Reaction              string                 `json:"reaction,omitempty"`
-	UserID                string                 `json:"userId,omitempty"`
-	UserRealName          string                 `json:"userRealName,omitempty"`
-	Action                CommandAction          `json:"action,omitempty"`
-	Parameters            map[string]interface{} `json:"parameters,omitempty"`
-	WebhookParameters     *WebhookCommandParams  `json:"webhookParameters,omitempty"`
-	IncludeArchivedIssues bool                   `json:"includeArchivedIssues"`
+	IDValue                 string                 `json:"id,omitempty"`
+	Timestamp               time.Time              `json:"timestamp,omitempty"`
+	SlackChannelID          string                 `json:"slackChannelId,omitempty"`
+	SlackPostID             string                 `json:"ts,omitempty"`
+	Reaction                string                 `json:"reaction,omitempty"`
+	UserID                  string                 `json:"userId,omitempty"`
+	UserRealName            string                 `json:"userRealName,omitempty"`
+	Action                  CommandAction          `json:"action,omitempty"`
+	Parameters              map[string]interface{} `json:"parameters,omitempty"`
+	WebhookParameters       *WebhookCommandParams  `json:"webhookParameters,omitempty"`
+	IncludeArchivedIssues   bool                   `json:"includeArchivedIssues"`
+	ExecuteWhenNoIssueFound bool                   `json:"executeWhenNoIssueFound"`
 
 	message
 }
@@ -93,7 +94,7 @@ func (c *Command) LogFields() map[string]interface{} {
 
 	fields := map[string]interface{}{
 		"slack_channel_id": c.SlackChannelID,
-		"message_ts":       c.SlackPostID,
+		"slack_post_id":    c.SlackPostID,
 		"reaction":         c.Reaction,
 		"action":           c.Action,
 		"user_id":          c.UserID,

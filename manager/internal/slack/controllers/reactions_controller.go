@@ -119,6 +119,7 @@ func (c *ReactionsController) sendReactionAddedCommand(ctx context.Context, evt 
 
 	if action == models.CommandActionTerminateIssue {
 		cmd.IncludeArchivedIssues = true
+		cmd.ExecuteWhenNoIssueFound = true
 	}
 
 	if err := sendCommand(ctx, c.commandHandler, cmd); err != nil {
