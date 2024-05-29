@@ -205,7 +205,7 @@ func (m *Manager) UpdateSettings(settings *config.ManagerSettings) error {
 	}
 
 	if err := settings.InitAndValidate(); err != nil {
-		return fmt.Errorf("failed to update manager settings (the existing settings will continue to be used): %w", err)
+		return fmt.Errorf("failed to initialize updated manager settings (the existing settings will continue to be used): %w", err)
 	}
 
 	m.managerSettings.Settings = settings

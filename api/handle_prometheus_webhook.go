@@ -64,6 +64,7 @@ func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*common.Alert 
 		// Map from lower-case keys only, to ensure maximum compatibility
 		// Annotation keys take precedence over label keys
 		correlationID := find(promAlert.Annotations, promAlert.Labels, "correlationid", "correlation_id")
+		alertType := find(promAlert.Annotations, promAlert.Labels, "alerttype", "alert_type", "type")
 		header := valueOrDefault(find(promAlert.Annotations, promAlert.Labels, "header", "title", "summary"), "Prometheus alert")
 		text := find(promAlert.Annotations, promAlert.Labels, "text", "description", "body")
 		fallbackText := find(promAlert.Annotations, promAlert.Labels, "fallbacktext")
@@ -84,40 +85,49 @@ func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*common.Alert 
 		ignoreIfTextContains := find(promAlert.Annotations, promAlert.Labels, "ignoreiftextcontains")
 		failOnRateLimitError := find(promAlert.Annotations, promAlert.Labels, "failonratelimiterror")
 
+		// No specifig fallback text found, use the header.
 		if fallbackText == "" {
 			fallbackText = header
 		}
 
+		// If no alert type is specified, default to "alert".
+		// Replace 'critical' with 'error'.
 		if severityString == "critical" || severityString == "" {
 			severityString = "error"
 		}
 
 		severity := common.AlertSeverity(severityString)
 
+		// If the severity is invalid, log it and use the default value 'error'.
 		if !common.SeverityIsValid(severity) {
-			s.logger.Infof("Invalid severity '%s' in Prometheus alert", severity)
+			s.logger.Infof("Invalid severity '%s' in Prometheus alert, using default value 'error'", severity)
 			severity = common.AlertError
 		}
 
+		// If the alert is resolved, set the severity to 'resolved'.
 		if promAlert.Status == "resolved" {
 			severity = common.AlertResolved
 		}
 
+		// Override missing or invalid auto resolve period with default value of 1 hour
 		autoResolveSeconds, err := strconv.Atoi(autoResolve)
 		if err != nil || autoResolveSeconds < 30 {
 			autoResolveSeconds = 3600 // 1 hour
 		}
 
+		// Override missing or invalid notification delay period with default value of 0 seconds
 		notificationDelaySeconds, err := strconv.Atoi(notificationDelay)
 		if err != nil || notificationDelaySeconds < 0 || notificationDelaySeconds > autoResolveSeconds {
 			notificationDelaySeconds = 0
 		}
 
+		// Override missing or invalid archiving delay period with default value of 6 hours
 		archivingDelaySeconds, err := strconv.Atoi(archivingDelay)
 		if err != nil || archivingDelaySeconds < 0 {
 			archivingDelaySeconds = 6 * 3600
 		}
 
+		// If no :status: placeholder is found in the header or text, prepend it to the header
 		if !strings.Contains(header, ":status:") && !strings.Contains(text, ":status:") {
 			header = fmt.Sprintf(":status: %s", header)
 		}
@@ -145,6 +155,7 @@ func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*common.Alert 
 		a := common.Alert{
 			Timestamp:                 time.Now().UTC(),
 			CorrelationID:             correlationID,
+			Type:                      alertType,
 			Header:                    header,
 			Text:                      text,
 			FallbackText:              fallbackText,

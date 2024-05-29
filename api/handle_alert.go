@@ -17,39 +17,13 @@ import (
 
 const NA = "N/A"
 
-type Alerts struct {
+// alertsInput is a struct that represents the input of the alerts endpoint.
+// It supports two formats (for backwards compatibility reasons):
+//  1. A single alert, where all fields are at the root level
+//  2. Multiple alerts, where each alert is an object in an array
+type alertsInput struct {
+	common.Alert
 	Alerts []*common.Alert `json:"alerts"`
-}
-
-func (s *Server) handleAlert(resp http.ResponseWriter, req *http.Request) {
-	started := time.Now()
-
-	if req.ContentLength <= 0 {
-		err := errors.New("missing POST body")
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
-		return
-	}
-
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		err = fmt.Errorf("failed to read POST body: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, nil, "", resp, req, started)
-		return
-	}
-
-	s.debugLogRequest(req, body)
-
-	var alert common.Alert
-
-	if err := json.Unmarshal(body, &alert); err != nil {
-		err = fmt.Errorf("failed to decode POST body: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
-		return
-	}
-
-	alerts := []*common.Alert{&alert}
-
-	s.processAlerts(resp, req, alerts, started)
 }
 
 func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request) {
@@ -70,23 +44,11 @@ func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request) {
 
 	s.debugLogRequest(req, body)
 
-	var alerts []*common.Alert
-
-	if strings.HasPrefix(string(body), "[") {
-		if err := json.Unmarshal(body, &alerts); err != nil {
-			err = fmt.Errorf("failed to decode POST body: %w", err)
-			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
-			return
-		}
-	} else {
-		var input *Alerts
-		if err := json.Unmarshal(body, &input); err != nil {
-			err = fmt.Errorf("failed to decode POST body: %w", err)
-			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
-			return
-		}
-
-		alerts = input.Alerts
+	alerts, err := parseAlertInput(body)
+	if err != nil {
+		err = fmt.Errorf("failed to parse POST body: %w", err)
+		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+		return
 	}
 
 	s.processAlerts(resp, req, alerts, started)
@@ -233,20 +195,26 @@ func (s *Server) handleAlertsTest(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	var input *Alerts
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		err = fmt.Errorf("failed to read POST body: %w", err)
+		s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, nil, "", resp, req, started)
+		return
+	}
 
-	if err := json.NewDecoder(req.Body).Decode(&input); err != nil {
-		err = fmt.Errorf("failed to decode POST body: %w", err)
+	alerts, err := parseAlertInput(body)
+	if err != nil {
+		err = fmt.Errorf("failed to parse POST body: %w", err)
 		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
 		return
 	}
 
-	if err := s.setSlackChannelID(req, input.Alerts...); err != nil {
+	if err := s.setSlackChannelID(req, alerts...); err != nil {
 		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
 		return
 	}
 
-	body, err := json.Marshal(input)
+	body, err = json.Marshal(alerts)
 	if err != nil {
 		err = fmt.Errorf("failed to marshal POST body: %w", err)
 		s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, nil, "", resp, req, started)
@@ -256,50 +224,6 @@ func (s *Server) handleAlertsTest(resp http.ResponseWriter, req *http.Request) {
 	s.logger.Infof("BODY: %s", string(body))
 
 	resp.WriteHeader(http.StatusNoContent)
-}
-
-func getClientErrorDebugText(alert *common.Alert) map[string]string {
-	if alert == nil {
-		return nil
-	}
-
-	return map[string]string{
-		"CorrelationId": alert.CorrelationID,
-		"Header":        alert.Header,
-		"Body":          alert.Text,
-	}
-}
-
-func reduceAlertCountForChannel(channel string, alerts []*common.Alert, limit int) ([]*common.Alert, []*common.Alert) {
-	if len(alerts) <= limit {
-		return alerts, []*common.Alert{}
-	}
-
-	reducedAlerts := alerts[0:limit]
-	overflow := len(alerts) - len(reducedAlerts)
-	firstVictim := alerts[limit]
-	rateLimitAlert := createRateLimitAlert(channel, overflow, firstVictim)
-	reducedAlerts = append(reducedAlerts, rateLimitAlert)
-
-	return reducedAlerts, alerts[limit:]
-}
-
-func createRateLimitAlert(channel string, overflow int, template *common.Alert) *common.Alert {
-	summary := common.NewPanicAlert()
-	summary.CorrelationID = fmt.Sprintf("__rate_limit_%s", channel)
-	summary.Header = ":status: Too many alerts"
-	summary.Text = fmt.Sprintf("%d alerts were dropped", overflow)
-	summary.FallbackText = "Too many alerts"
-	summary.IconEmoji = template.IconEmoji
-	summary.Username = template.Username
-	summary.SlackChannelID = channel
-
-	if template.IssueFollowUpEnabled {
-		summary.IssueFollowUpEnabled = true
-		summary.AutoResolveSeconds = 3600
-	}
-
-	return summary
 }
 
 func (s *Server) createClientErrorAlert(err error, statusCode int, debugText map[string]string, targetChannel string) *common.Alert {
@@ -347,6 +271,10 @@ func (s *Server) createClientErrorAlert(err error, statusCode int, debugText map
 }
 
 func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) error {
+	if len(alerts) == 0 {
+		return nil
+	}
+
 	var channelIDFromURL string
 	var getChannelIDFromURL sync.Once
 
@@ -389,6 +317,62 @@ func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) e
 	return nil
 }
 
+func (s *Server) logAlerts(text, reason string, started time.Time, alerts ...*common.Alert) {
+	d := fmt.Sprintf("%v", time.Since(started))
+
+	for _, alert := range alerts {
+		entry := s.logger.WithField("duration", d).WithField("correlation_id", alert.CorrelationID).WithField("slack_channel_id", alert.SlackChannelID).WithField("header", alert.Header).WithField("fallback_text", alert.FallbackText)
+		if reason != "" {
+			entry = entry.WithField("reason", reason)
+		}
+		entry.Info(text)
+	}
+}
+
+func getClientErrorDebugText(alert *common.Alert) map[string]string {
+	if alert == nil {
+		return nil
+	}
+
+	return map[string]string{
+		"CorrelationId": alert.CorrelationID,
+		"Header":        alert.Header,
+		"Body":          alert.Text,
+	}
+}
+
+func reduceAlertCountForChannel(channel string, alerts []*common.Alert, limit int) ([]*common.Alert, []*common.Alert) {
+	if len(alerts) <= limit {
+		return alerts, []*common.Alert{}
+	}
+
+	reducedAlerts := alerts[0:limit]
+	overflow := len(alerts) - len(reducedAlerts)
+	firstVictim := alerts[limit]
+	rateLimitAlert := createRateLimitAlert(channel, overflow, firstVictim)
+	reducedAlerts = append(reducedAlerts, rateLimitAlert)
+
+	return reducedAlerts, alerts[limit:]
+}
+
+func createRateLimitAlert(channel string, overflow int, template *common.Alert) *common.Alert {
+	summary := common.NewPanicAlert()
+	summary.CorrelationID = fmt.Sprintf("__rate_limit_%s", channel)
+	summary.Header = ":status: Too many alerts"
+	summary.Text = fmt.Sprintf("%d alerts were dropped", overflow)
+	summary.FallbackText = "Too many alerts"
+	summary.IconEmoji = template.IconEmoji
+	summary.Username = template.Username
+	summary.SlackChannelID = channel
+
+	if template.IssueFollowUpEnabled {
+		summary.IssueFollowUpEnabled = true
+		summary.AutoResolveSeconds = 3600
+	}
+
+	return summary
+}
+
 func ignoreAlert(alert *common.Alert) (bool, string) {
 	if alert == nil || len(alert.IgnoreIfTextContains) == 0 || alert.Text == "" {
 		return false, ""
@@ -409,16 +393,35 @@ func ignoreAlert(alert *common.Alert) (bool, string) {
 	return false, ""
 }
 
-func (s *Server) logAlerts(text, reason string, started time.Time, alerts ...*common.Alert) {
-	d := fmt.Sprintf("%v", time.Since(started))
+func parseAlertInput(body []byte) ([]*common.Alert, error) {
+	var alerts []*common.Alert
 
-	for _, alert := range alerts {
-		entry := s.logger.WithField("duration", d).WithField("correlation_id", alert.CorrelationID).WithField("slack_channel_id", alert.SlackChannelID).WithField("header", alert.Header).WithField("fallback_text", alert.FallbackText)
-		if reason != "" {
-			entry = entry.WithField("reason", reason)
+	// Scenario 1: the input is an array of alerts, i.e. the root level is an array
+	if strings.HasPrefix(string(body), "[") {
+		if err := json.Unmarshal(body, &alerts); err != nil {
+			return nil, fmt.Errorf("failed to json unmarshal input: %w", err)
 		}
-		entry.Info(text)
+
+		return alerts, nil
 	}
+
+	// Scenario 2: the root level is an object.
+	// In this case, we may still have multiple alerts (see alertsInput struct for details)
+	// Yes, this is a bit of a hack, but backwards compatibility...
+	var input *alertsInput
+
+	if err := json.Unmarshal(body, &input); err != nil {
+		return nil, fmt.Errorf("failed to json unmarshal input: %w", err)
+	}
+
+	// If the input contains an array of alerts, return that.
+	// Any other fields on the root level are ignored (we can't have it both ways).
+	if len(input.Alerts) > 0 {
+		return input.Alerts, nil
+	}
+
+	// Nothing in the alerts array -> assume the input is a single alert, with all fields at the root level.
+	return []*common.Alert{&input.Alert}, nil
 }
 
 func getAlertChannelWithRouteKey(alert *common.Alert) string {
