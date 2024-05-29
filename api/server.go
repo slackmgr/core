@@ -23,7 +23,7 @@ import (
 )
 
 type FifoQueueProducer interface {
-	Send(ctx context.Context, channelID, dedupID, body string) error
+	Send(ctx context.Context, slackChannelID, dedupID, body string) error
 }
 
 type Server struct {
