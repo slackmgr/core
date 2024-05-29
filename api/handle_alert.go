@@ -376,7 +376,7 @@ func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) e
 		}
 
 		// Find an alert mapping rule matching the route key and alert type (if any)
-		if channel, ok := s.apiSettings.Match(alert.RouteKey, alert.Type); ok {
+		if channel, ok := s.apiSettings.Match(alert.RouteKey, alert.Type, s.logger); ok {
 			alert.SlackChannelID = channel
 		} else {
 			if alert.RouteKey == "" {
