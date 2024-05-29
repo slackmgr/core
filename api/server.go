@@ -79,7 +79,7 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to validate manager configuration: %w", err)
 	}
 
-	if err := s.apiSettings.InitAndValidate(); err != nil {
+	if err := s.apiSettings.InitAndValidate(s.logger); err != nil {
 		return fmt.Errorf("failed to initialize alert mapping: %w", err)
 	}
 
@@ -185,7 +185,7 @@ func (s *Server) UpdateSettings(settings *config.APISettings) error {
 		settings = &config.APISettings{}
 	}
 
-	if err := settings.InitAndValidate(); err != nil {
+	if err := settings.InitAndValidate(s.logger); err != nil {
 		return fmt.Errorf("failed to update API settings (the existing settings will continue to be used): %w", err)
 	}
 
