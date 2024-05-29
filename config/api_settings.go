@@ -74,7 +74,7 @@ func (s *APISettings) InitAndValidate() error {
 
 		r.Channel = strings.TrimSpace(r.Channel)
 
-		if !r.MatchAll && allItemsEmpty(r.Equals) && allItemsEmpty(r.HasPrefix) && allItemsEmpty(r.MatchesRegex) {
+		if !r.MatchAll && allItemsAreEmpty(r.Equals) && allItemsAreEmpty(r.HasPrefix) && allItemsAreEmpty(r.MatchesRegex) {
 			return fmt.Errorf("rule[%d] does not match anything", i)
 		}
 
@@ -133,10 +133,6 @@ func (s *APISettings) matchMappingRule(key, alertType string) *RoutingRule {
 		return nil
 	}
 
-	if key == "" {
-		return nil
-	}
-
 	// Evaluate exact (equals) matches first
 	if rule := s.findRuleWithEqualsMatch(key, alertType); rule != nil {
 		return rule
@@ -152,25 +148,15 @@ func (s *APISettings) matchMappingRule(key, alertType string) *RoutingRule {
 		return rule
 	}
 
-	// Then try to find a match-all rule with the correct alert type
-	for _, rule := range s.RoutingRules {
-		if alertType == rule.AlertType && rule.MatchAll {
-			return rule
-		}
-	}
-
-	// Finally, try to find a match-all rule with an empty alert type
-	for _, rule := range s.RoutingRules {
-		if rule.AlertType == "" && rule.MatchAll {
-			return rule
-		}
-	}
-
-	// Nothing found - return nil
-	return nil
+	// Finally, try to find a match-all rule
+	return s.findRuleWithMatchAll(alertType)
 }
 
 func (s *APISettings) findRuleWithEqualsMatch(key, alertType string) *RoutingRule {
+	if key == "" {
+		return nil
+	}
+
 	var emptyAlertTypeMatch *RoutingRule
 
 	// If we find a rule that matches both key and alert type, return it immediately
@@ -189,6 +175,10 @@ func (s *APISettings) findRuleWithEqualsMatch(key, alertType string) *RoutingRul
 }
 
 func (s *APISettings) findRuleWithPrefixMatch(key, alertType string) *RoutingRule {
+	if key == "" {
+		return nil
+	}
+
 	var emptyAlertTypeMatch *RoutingRule
 
 	// If we find a rule that matches both key prefix and alert type, return it immediately
@@ -207,6 +197,10 @@ func (s *APISettings) findRuleWithPrefixMatch(key, alertType string) *RoutingRul
 }
 
 func (s *APISettings) findRuleWithRegexMatch(key, alertType string) *RoutingRule {
+	if key == "" {
+		return nil
+	}
+
 	var emptyAlertTypeMatch *RoutingRule
 
 	// If we find a rule that regex matches both key and alert type, return it immediately
@@ -222,6 +216,24 @@ func (s *APISettings) findRuleWithRegexMatch(key, alertType string) *RoutingRule
 	}
 
 	return emptyAlertTypeMatch
+}
+
+func (s *APISettings) findRuleWithMatchAll(alertType string) *RoutingRule {
+	// First try to find a match-all rule with the correct alert type
+	for _, rule := range s.RoutingRules {
+		if rule.MatchAll && alertType == rule.AlertType {
+			return rule
+		}
+	}
+
+	// Then try to find a match-all rule with an empty alert type
+	for _, rule := range s.RoutingRules {
+		if rule.MatchAll && rule.AlertType == "" {
+			return rule
+		}
+	}
+
+	return nil
 }
 
 func (r *RoutingRule) matchEquals(key string) bool {
@@ -254,7 +266,7 @@ func (r *RoutingRule) matchRegex(key string) bool {
 	return false
 }
 
-func allItemsEmpty(items []string) bool {
+func allItemsAreEmpty(items []string) bool {
 	for _, s := range items {
 		if s != "" {
 			return false
