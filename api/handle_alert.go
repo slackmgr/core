@@ -379,6 +379,9 @@ func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) e
 		if channel, ok := s.apiSettings.Match(alert.RouteKey, alert.Type); ok {
 			alert.SlackChannelID = channel
 		} else {
+			if alert.RouteKey == "" {
+				return fmt.Errorf("alert has no route key, and no fallback mapping exists")
+			}
 			return fmt.Errorf("no mapping exists for route key %s and alert type %s", alert.RouteKey, alert.Type)
 		}
 	}
