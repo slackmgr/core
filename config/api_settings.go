@@ -31,22 +31,22 @@ type APISettings struct {
 type RoutingRule struct {
 	// Name is a (short) unique name for the rule. It does not effect routing.
 	// All rules must have a unique non-empty name.
-	Name string `json:"name"     yaml:"name"`
+	Name string `json:"name" yaml:"name"`
 
 	// Description is a human-readable description of the rule. It does not effect routing.
 	// This field is optional.
-	Description string `json:"description"  yaml:"description"`
+	Description string `json:"description" yaml:"description"`
 
 	// AlertType is the case-insensitive type of alert that this rule matches.
 	// This field is optional.
 	// If empty, the rule matches all alert types, but rules with a non-empty AlertType take precedence.
-	AlertType string `json:"alertType"    yaml:"alertType"`
+	AlertType string `json:"alertType" yaml:"alertType"`
 
 	// Equals is a list of case-insensitive exact matches for the alert route key.
-	Equals []string `json:"equals"       yaml:"equals"`
+	Equals []string `json:"equals" yaml:"equals"`
 
 	// HasPrefix is a list of case-insensitive prefixes for the alert route key.
-	HasPrefix []string `json:"hasPrefix"    yaml:"hasPrefix"`
+	HasPrefix []string `json:"hasPrefix" yaml:"hasPrefix"`
 
 	// MatchesRegex is a list of case-insensitive regular expressions for the alert route key.
 	// If a regex does not start with the case-insensitive flag (?i), it will be added automatically.
@@ -54,10 +54,10 @@ type RoutingRule struct {
 
 	// MatchAll is a flag that indicates that this rule matches all alerts.
 	// This field is typically used to create a catch-all (fallback) rule, to capture all alerts that do not match any other rule.
-	MatchAll bool `json:"matchAll"     yaml:"matchAll"`
+	MatchAll bool `json:"matchAll" yaml:"matchAll"`
 
 	// Channel is the Slack channel ID to route the alert to (if the rule is a match), for example C1234567890.
-	Channel string `json:"channel"      yaml:"channel"`
+	Channel string `json:"channel" yaml:"channel"`
 
 	regex []*regexp.Regexp
 }
@@ -160,7 +160,7 @@ func (s *APISettings) InitAndValidate(logger common.Logger) error {
 }
 
 // Match matches a route key and alert type to a Slack channel ID, based on the routing rules.
-// if more than one rule matches, the most specific rule is returned.
+// If more than one rule matches, the most specific rule is returned.
 // Specificity is determined by the type of match, in the following order:
 //  1. Exact match
 //  2. Prefix match

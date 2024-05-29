@@ -80,7 +80,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	if err := s.apiSettings.InitAndValidate(s.logger); err != nil {
-		return fmt.Errorf("failed to initialize alert mapping: %w", err)
+		return fmt.Errorf("failed to initialize API settings: %w", err)
 	}
 
 	s.slackAPI = slackapi.New(s.cacheStore, s.cfg.CacheKeyPrefix, s.logger, s.metrics, s.cfg.SlackClient)
@@ -97,17 +97,19 @@ func (s *Server) Run(ctx context.Context) error {
 
 	router := mux.NewRouter()
 
-	// Stateful alerts
-	router.HandleFunc("/alert", s.handleAlert).Methods("POST")
-	router.HandleFunc("/alert/{slackChannelId}", s.handleAlert).Methods("POST")
+	// We support both /alert and /alerts endpoints for backwards compatibility.
+	// Input is either a single alert (common.Alert), or an array of alerts.
+	router.HandleFunc("/alert", s.handleAlerts).Methods("POST")
+	router.HandleFunc("/alert/{slackChannelId}", s.handleAlerts).Methods("POST")
 	router.HandleFunc("/alerts", s.handleAlerts).Methods("POST")
 	router.HandleFunc("/alerts/{slackChannelId}", s.handleAlerts).Methods("POST")
 
-	// Prometheus alert manager
+	// Webhooks from Prometheus alert manager.
+	// The alert format is defined in PrometheusWebhook.
 	router.HandleFunc("/prometheus-alert", s.handlePrometheusWebhook).Methods("POST")
 	router.HandleFunc("/prometheus-alert/{slackChannelId}", s.handlePrometheusWebhook).Methods("POST")
 
-	// Test endpoint for stateful alerts, which writes the input message as an info log message
+	// Test endpoint for alerts, which writes the input body as an info log message.
 	router.HandleFunc("/alerts-test", s.handleAlertsTest).Methods("POST")
 	router.HandleFunc("/alerts-test/{slackChannelId}", s.handleAlertsTest).Methods("POST")
 
@@ -186,7 +188,7 @@ func (s *Server) UpdateSettings(settings *config.APISettings) error {
 	}
 
 	if err := settings.InitAndValidate(s.logger); err != nil {
-		return fmt.Errorf("failed to update API settings (the existing settings will continue to be used): %w", err)
+		return fmt.Errorf("failed to initialize updated API settings (the existing settings will continue to be used): %w", err)
 	}
 
 	s.apiSettings = settings
