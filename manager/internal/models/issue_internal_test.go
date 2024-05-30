@@ -8,6 +8,8 @@ import (
 )
 
 func TestSlackMentionHandling(t *testing.T) {
+	t.Parallel()
+
 	// Texts without mentions are OK
 	issue := Issue{
 		LastAlert: &Alert{

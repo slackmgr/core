@@ -8,6 +8,8 @@ import (
 )
 
 func TestNewHeaderBlock(t *testing.T) {
+	t.Parallel()
+
 	text := newPlainTextTextBlock("foo")
 	foo := slackapi.NewHeaderBlock(text)
 	assert.NotNil(t, foo)

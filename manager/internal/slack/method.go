@@ -1,10 +1,9 @@
-//nolint:revive,stylecheck
 package slack
 
-type Method string
+type UpdateMethod string
 
-var (
-	POST           = Method("POST")
-	UPDATE         = Method("UPDATE")
-	UPDATE_DELETED = Method("UPDATE_DELETED")
+const (
+	UpdateMethodPost          = UpdateMethod("POST")
+	UpdateMethodUpdate        = UpdateMethod("UPDATE")
+	UpdateMethodUpdateDeleted = UpdateMethod("UPDATE_DELETED")
 )

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
@@ -26,19 +27,19 @@ func NewDefaultManagerConfig() *ManagerConfig {
 
 func (c *ManagerConfig) Validate() error {
 	if c.WebhookTimeoutSeconds < 1 || time.Duration(c.WebhookTimeoutSeconds) > 30 {
-		return fmt.Errorf("webhook timeout must be between 1 and 30 seconds")
+		return errors.New("webhook timeout must be between 1 and 30 seconds")
 	}
 
 	if c.SlackClient == nil {
-		return fmt.Errorf("slack client config is required")
+		return errors.New("slack client config is required")
 	}
 
 	if c.Location == nil {
-		return fmt.Errorf("location is required")
+		return errors.New("location is required")
 	}
 
 	if c.SlackClient == nil {
-		return fmt.Errorf("slack client config is required")
+		return errors.New("slack client config is required")
 	}
 
 	if err := c.SlackClient.Validate(); err != nil {

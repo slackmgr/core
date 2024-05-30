@@ -232,7 +232,8 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 
 	// Receiving channel is not a managed alert channel - send ack with error message
 	if !isAlertChannel {
-		ackWithFieldErrorMsg(evt, clt, "select_channel", fmt.Sprintf("The channel must be managed by %s", c.managerSettings.Settings.AppFriendlyName))
+		errMsg := "The channel must be managed by " + c.managerSettings.Settings.AppFriendlyName
+		ackWithFieldErrorMsg(evt, clt, "select_channel", errMsg)
 		return
 	}
 
@@ -306,7 +307,8 @@ func (c *InteractiveController) createIssueViewSubmission(ctx context.Context, e
 
 	// Receiving channel is not managed - send ack with error message
 	if !isAlertChannel {
-		ackWithFieldErrorMsg(evt, clt, "select_channel", fmt.Sprintf("The channel must be managed by %s", c.managerSettings.Settings.AppFriendlyName))
+		errMsg := "The channel must be managed by " + c.managerSettings.Settings.AppFriendlyName
+		ackWithFieldErrorMsg(evt, clt, "select_channel", errMsg)
 		return
 	}
 
@@ -683,8 +685,12 @@ func getViewStateCheckboxSelectedValues(view slack.View) map[string][]string {
 }
 
 // getInteractionAndLoggerFromEvent casts the event data to interaction callback, and creates a log entry with suitable fields
-func getInteractionAndLoggerFromEvent(evt *socketmode.Event, logger common.Logger) (slack.InteractionCallback, common.Logger) {
-	interaction := evt.Data.(slack.InteractionCallback)
+func getInteractionAndLoggerFromEvent(evt *socketmode.Event, logger common.Logger) (slack.InteractionCallback, common.Logger) { //nolint:ireturn
+	interaction, ok := evt.Data.(slack.InteractionCallback)
+	if !ok {
+		// This should never happen
+		panic("Failed to cast event data to interaction callback")
+	}
 
 	logger = logger.
 		WithField("operation", "slack").

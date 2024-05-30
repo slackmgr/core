@@ -5,9 +5,12 @@ import (
 
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestReduceAlerts(t *testing.T) {
+	t.Parallel()
+
 	limit := 2
 
 	alerts := []*common.Alert{
@@ -18,7 +21,7 @@ func TestReduceAlerts(t *testing.T) {
 	// Two alerts is within the limit -> no alerts should be skipped
 	keptAlerts, skippedAlerts := reduceAlertCountForChannel("123", alerts, limit)
 	assert.Len(t, keptAlerts, 2)
-	assert.Len(t, skippedAlerts, 0)
+	assert.Empty(t, skippedAlerts)
 
 	alerts = append(alerts, &common.Alert{
 		SlackChannelID: "123", Header: "c",
@@ -49,40 +52,47 @@ func TestReduceAlerts(t *testing.T) {
 }
 
 func TestAlertInputParser(t *testing.T) {
+	t.Parallel()
+
 	t.Run("array input", func(t *testing.T) {
+		t.Parallel()
 		input := `[{"header":"foo"}, {"header":"bar"}]`
 		alerts, err := parseAlertInput([]byte(input))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, alerts, 2)
 		assert.Equal(t, "foo", alerts[0].Header)
 		assert.Equal(t, "bar", alerts[1].Header)
 	})
 
 	t.Run("array input with invalid json should return an error", func(t *testing.T) {
+		t.Parallel()
 		input := `[{"header":"foo"`
 		_, err := parseAlertInput([]byte(input))
-		assert.Error(t, err)
+		require.Error(t, err)
 	})
 
 	t.Run("object input with all fields at root", func(t *testing.T) {
+		t.Parallel()
 		input := `{"header":"foo", "footer":"bar"}`
 		alerts, err := parseAlertInput([]byte(input))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, alerts, 1)
 		assert.Equal(t, "foo", alerts[0].Header)
 		assert.Equal(t, "bar", alerts[0].Footer)
 	})
 
 	t.Run("object input with invalid json should return an error", func(t *testing.T) {
+		t.Parallel()
 		input := `{"header":"foo", `
 		_, err := parseAlertInput([]byte(input))
-		assert.Error(t, err)
+		require.Error(t, err)
 	})
 
 	t.Run("object input with array of alerts", func(t *testing.T) {
+		t.Parallel()
 		input := `{"alerts":[{"header":"foo"}, {"header":"bar"}]}`
 		alerts, err := parseAlertInput([]byte(input))
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Len(t, alerts, 2)
 		assert.Equal(t, "foo", alerts[0].Header)
 		assert.Equal(t, "bar", alerts[1].Header)

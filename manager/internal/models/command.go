@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -46,9 +47,9 @@ type WebhookCommandParams struct {
 	CheckboxInput map[string][]string `json:"checkboxInput,omitempty"`
 }
 
-func NewCommandFromQueue(queueItem *commonlib.FifoQueueItem) (Message, error) {
+func NewCommandFromQueue(queueItem *commonlib.FifoQueueItem) (Message, error) { //nolint:ireturn
 	if len(queueItem.Body) == 0 {
-		return nil, fmt.Errorf("alert body is empty")
+		return nil, errors.New("alert body is empty")
 	}
 
 	var cmd Command

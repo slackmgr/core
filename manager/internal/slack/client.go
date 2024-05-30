@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -56,27 +57,27 @@ func (c *Client) SetIssueFinder(issueFinder handler.IssueFinder) {
 
 func (c *Client) Connect(ctx context.Context) error {
 	if c.commandHandler == nil {
-		return fmt.Errorf("command handler must be set before connecting")
+		return errors.New("command handler must be set before connecting")
 	}
 
 	if c.cacheStore == nil {
-		return fmt.Errorf("cache store must be set before connecting")
+		return errors.New("cache store must be set before connecting")
 	}
 
 	if c.logger == nil {
-		return fmt.Errorf("logger must be set before connecting")
+		return errors.New("logger must be set before connecting")
 	}
 
 	if c.metrics == nil {
-		return fmt.Errorf("metrics must be set before connecting")
+		return errors.New("metrics must be set before connecting")
 	}
 
 	if c.cfg == nil {
-		return fmt.Errorf("config must be set before connecting")
+		return errors.New("config must be set before connecting")
 	}
 
 	if c.managerSettings == nil {
-		return fmt.Errorf("channel settings must be set before connecting")
+		return errors.New("channel settings must be set before connecting")
 	}
 
 	c.api = slackapi.New(c.cacheStore, c.cfg.CacheKeyPrefix, c.logger, c.metrics, c.cfg.SlackClient)
@@ -93,7 +94,7 @@ func (c *Client) RunSocketMode(ctx context.Context) error {
 	defer c.logger.Debug("common.RunSocketMode exited")
 
 	if c.issueFinder == nil {
-		return fmt.Errorf("issue finder must be set before running socket mode")
+		return errors.New("issue finder must be set before running socket mode")
 	}
 
 	socketModeClient := c.api.NewSocketModeClient()
@@ -305,7 +306,7 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, updateIfMessag
 	if hardDelete {
 		deleteOrUpdateErr = c.api.ChatDeleteMessage(ctx, issue.LastAlert.SlackChannelID, issue.SlackPostID)
 	} else {
-		options := c.getMessageOptionsBlocks(issue, models.ActionNone, UPDATE_DELETED)
+		options := c.getMessageOptionsBlocks(issue, models.ActionNone, UpdateMethodUpdateDeleted)
 		_, err := c.api.ChatUpdateMessage(ctx, issue.LastAlert.SlackChannelID, options...)
 		deleteOrUpdateErr = err
 	}
@@ -426,7 +427,7 @@ func (c *Client) createOrUpdate(ctx context.Context, issue *models.Issue, action
 }
 
 func (c *Client) create(ctx context.Context, issue *models.Issue, action models.SlackAction) error {
-	options := c.getMessageOptionsBlocks(issue, action, POST)
+	options := c.getMessageOptionsBlocks(issue, action, UpdateMethodPost)
 
 	postID, err := c.api.ChatPostMessage(ctx, issue.LastAlert.SlackChannelID, options...)
 	if err != nil {
@@ -472,7 +473,7 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, action models.
 }
 
 func (c *Client) update(ctx context.Context, issue *models.Issue, action models.SlackAction) error {
-	options := c.getMessageOptionsBlocks(issue, action, UPDATE)
+	options := c.getMessageOptionsBlocks(issue, action, UpdateMethodUpdate)
 
 	postID, err := c.api.ChatUpdateMessage(ctx, issue.LastAlert.SlackChannelID, options...)
 	if err != nil {
@@ -525,7 +526,7 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, action models.
 	return nil
 }
 
-func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.SlackAction, method Method) []slack.MsgOption {
+func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.SlackAction, method UpdateMethod) []slack.MsgOption {
 	blocks := []slack.Block{}
 	statusEmoji := c.getStatusEmoji(issue, action, method)
 
@@ -566,7 +567,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 
-	if method != UPDATE_DELETED {
+	if method != UpdateMethodUpdateDeleted {
 		webhookButtons := getWebhookButtons(issue)
 		if len(webhookButtons) > 0 {
 			blocks = append(blocks, slack.NewActionBlock("alert_actions", webhookButtons...))
@@ -579,27 +580,31 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 	}
 
 	if issue.FollowUpEnabled() {
+		first := "First: " + issue.Created.In(c.cfg.Location).Format("01-02 15:04:05")
+		last := "Last: " + issue.LastAlertReceived.In(c.cfg.Location).Format("01-02 15:04:05")
+		alertCount := fmt.Sprintf("#%d", issue.AlertCount)
+
 		fields := []slack.MixedElement{}
-		fields = append(fields, slack.NewTextBlockObject("plain_text", fmt.Sprintf("First: %s", issue.Created.In(c.cfg.Location).Format("01-02 15:04:05")), false, false))
-		fields = append(fields, slack.NewTextBlockObject("plain_text", fmt.Sprintf("Last: %s", issue.LastAlertReceived.In(c.cfg.Location).Format("01-02 15:04:05")), false, false))
-		fields = append(fields, slack.NewTextBlockObject("plain_text", fmt.Sprintf("#%d", issue.AlertCount), false, false))
+		fields = append(fields, slack.NewTextBlockObject("plain_text", first, false, false))
+		fields = append(fields, slack.NewTextBlockObject("plain_text", last, false, false))
+		fields = append(fields, slack.NewTextBlockObject("plain_text", alertCount, false, false))
 		blocks = append(blocks, slack.NewContextBlock("", fields...))
 	}
 
 	// Issue is manually resolved by user
-	if method != UPDATE_DELETED && issue.IsInfoOrResolved() && issue.IsEmojiResolved {
+	if method != UpdateMethodUpdateDeleted && issue.IsInfoOrResolved() && issue.IsEmojiResolved {
 		text := newMrkdwnTextBlock(fmt.Sprintf(":raising_hand: The issue was resolved by *%s* at %s", issue.ResolvedByUser, issue.ResolveTime.In(c.cfg.Location).Format("2006-01-02 15:04:05")))
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 
 	// Issue is not resolved AND being investigated by user
-	if method != UPDATE_DELETED && !issue.IsInfoOrResolved() && issue.IsEmojiInvestigated {
+	if method != UpdateMethodUpdateDeleted && !issue.IsInfoOrResolved() && issue.IsEmojiInvestigated {
 		text := newMrkdwnTextBlock(fmt.Sprintf(":cop: The issue is investigated by *%s* since %s", issue.InvestigatedByUser, issue.InvestigatedSince.In(c.cfg.Location).Format("2006-01-02 15:04:05")))
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 
 	// Issue is not resolved AND muted by user
-	if method != UPDATE_DELETED && !issue.IsInfoOrResolved() && issue.IsEmojiMuted {
+	if method != UpdateMethodUpdateDeleted && !issue.IsInfoOrResolved() && issue.IsEmojiMuted {
 		text := newMrkdwnTextBlock(fmt.Sprintf(":mask: The issue was muted by *%s* at %s", issue.MutedByUser, issue.MutedSince.In(c.cfg.Location).Format("2006-01-02 15:04:05")))
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
@@ -616,7 +621,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 
 	options = append(options, slack.MsgOptionPostMessageParameters(params))
 
-	if method == UPDATE || method == UPDATE_DELETED {
+	if method == UpdateMethodUpdate || method == UpdateMethodUpdateDeleted {
 		options = append(options, slack.MsgOptionUpdate(issue.SlackPostID))
 	} else {
 		options = append(options, slack.MsgOptionPost())
@@ -666,7 +671,7 @@ func getWebhookButtons(issue *models.Issue) []slack.BlockElement {
 	return buttons
 }
 
-func (c *Client) getStatusEmoji(issue *models.Issue, action models.SlackAction, method Method) string {
+func (c *Client) getStatusEmoji(issue *models.Issue, action models.SlackAction, method UpdateMethod) string {
 	if action == models.ActionResolve {
 		if issue.IsResolvedAsInconclusive() {
 			return c.managerSettings.Settings.IssueStatus.InconclusiveEmoji
@@ -676,17 +681,17 @@ func (c *Client) getStatusEmoji(issue *models.Issue, action models.SlackAction, 
 
 	switch issue.LastAlert.Severity {
 	case common.AlertPanic:
-		if issue.IsEmojiMuted || method == UPDATE_DELETED {
+		if issue.IsEmojiMuted || method == UpdateMethodUpdateDeleted {
 			return c.managerSettings.Settings.IssueStatus.MutePanicEmoji
 		}
 		return c.managerSettings.Settings.IssueStatus.PanicEmoji
 	case common.AlertError:
-		if issue.IsEmojiMuted || method == UPDATE_DELETED {
+		if issue.IsEmojiMuted || method == UpdateMethodUpdateDeleted {
 			return c.managerSettings.Settings.IssueStatus.MuteErrorEmoji
 		}
 		return c.managerSettings.Settings.IssueStatus.ErrorEmoji
 	case common.AlertWarning:
-		if issue.IsEmojiMuted || method == UPDATE_DELETED {
+		if issue.IsEmojiMuted || method == UpdateMethodUpdateDeleted {
 			return c.managerSettings.Settings.IssueStatus.MuteWarningEmoji
 		}
 		return c.managerSettings.Settings.IssueStatus.WarningEmoji
@@ -722,7 +727,7 @@ func newerSlackPostWithLowerPriorityExists(currentIssue *models.Issue, allIssues
 	return false
 }
 
-func getTextBlocks(alertText, statusEmoji string, method Method) []slack.Block {
+func getTextBlocks(alertText, statusEmoji string, method UpdateMethod) []slack.Block {
 	endsWithCodeBlock := strings.HasSuffix(alertText, "```")
 
 	blocks := []slack.Block{}
@@ -737,8 +742,8 @@ func getTextBlocks(alertText, statusEmoji string, method Method) []slack.Block {
 	}
 
 	for {
-		if len(alertText) <= 2800 || method == UPDATE_DELETED {
-			if method == UPDATE_DELETED {
+		if len(alertText) <= 2800 || method == UpdateMethodUpdateDeleted {
+			if method == UpdateMethodUpdateDeleted {
 				alertText = strikethrough(alertText)
 			}
 
@@ -756,14 +761,14 @@ func getTextBlocks(alertText, statusEmoji string, method Method) []slack.Block {
 			alertText = "```" + alertText
 		}
 
-		if method == UPDATE_DELETED {
+		if method == UpdateMethodUpdateDeleted {
 			part = strikethrough(part)
 		}
 
 		text := newMrkdwnTextBlock(setStatusEmoji(part, statusEmoji))
 		blocks = append(blocks, slack.NewSectionBlock(text, nil, nil))
 
-		if method == UPDATE_DELETED {
+		if method == UpdateMethodUpdateDeleted {
 			break
 		}
 	}

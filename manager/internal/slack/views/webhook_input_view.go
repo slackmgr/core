@@ -35,7 +35,7 @@ func WebhookInputView(webhook *common.Webhook) []slack.Block {
 	return blocks
 }
 
-func createStringInputBlock(input *common.WebhookPlainTextInput) slack.Block {
+func createStringInputBlock(input *common.WebhookPlainTextInput) *slack.InputBlock {
 	label := slack.NewTextBlockObject(slack.PlainTextType, input.Description, false, false)
 
 	inputElement := slack.NewPlainTextInputBlockElement(nil, input.ID)
@@ -54,7 +54,7 @@ func createStringInputBlock(input *common.WebhookPlainTextInput) slack.Block {
 	return slack.NewInputBlock(input.ID, label, nil, inputElement)
 }
 
-func createCheckboxInputBlock(input *common.WebhookCheckboxInput) slack.Block {
+func createCheckboxInputBlock(input *common.WebhookCheckboxInput) *slack.InputBlock {
 	label := slack.NewTextBlockObject(slack.PlainTextType, input.Label, false, false)
 
 	checkboxGroup := slack.NewCheckboxGroupsBlockElement(input.ID)

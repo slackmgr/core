@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -127,7 +128,7 @@ func (c *coordinator) AddCommand(ctx context.Context, cmd *models.Command) error
 		return fmt.Errorf("failed to find or create channel manager: %w", err)
 	}
 
-	if err := manager.QueueCommand(ctx, cmd); err != nil {
+	if err := manager.queueCommand(ctx, cmd); err != nil {
 		return fmt.Errorf("failed to add command to channel manager: %w", err)
 	}
 
@@ -149,7 +150,7 @@ func (c *coordinator) AddAlert(ctx context.Context, alert *models.Alert) error {
 		return fmt.Errorf("failed to find or create channel manager: %w", err)
 	}
 
-	if err := channelManager.QueueAlert(ctx, alert); err != nil {
+	if err := channelManager.queueAlert(ctx, alert); err != nil {
 		return fmt.Errorf("failed to add alert to channel manager: %w", err)
 	}
 
@@ -163,9 +164,11 @@ func (c *coordinator) FindIssueBySlackPost(ctx context.Context, channelID string
 		return nil
 	}
 
-	issue, err := channelManager.FindIssueBySlackPost(ctx, slackPostID, includeArchived)
+	issue, err := channelManager.findIssueBySlackPost(ctx, slackPostID, includeArchived)
 	if err != nil {
-		c.logger.Errorf("Failed to find issue by slack post: %s", err)
+		if !errors.Is(err, errIssueNotFound) {
+			c.logger.Errorf("Failed to find issue by slack post: %s", err)
+		}
 		return nil
 	}
 
@@ -195,7 +198,7 @@ func (c *coordinator) handleMoveRequest(ctx context.Context, request *models.Mov
 	}
 
 	// Add the issue to the new manager
-	if err := newChannelManager.QueueMovedIssue(ctx, issue); err != nil {
+	if err := newChannelManager.queueMovedIssue(ctx, issue); err != nil {
 		return fmt.Errorf("failed to add moved issue to channel manager: %w", err)
 	}
 
@@ -314,7 +317,7 @@ func (c *coordinator) findOrCreateChannelManager(ctx context.Context, channelID 
 
 	c.channelManagersWaitGroup.Add(1)
 
-	go manager.Run(ctx, c.channelManagersWaitGroup)
+	go manager.run(ctx, c.channelManagersWaitGroup)
 
 	c.channelManagers[channelID] = manager
 

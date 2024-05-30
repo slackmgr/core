@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,6 +16,11 @@ import (
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+)
+
+var (
+	errUnmanagedChannel      = errors.New("channel is not managed by the manager")
+	errUserIsNotChannelAdmin = errors.New("user is not channel admin")
 )
 
 type ReactionsController struct {
@@ -48,7 +54,11 @@ func NewReactionsController(eventhandler *handler.SocketModeHandler, client hand
 func (c *ReactionsController) reactionAdded(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
 	ack(evt, clt)
 
-	apiEvent := evt.Data.(slackevents.EventsAPIEvent)
+	apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
+	if !ok {
+		// This should never happen
+		panic("Failed to cast EventsAPIEvent")
+	}
 
 	reactionAddedEvent, ok := apiEvent.InnerEvent.Data.(*slackevents.ReactionAddedEvent)
 	if !ok {
@@ -76,7 +86,11 @@ func (c *ReactionsController) reactionAdded(ctx context.Context, evt *socketmode
 func (c *ReactionsController) reactionRemoved(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
 	ack(evt, clt)
 
-	apiEvent := evt.Data.(slackevents.EventsAPIEvent)
+	apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
+	if !ok {
+		// This should never happen
+		panic("Failed to cast EventsAPIEvent")
+	}
 
 	reactionRemovedEvent, ok := apiEvent.InnerEvent.Data.(*slackevents.ReactionRemovedEvent)
 	if !ok {
@@ -107,7 +121,9 @@ func (c *ReactionsController) sendReactionAddedCommand(ctx context.Context, evt 
 
 	userInfo, err := c.getUserInfo(ctx, evt.Item.Channel, evt.User, requireChannelAdmin, logger)
 	if err != nil {
-		logger.Errorf("Failed to get user info: %w", err)
+		if !errors.Is(err, errUnmanagedChannel) && !errors.Is(err, errUserIsNotChannelAdmin) {
+			logger.Errorf("Failed to get user info: %w", err)
+		}
 		return
 	}
 
@@ -133,7 +149,9 @@ func (c *ReactionsController) sendReactionRemovedCommand(ctx context.Context, ev
 
 	userInfo, err := c.getUserInfo(ctx, evt.Item.Channel, evt.User, requireChannelAdmin, logger)
 	if err != nil {
-		logger.Errorf("Failed to get user info: %w", err)
+		if !errors.Is(err, errUnmanagedChannel) && !errors.Is(err, errUserIsNotChannelAdmin) {
+			logger.Errorf("Failed to get user info: %w", err)
+		}
 		return
 	}
 
@@ -156,7 +174,7 @@ func (c *ReactionsController) getUserInfo(ctx context.Context, channel, userID s
 
 	if !isAlertChannel {
 		logger.Debug("User reaction to message in un-managed channel")
-		return nil, nil
+		return nil, errUnmanagedChannel
 	}
 
 	userInfo, err := c.client.GetUserInfo(ctx, userID)
@@ -174,7 +192,7 @@ func (c *ReactionsController) getUserInfo(ctx context.Context, channel, userID s
 		if !userIsChannelAdmin {
 			logger.Info("User is not admin in channel")
 			c.postNotAdminAlert(ctx, channel, userInfo.ID, userInfo.RealName, logger)
-			return nil, nil
+			return nil, errUserIsNotChannelAdmin
 		}
 	}
 

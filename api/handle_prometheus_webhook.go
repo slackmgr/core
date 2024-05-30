@@ -43,7 +43,7 @@ func (s *Server) handlePrometheusWebhook(resp http.ResponseWriter, req *http.Req
 	}
 
 	if len(webhook.Alerts) == 0 {
-		err = fmt.Errorf("prometheus alert list is empty")
+		err = errors.New("prometheus alert list is empty")
 		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
 		return
 	}
@@ -129,7 +129,7 @@ func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*common.Alert 
 
 		// If no :status: placeholder is found in the header or text, prepend it to the header
 		if !strings.Contains(header, ":status:") && !strings.Contains(text, ":status:") {
-			header = fmt.Sprintf(":status: %s", header)
+			header = ":status: " + header
 		}
 
 		// If no correlation ID is specified, generate one based on a specific set of labels

@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,13 +17,13 @@ type Alert struct {
 	ID                     string    `json:"-"`
 	DBTimestamp            time.Time `json:"@timestamp"`
 	SlackChannelName       string    `json:"slackChannelName"`
-	OriginalSlackChannelID string    `json:"originalSlackChannelID"`
+	OriginalSlackChannelID string    `json:"originalSlackChannelId"`
 	OriginalText           string    `json:"originalText"`
 }
 
-func NewAlert(queueItem *commonlib.FifoQueueItem) (Message, error) {
+func NewAlert(queueItem *commonlib.FifoQueueItem) (Message, error) { //nolint:ireturn
 	if len(queueItem.Body) == 0 {
-		return nil, fmt.Errorf("alert body is empty")
+		return nil, errors.New("alert body is empty")
 	}
 
 	var alert commonlib.Alert

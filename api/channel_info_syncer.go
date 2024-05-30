@@ -70,11 +70,13 @@ func (c *channelInfoSyncer) Run(ctx context.Context) error {
 			if err := c.refreshData(ctx); err != nil {
 				c.logger.Errorf("Failed to refresh Slack channel info: %s", err)
 			}
+
 			refreshChannelInfo = time.After(refreshChannelInfoInterval)
 		case <-refreshAllManagedChannels:
 			if err := c.refreshAllManagedChannelsMap(ctx); err != nil {
 				c.logger.Errorf("Failed to refresh Slack manager channel list: %s", err)
 			}
+
 			refreshAllManagedChannels = time.After(refreshAllManagedChannelsInterval)
 		case <-prune:
 			c.pruneInactiveChannels()

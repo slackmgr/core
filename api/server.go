@@ -135,7 +135,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	timeoutHandler := http.TimeoutHandler(handler, requestTimeout, "Handler timeout")
-	listenAddr := fmt.Sprintf(":%s", s.cfg.RestPort)
+	listenAddr := ":" + s.cfg.RestPort
 
 	srv := &http.Server{
 		Handler:           timeoutHandler,
@@ -166,9 +166,11 @@ func (s *Server) Run(ctx context.Context) error {
 
 	errg.Go(func() error {
 		<-ctx.Done()
+
 		if err := srv.Close(); err != nil {
 			s.logger.Errorf("Failed to close http server: %s", err)
 		}
+
 		return ctx.Err()
 	})
 
@@ -176,6 +178,7 @@ func (s *Server) Run(ctx context.Context) error {
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
+
 		return err
 	}
 
@@ -229,7 +232,7 @@ func (s *Server) writeErrorResponse(ctx context.Context, clientErr error, status
 
 func (s *Server) queueAlert(ctx context.Context, alert *common.Alert) error {
 	if alert.SlackChannelID == "" {
-		return fmt.Errorf("alert has no Slack channel ID")
+		return errors.New("alert has no Slack channel ID")
 	}
 
 	body, err := json.Marshal(alert)

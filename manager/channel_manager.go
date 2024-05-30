@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -17,6 +18,8 @@ import (
 )
 
 const alertsTotal = "processed_alerts_total"
+
+var errIssueNotFound = errors.New("issue not found")
 
 type cmdFunc func(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) error
 
@@ -90,7 +93,7 @@ func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveR
 // init initializes the channel manager with the specified issues.
 func (c *channelManager) init(ctx context.Context, issues []*models.Issue) error {
 	if c.initialized {
-		return fmt.Errorf("channel manager can only be initialized once")
+		return errors.New("channel manager can only be initialized once")
 	}
 
 	c.issueCollection = models.NewIssueCollection(issues)
@@ -115,11 +118,11 @@ func (c *channelManager) init(ctx context.Context, issues []*models.Issue) error
 	return nil
 }
 
-// Run waits for and handles incoming alerts, commands and issues.
+// run waits for and handles incoming alerts, commands and issues.
 // It processes existing issues at given intervals, e.g. for archiving and escalation.
 // This method blocks until the context is cancelled.
 // All errors are logged and not returned.
-func (c *channelManager) Run(ctx context.Context, waitGroup *sync.WaitGroup) {
+func (c *channelManager) run(ctx context.Context, waitGroup *sync.WaitGroup) {
 	c.logger.Info("Channel manager started")
 	defer c.logger.Info("Channel manager exited")
 
@@ -167,34 +170,34 @@ func (c *channelManager) Run(ctx context.Context, waitGroup *sync.WaitGroup) {
 	}
 }
 
-// QueueAlert adds an alert to the alert queue channel.
-func (c *channelManager) QueueAlert(ctx context.Context, alert *models.Alert) error {
+// queueAlert adds an alert to the alert queue channel.
+func (c *channelManager) queueAlert(ctx context.Context, alert *models.Alert) error {
 	if err := internal.TrySend(ctx, alert, c.alertCh); err != nil {
 		return fmt.Errorf("failed to queue alert: %w", err)
 	}
 	return nil
 }
 
-// QueueCommand adds a command to the command queue channel.
-func (c *channelManager) QueueCommand(ctx context.Context, cmd *models.Command) error {
+// queueCommand adds a command to the command queue channel.
+func (c *channelManager) queueCommand(ctx context.Context, cmd *models.Command) error {
 	if err := internal.TrySend(ctx, cmd, c.commandCh); err != nil {
 		return fmt.Errorf("failed to queue command: %w", err)
 	}
 	return nil
 }
 
-// QueueMovedIssue adds a moved issue to the issue queue channel.
-func (c *channelManager) QueueMovedIssue(ctx context.Context, issue *models.Issue) error {
+// queueMovedIssue adds a moved issue to the issue queue channel.
+func (c *channelManager) queueMovedIssue(ctx context.Context, issue *models.Issue) error {
 	if err := internal.TrySend(ctx, issue, c.movedIssueCh); err != nil {
 		return fmt.Errorf("failed to queue moved issue: %w", err)
 	}
 	return nil
 }
 
-// FindIssueBySlackPost attempts to find an existing issue by the specified Slack post ID.
+// findIssueBySlackPost attempts to find an existing issue by the specified Slack post ID.
 // If archived issues should be included in the search, it will search the database for older issues after first searching for active issues in memory.
 // If no issue is found, nil is returned.
-func (c *channelManager) FindIssueBySlackPost(ctx context.Context, slackPostID string, includeArchived bool) (*models.Issue, error) {
+func (c *channelManager) findIssueBySlackPost(ctx context.Context, slackPostID string, includeArchived bool) (*models.Issue, error) {
 	// Search the active issues first
 	if activeIssue, found := c.issueCollection.FindActiveIssueBySlackPost(slackPostID); found {
 		return activeIssue, nil
@@ -202,16 +205,12 @@ func (c *channelManager) FindIssueBySlackPost(ctx context.Context, slackPostID s
 
 	// No active issue found - give up if includeArchived is false
 	if !includeArchived {
-		return nil, nil
+		return nil, errIssueNotFound
 	}
 
 	_, issueBody, err := c.db.FindSingleIssue(ctx, common.WithFieldEquals("lastAlert.slackChannelId", c.channelID), common.WithFieldEquals("slackPostId", slackPostID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for issue in database: %w", err)
-	}
-
-	if issueBody == nil {
-		return nil, nil
 	}
 
 	issue := &models.Issue{}
@@ -222,12 +221,12 @@ func (c *channelManager) FindIssueBySlackPost(ctx context.Context, slackPostID s
 
 	// Sanity check
 	if issue.LastAlert.SlackChannelID != c.channelID {
-		return nil, fmt.Errorf("issue found in database is not associated with the current channel")
+		return nil, errors.New("issue found in database is not associated with the current channel")
 	}
 
 	// Sanity check
 	if issue.SlackPostID != slackPostID {
-		return nil, fmt.Errorf("issue found in database does not match the specified Slack post ID")
+		return nil, errors.New("issue found in database does not match the specified Slack post ID")
 	}
 
 	return issue, nil
@@ -307,7 +306,7 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 		go ackCommand(ctx, cmd, logger)
 	}()
 
-	issue, err := c.FindIssueBySlackPost(ctx, cmd.SlackPostID, cmd.IncludeArchivedIssues)
+	issue, err := c.findIssueBySlackPost(ctx, cmd.SlackPostID, cmd.IncludeArchivedIssues)
 	if err != nil {
 		return fmt.Errorf("failed to find issue by Slack post ID: %w", err)
 	}
@@ -602,15 +601,20 @@ func (c *channelManager) handleMoveIssueCmd(ctx context.Context, issue *models.I
 	logger.Info("Cmd: move issue")
 
 	if cmd.Parameters == nil {
-		return fmt.Errorf("missing command parameters in move issue command")
+		return errors.New("missing command parameters in move issue command")
 	}
 
 	targetChannel, ok := cmd.Parameters["targetChannelId"]
 	if !ok {
-		return fmt.Errorf("missing key 'targetChannelId' in move issue command parameters")
+		return errors.New("missing key 'targetChannelId' in move issue command parameters")
 	}
 
-	return c.moveIssue(ctx, issue, targetChannel.(string), cmd.UserRealName, logger)
+	targetChannelStr, ok := targetChannel.(string)
+	if !ok {
+		return errors.New("target channel ID is not a string")
+	}
+
+	return c.moveIssue(ctx, issue, targetChannelStr, cmd.UserRealName, logger)
 }
 
 func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, targetChannel, username string, logger common.Logger) error {
@@ -643,7 +647,7 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 	logger.Info("Handle issue webhook")
 
 	if cmd.WebhookParameters == nil {
-		return fmt.Errorf("missing command webhook parameters in post webhook command")
+		return errors.New("missing command webhook parameters in post webhook command")
 	}
 
 	webhook := issue.FindWebhook(cmd.WebhookParameters.WebhookID)
