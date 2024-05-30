@@ -49,4 +49,5 @@ issues:
     - path: _test\.go # Skip certain linters in test files
       linters:
         - revive
-        - wsl
+        - gochecknoglobals
+        - gosec
