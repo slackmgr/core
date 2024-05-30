@@ -138,6 +138,7 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 
 		if len(skippedAlerts) > 0 {
 			channelAlerts = keptAlerts
+
 			s.logAlerts("Alert dropped", "Too many alerts in request", started, skippedAlerts...)
 		}
 
@@ -308,7 +309,7 @@ func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) e
 			alert.SlackChannelID = channel
 		} else {
 			if alert.RouteKey == "" {
-				return fmt.Errorf("alert has no route key, and no fallback mapping exists")
+				return errors.New("alert has no route key, and no fallback mapping exists")
 			}
 			return fmt.Errorf("no mapping exists for route key %s and alert type %s", alert.RouteKey, alert.Type)
 		}
@@ -325,6 +326,7 @@ func (s *Server) logAlerts(text, reason string, started time.Time, alerts ...*co
 		if reason != "" {
 			entry = entry.WithField("reason", reason)
 		}
+
 		entry.Info(text)
 	}
 }
@@ -357,7 +359,7 @@ func reduceAlertCountForChannel(channel string, alerts []*common.Alert, limit in
 
 func createRateLimitAlert(channel string, overflow int, template *common.Alert) *common.Alert {
 	summary := common.NewPanicAlert()
-	summary.CorrelationID = fmt.Sprintf("__rate_limit_%s", channel)
+	summary.CorrelationID = "__rate_limit_" + channel
 	summary.Header = ":status: Too many alerts"
 	summary.Text = fmt.Sprintf("%d alerts were dropped", overflow)
 	summary.FallbackText = "Too many alerts"

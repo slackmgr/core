@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -39,12 +40,6 @@ const (
 	DefaultInconclusiveEmoji              = ":grey_question:"
 	DefaultResolvedEmoji                  = ":white_check_mark:"
 )
-
-var allowedDefaultAlertSeverities = map[common.AlertSeverity]struct{}{
-	common.AlertPanic:   {},
-	common.AlertError:   {},
-	common.AlertWarning: {},
-}
 
 // ManagerSettings contains the settings for the Slack Manager system,
 // both global settings and settings for individual channels.
@@ -112,7 +107,7 @@ type ManagerSettings struct {
 	MaxThrottleDurationSeconds int `json:"maxThrottleDurationSeconds" yaml:"maxThrottleDurationSeconds"`
 
 	// DocsURL is the URL to the Slack Manager documentation (if any).
-	DocsURL string `json:"docsURL" yaml:"docsURL"`
+	DocsURL string `json:"docsUrl" yaml:"docsUrl"`
 
 	// AlertChannels is an optional list of settings for individual alert channels.
 	// Each alert channel can potentially have its own list of admins, and some settings that affect how alerts are handled.
@@ -191,7 +186,7 @@ type AlertChannelSettings struct {
 
 // InfoChannelSettings contains the settings for an individual info channel.
 type InfoChannelSettings struct {
-	ID           string `json:"channelID"    yaml:"channelID"`
+	ID           string `json:"channelId"    yaml:"channelId"`
 	TemplatePath string `json:"templatePath" yaml:"templatePath"`
 }
 
@@ -230,11 +225,17 @@ func (s *ManagerSettings) InitAndValidate() error {
 	if s.DefaultPostIconEmoji == "" {
 		s.DefaultPostIconEmoji = DefaultPostIconEmoji
 	} else if !common.IconRegex.MatchString(s.DefaultPostIconEmoji) {
-		return fmt.Errorf("default icon emoji must be on the format \":emoji:\"")
+		return errors.New("default icon emoji must be on the format \":emoji:\"")
 	}
 
 	if s.DefaultPostUsername == "" {
 		s.DefaultPostUsername = DefaultPostUsername
+	}
+
+	allowedDefaultAlertSeverities := map[common.AlertSeverity]struct{}{
+		common.AlertPanic:   {},
+		common.AlertError:   {},
+		common.AlertWarning: {},
 	}
 
 	if s.DefaultAlertSeverity == "" {
@@ -246,19 +247,19 @@ func (s *ManagerSettings) InitAndValidate() error {
 	if s.DefaultIssueArchivingDelaySeconds <= 0 {
 		s.DefaultIssueArchivingDelaySeconds = DefaultIssueArchivingDelaySeconds
 	} else if s.DefaultIssueArchivingDelaySeconds < MinIssueArchivingDelaySeconds || s.DefaultIssueArchivingDelaySeconds > MaxIssueArchivingDelaySeconds {
-		return fmt.Errorf("default archiving delay must be between MinIssueArchivingDelaySeconds and MaxIssueArchivingDelaySeconds")
+		return errors.New("default archiving delay must be between MinIssueArchivingDelaySeconds and MaxIssueArchivingDelaySeconds")
 	}
 
 	if s.IssueReorderingLimit <= 0 {
 		s.IssueReorderingLimit = DefaultIssueReorderingLimit
 	} else if s.IssueReorderingLimit < MinIssueReorderingLimit || s.IssueReorderingLimit > MaxIssueReorderingLimit {
-		return fmt.Errorf("issue reordering limit must be between MinIssueReorderingLimit and MaxIssueReorderingLimit (use DisableIssueReordering to turn off reordering)")
+		return errors.New("issue reordering limit must be between MinIssueReorderingLimit and MaxIssueReorderingLimit (use DisableIssueReordering to turn off reordering)")
 	}
 
 	if s.IssueProcessingIntervalSeconds <= 0 {
 		s.IssueProcessingIntervalSeconds = DefaultIssueProcessingIntervalSeconds
 	} else if s.IssueProcessingIntervalSeconds < MinIssueProcessingIntervalSeconds || s.IssueProcessingIntervalSeconds > MaxIssueProcessingIntervalSeconds {
-		return fmt.Errorf("issue processing interval must be between MinIssueProcessingIntervalSeconds and MaxIssueProcessingIntervalSeconds")
+		return errors.New("issue processing interval must be between MinIssueProcessingIntervalSeconds and MaxIssueProcessingIntervalSeconds")
 	}
 
 	if s.IssueReactions == nil {

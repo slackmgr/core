@@ -21,7 +21,11 @@ func processor(ctx context.Context, coordinator *coordinator, alertCh <-chan mod
 				return nil
 			}
 
-			alert := msg.(*models.Alert)
+			alert, ok := msg.(*models.Alert)
+			if !ok {
+				logger.Errorf("Invalid message type %T on alert channel", msg)
+				continue
+			}
 
 			if err := coordinator.AddAlert(ctx, alert); err != nil {
 				msg.MarkAsFailed()
@@ -37,7 +41,11 @@ func processor(ctx context.Context, coordinator *coordinator, alertCh <-chan mod
 				return nil
 			}
 
-			cmd := msg.(*models.Command)
+			cmd, ok := msg.(*models.Command)
+			if !ok {
+				logger.Errorf("Invalid message type %T on command channel", msg)
+				continue
+			}
 
 			if err := coordinator.AddCommand(ctx, cmd); err != nil {
 				msg.MarkAsFailed()

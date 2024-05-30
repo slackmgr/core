@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"time"
 
 	"github.com/peteraglen/slack-manager/config"
@@ -36,7 +37,7 @@ type issueDetailsArgs struct {
 }
 
 func IssueDetailsAssets(issue *models.Issue, cfg *config.ManagerConfig) (slack.Blocks, error) {
-	autoResolve := fmt.Sprintf("%v", issue.FollowUpEnabled())
+	autoResolve := strconv.FormatBool(issue.FollowUpEnabled())
 
 	if issue.FollowUpEnabled() {
 		autoResolve += fmt.Sprintf(" (%s after last alert)", formatDuration(issue.AutoResolvePeriod))
@@ -56,15 +57,15 @@ func IssueDetailsAssets(issue *models.Issue, cfg *config.ManagerConfig) (slack.B
 		AlertCount:                issue.AlertCount,
 		Status:                    string(issue.LastAlert.Severity),
 		AutoResolve:               autoResolve,
-		AutoResolveAsInconclusive: fmt.Sprintf("%v", issue.LastAlert.AutoResolveAsInconclusive),
+		AutoResolveAsInconclusive: strconv.FormatBool(issue.LastAlert.AutoResolveAsInconclusive),
 		Resolved:                  resolved,
-		Archived:                  fmt.Sprintf("%v", issue.Archived),
+		Archived:                  strconv.FormatBool(issue.Archived),
 		ArchiveDelay:              formatDuration(issue.ArchiveDelay),
 		ArchiveTime:               issue.ArchiveTime.Format(time.RFC3339),
 		CurrentChannel:            issue.LastAlert.SlackChannelID,
 		OriginalChannel:           issue.OriginalSlackChannelID(),
-		Escalated:                 fmt.Sprintf("%v", issue.IsEscalated),
-		Moved:                     fmt.Sprintf("%v", issue.IsMoved),
+		Escalated:                 strconv.FormatBool(issue.IsEscalated),
+		Moved:                     strconv.FormatBool(issue.IsMoved),
 		RouteKey:                  issue.LastAlert.RouteKey,
 	}
 

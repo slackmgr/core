@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 
@@ -20,7 +21,7 @@ func EncryptWebhookPayload(w *common.Webhook, key []byte) error {
 	}
 
 	if len(key) != 32 {
-		return fmt.Errorf("encryption key length must be 32")
+		return errors.New("encryption key length must be 32")
 	}
 
 	data, err := json.Marshal(w.Payload)
@@ -68,17 +69,17 @@ func encrypt(key, data []byte) ([]byte, error) {
 // This function does not modify the state of the webhook.
 func DecryptWebhookPayload(w *common.Webhook, key []byte) (map[string]interface{}, error) {
 	if w.Payload == nil || len(w.Payload) == 0 {
-		return nil, nil
+		return map[string]interface{}{}, nil
 	}
 
 	if len(key) != 32 {
-		return nil, fmt.Errorf("encryption key length must be 32")
+		return nil, errors.New("encryption key length must be 32")
 	}
 
 	encryptedDataBase64, dataFound := w.Payload["__encrypted_data"]
 
 	if !dataFound {
-		return nil, nil
+		return map[string]interface{}{}, nil
 	}
 
 	encryptedData, err := base64.StdEncoding.DecodeString(encryptedDataBase64.(string))
@@ -114,7 +115,7 @@ func decrypt(key, encryptedData []byte) ([]byte, error) {
 	nonceSize := gcm.NonceSize()
 
 	if len(encryptedData) < nonceSize {
-		return nil, fmt.Errorf("encrypted data length is too short")
+		return nil, errors.New("encrypted data length is too short")
 	}
 
 	nonce, ciphertext := encryptedData[:nonceSize], encryptedData[nonceSize:]

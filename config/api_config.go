@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 )
 
@@ -15,7 +16,7 @@ type APIConfig struct {
 	RestPort               string             `json:"restPort"               yaml:"restPort"`
 	EncryptionKey          string             `json:"encryptionKey"          yaml:"encryptionKey"`
 	CacheKeyPrefix         string             `json:"cacheKeyPrefix"         yaml:"cacheKeyPrefix"`
-	ErrorReportChannelID   string             `json:"errorReportChannelID"   yaml:"errorReportChannelID"`
+	ErrorReportChannelID   string             `json:"errorReportChannelId"   yaml:"errorReportChannelId"`
 	MaxUsersInAlertChannel int                `json:"maxUsersInAlertChannel" yaml:"maxUsersInAlertChannel"`
 	RateLimit              *RateLimitConfig   `json:"rateLimit"              yaml:"rateLimit"`
 	SlackClient            *SlackClientConfig `json:"slackClient"            yaml:"slackClient"`
@@ -40,11 +41,11 @@ func NewDefaultAPIConfig() *APIConfig {
 
 func (c *APIConfig) Validate() error {
 	if c.RestPort == "" {
-		return fmt.Errorf("rest port is required")
+		return errors.New("rest port is required")
 	}
 
 	if c.SlackClient == nil {
-		return fmt.Errorf("slack client config is required")
+		return errors.New("slack client config is required")
 	}
 
 	if err := c.SlackClient.Validate(); err != nil {

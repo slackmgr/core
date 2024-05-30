@@ -56,23 +56,23 @@ func New(cacheStore cachestore.StoreInterface, cacheKeyPrefix string, logger com
 
 func (c *Client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
 	if c.connected {
-		return nil, fmt.Errorf("connect can only be run once")
+		return nil, errors.New("connect can only be run once")
 	}
 
 	if c.metrics == nil {
-		return nil, fmt.Errorf("client metrics cannot be nil")
+		return nil, errors.New("client metrics cannot be nil")
 	}
 
 	if c.cache == nil {
-		return nil, fmt.Errorf("client cache cannot be nil")
+		return nil, errors.New("client cache cannot be nil")
 	}
 
 	if c.cfg == nil {
-		return nil, fmt.Errorf("client options cannot be nil")
+		return nil, errors.New("client options cannot be nil")
 	}
 
 	if c.cfg.BotToken == "" {
-		return nil, fmt.Errorf("client bot token cannot be nil")
+		return nil, errors.New("client bot token cannot be nil")
 	}
 
 	c.metrics.RegisterCounter(slackRequestMetric, "Total number of Slack client requests", "slack_action")
@@ -98,7 +98,7 @@ func (c *Client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
 	}
 
 	if response.UserID == "" {
-		return nil, fmt.Errorf("missing bot user ID in auth test response")
+		return nil, errors.New("missing bot user ID in auth test response")
 	}
 
 	c.botUserID = response.UserID
@@ -282,7 +282,7 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("GetChannelInfo::%s", channelID)
+	cacheKey := "GetChannelInfo::" + channelID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
@@ -409,7 +409,7 @@ func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("GetUserInfo::%s", userID)
+	cacheKey := "GetUserInfo::" + userID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
@@ -452,7 +452,7 @@ func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("ListUserGroupMembers::%s", groupID)
+	cacheKey := "ListUserGroupMembers::" + groupID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
@@ -504,7 +504,7 @@ func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := fmt.Sprintf("GetUserIDsInChannel::%s", channelID)
+	cacheKey := "GetUserIDsInChannel::" + channelID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
@@ -566,7 +566,7 @@ func (c *Client) BotIsInChannel(ctx context.Context, channelID string) (bool, er
 		return false, errors.New("channelID cannot be empty")
 	}
 
-	cacheKey := fmt.Sprintf("BotIsInChannel::%s", channelID)
+	cacheKey := "BotIsInChannel::" + channelID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		return val == "true", nil
@@ -588,7 +588,9 @@ func (c *Client) BotIsInChannel(ctx context.Context, channelID string) (bool, er
 	return found, nil
 }
 
-func callAPI[V any, W any](ctx context.Context, logger commonlib.Logger, metrics commonlib.Metrics, cfg *config.SlackClientConfig, action string, f func(ctx context.Context) (V, W, error), expectedErrors ...string) (V, W, error) {
+func callAPI[V any, W any](ctx context.Context, logger commonlib.Logger, metrics commonlib.Metrics,
+	cfg *config.SlackClientConfig, action string, f func(ctx context.Context) (V, W, error), expectedErrors ...string,
+) (V, W, error) {
 	attempt := 1
 	started := time.Now()
 

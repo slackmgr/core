@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -125,23 +126,23 @@ func (m *Manager) Run(ctx context.Context) error {
 	defer m.logger.Debug("manager.Run exited")
 
 	if m.db == nil {
-		return fmt.Errorf("database cannot be nil")
+		return errors.New("database cannot be nil")
 	}
 
 	if m.alertQueue == nil {
-		return fmt.Errorf("alert queue cannot be nil")
+		return errors.New("alert queue cannot be nil")
 	}
 
 	if m.commandQueue == nil {
-		return fmt.Errorf("command queue cannot be nil")
+		return errors.New("command queue cannot be nil")
 	}
 
 	if m.logger == nil {
-		return fmt.Errorf("logger cannot be nil")
+		return errors.New("logger cannot be nil")
 	}
 
 	if m.cfg == nil {
-		return fmt.Errorf("configuration cannot be nil")
+		return errors.New("configuration cannot be nil")
 	}
 
 	if err := m.cfg.Validate(); err != nil {

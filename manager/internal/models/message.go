@@ -2,7 +2,7 @@ package models
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 	"time"
 
@@ -21,7 +21,7 @@ type Message interface {
 	IsExtendable() bool
 	ExtendCount() int
 	NeedsExtensionNow() bool
-	ExtendVisibility(context.Context) error
+	ExtendVisibility(ctx context.Context) error
 }
 
 type message struct {
@@ -68,7 +68,7 @@ func (m *message) Ack(ctx context.Context) error {
 
 	// The ack func must be set for *all* messages, and it can be called at most once.
 	if m.ackFunc == nil {
-		return fmt.Errorf("ack function has not been set, or has already been called")
+		return errors.New("ack function has not been set, or has already been called")
 	}
 
 	if err := m.ackFunc(ctx); err != nil {

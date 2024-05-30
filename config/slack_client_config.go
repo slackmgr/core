@@ -1,8 +1,6 @@
 package config
 
-import (
-	"fmt"
-)
+import "errors"
 
 type SlackClientConfig struct {
 	AppToken                         string `json:"appToken"                         yaml:"appToken"`
@@ -61,15 +59,15 @@ func (c *SlackClientConfig) SetDefaults() {
 
 func (c *SlackClientConfig) Validate() error {
 	if c.AppToken == "" {
-		return fmt.Errorf("app token is empty")
+		return errors.New("app token is empty")
 	}
 
 	if c.BotToken == "" {
-		return fmt.Errorf("bot token is empty")
+		return errors.New("bot token is empty")
 	}
 
 	if c.HTTPTimeoutSeconds <= 0 {
-		return fmt.Errorf("http timeout must be greater than 0")
+		return errors.New("http timeout must be greater than 0")
 	}
 
 	return nil

@@ -9,6 +9,8 @@ import (
 )
 
 func TestRetryableError(t *testing.T) {
+	t.Parallel()
+
 	err := &slackapi.RateLimitedError{}
 	assert.True(t, isTransientError(err))
 
