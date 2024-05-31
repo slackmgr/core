@@ -599,7 +599,12 @@ func callAPI[V any, W any](ctx context.Context, logger commonlib.Logger, metrics
 
 		metrics.AddToCounter(slackAPICallMetric, 1, action)
 
-		logger.Debugf("Slack %s response [val1:%v val2:%v err:%v]", action, val1, val2, err)
+		logger.
+			WithField("action", action).
+			WithField("response_val_1", val1).
+			WithField("response_val_2", val2).
+			WithField("error", err.Error()).
+			Debug("Slack API call response")
 
 		if err == nil {
 			return val1, val2, nil
