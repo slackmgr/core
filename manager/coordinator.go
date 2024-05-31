@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -166,9 +165,7 @@ func (c *coordinator) FindIssueBySlackPost(ctx context.Context, channelID string
 
 	issue, err := channelManager.findIssueBySlackPost(ctx, slackPostID, includeArchived)
 	if err != nil {
-		if !errors.Is(err, errIssueNotFound) {
-			c.logger.Errorf("Failed to find issue by slack post: %s", err)
-		}
+		c.logger.Errorf("Failed to find issue by slack post: %s", err)
 		return nil
 	}
 

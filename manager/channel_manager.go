@@ -19,8 +19,6 @@ import (
 
 const alertsTotal = "processed_alerts_total"
 
-var errIssueNotFound = errors.New("issue not found")
-
 type cmdFunc func(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) error
 
 type channelManager struct {
@@ -207,12 +205,16 @@ func (c *channelManager) findIssueBySlackPost(ctx context.Context, slackPostID s
 
 	// No active issue found - give up if includeArchived is false
 	if !includeArchived {
-		return nil, errIssueNotFound
+		return nil, nil
 	}
 
 	_, issueBody, err := c.db.FindSingleIssue(ctx, common.WithFieldEquals("lastAlert.slackChannelId", c.channelID), common.WithFieldEquals("slackPostId", slackPostID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for issue in database: %w", err)
+	}
+
+	if issueBody == nil {
+		return nil, nil
 	}
 
 	issue := &models.Issue{}
