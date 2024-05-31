@@ -139,9 +139,12 @@ func (c *InteractiveController) blockActionsHandler(ctx context.Context, evt *so
 
 	actionID := interaction.ActionCallback.BlockActions[0].ActionID
 
-	if strings.HasPrefix(actionID, WebhookActionIDPrefix) {
+	switch {
+	case strings.HasPrefix(actionID, WebhookActionIDPrefix):
 		c.handleWebhookRequest(ctx, interaction, interaction.ActionCallback.BlockActions[0], logger)
-	} else {
+	case strings.HasPrefix(actionID, OptionButtonActionIDPrefix):
+		c.handleIssueOptionsButtonRequest(ctx, interaction, interaction.ActionCallback.BlockActions[0], logger)
+	default:
 		logger.Errorf("Unknown action ID %s in block action event", interaction.ActionCallback.BlockActions[0].ActionID)
 	}
 }
@@ -446,6 +449,15 @@ func (c *InteractiveController) handleViewIssueDetailsRequest(ctx context.Contex
 
 	if err := c.client.OpenModal(ctx, interaction.TriggerID, request); err != nil {
 		logger.Errorf("failed to open modal view for issue details action: %s", err)
+	}
+}
+
+func (c *InteractiveController) handleIssueOptionsButtonRequest(ctx context.Context, interaction slack.InteractionCallback, action *slack.BlockAction, logger common.Logger) {
+	switch action.Value {
+	case MoveIssueAction:
+		c.handleMoveIssueRequest(ctx, interaction, logger)
+	default:
+		logger.Errorf("Unknown action value %s in issue options button event", action.Value)
 	}
 }
 
