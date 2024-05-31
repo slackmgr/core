@@ -74,15 +74,17 @@ func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveR
 	}
 
 	c.cmdFuncs = map[models.CommandAction]cmdFunc{
-		models.CommandActionTerminateIssue:     c.terminateIssue,
-		models.CommandActionResolveIssue:       c.resolveIssue,
-		models.CommandActionUnresolveIssue:     c.unresolveIssue,
-		models.CommandActionInvestigateIssue:   c.investigateIssue,
-		models.CommandActionUninvestigateIssue: c.uninvestigateIssue,
-		models.CommandActionMuteIssue:          c.muteIssue,
-		models.CommandActionUnmuteIssue:        c.unmuteIssue,
-		models.CommandActionMoveIssue:          c.handleMoveIssueCmd,
-		models.CommandActionWebhook:            c.handleWebhook,
+		models.CommandActionTerminateIssue:         c.terminateIssue,
+		models.CommandActionResolveIssue:           c.resolveIssue,
+		models.CommandActionUnresolveIssue:         c.unresolveIssue,
+		models.CommandActionInvestigateIssue:       c.investigateIssue,
+		models.CommandActionUninvestigateIssue:     c.uninvestigateIssue,
+		models.CommandActionMuteIssue:              c.muteIssue,
+		models.CommandActionUnmuteIssue:            c.unmuteIssue,
+		models.CommandActionMoveIssue:              c.handleMoveIssueCmd,
+		models.CommandActionShowIssueOptionButtons: c.showIssueOptionButtons,
+		models.CommandActionHideIssueOptionButtons: c.hideIssueOptionButtons,
+		models.CommandActionWebhook:                c.handleWebhook,
 	}
 
 	metrics.RegisterCounter(alertsTotal, "Total number of handled alerts", "channel")
@@ -615,6 +617,22 @@ func (c *channelManager) handleMoveIssueCmd(ctx context.Context, issue *models.I
 	}
 
 	return c.moveIssue(ctx, issue, targetChannelStr, cmd.UserRealName, logger)
+}
+
+func (c *channelManager) showIssueOptionButtons(ctx context.Context, issue *models.Issue, _ *models.Command, logger common.Logger) error {
+	logger.Info("Cmd: show issue option buttons")
+
+	issue.RegisterShowOptionButtonsRequest()
+
+	return c.slackClient.UpdateSingleIssue(ctx, issue)
+}
+
+func (c *channelManager) hideIssueOptionButtons(ctx context.Context, issue *models.Issue, _ *models.Command, logger common.Logger) error {
+	logger.Info("Cmd: hide issue option buttons")
+
+	issue.RegisterHideOptionButtonsRequest()
+
+	return c.slackClient.UpdateSingleIssue(ctx, issue)
 }
 
 func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, targetChannel, username string, logger common.Logger) error {

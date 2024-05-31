@@ -570,7 +570,12 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 	if method != UpdateMethodUpdateDeleted {
 		webhookButtons := getWebhookButtons(issue)
 		if len(webhookButtons) > 0 {
-			blocks = append(blocks, slack.NewActionBlock("alert_actions", webhookButtons...))
+			blocks = append(blocks, slack.NewActionBlock("issue_actions", webhookButtons...))
+		}
+
+		optionButtons := getIssueOptionButtons(issue)
+		if len(optionButtons) > 0 {
+			blocks = append(blocks, slack.NewActionBlock("issue_options", optionButtons...))
 		}
 	}
 
@@ -656,7 +661,7 @@ func getWebhookButtons(issue *models.Issue) []slack.BlockElement {
 			continue
 		}
 
-		actionID := fmt.Sprintf("%s-%d", controllers.WebhookActionID, index)
+		actionID := fmt.Sprintf("%s-%d", controllers.WebhookActionIDPrefix, index)
 		button := slack.NewButtonBlockElement(actionID, hook.ID, slack.NewTextBlockObject("plain_text", hook.ButtonText, false, false))
 
 		if hook.ButtonStyle == "default" {
@@ -665,6 +670,18 @@ func getWebhookButtons(issue *models.Issue) []slack.BlockElement {
 
 		button = button.WithStyle(slack.Style(hook.ButtonStyle))
 
+		buttons = append(buttons, button)
+	}
+
+	return buttons
+}
+
+func getIssueOptionButtons(issue *models.Issue) []slack.BlockElement {
+	buttons := []slack.BlockElement{}
+
+	if !issue.IsResolved() {
+		actionID := fmt.Sprintf("%s-%s", controllers.OptionButtonActionIDPrefix, "move_issue")
+		button := slack.NewButtonBlockElement(actionID, "move_issue", slack.NewTextBlockObject("plain_text", "Move issue...", false, false))
 		buttons = append(buttons, button)
 	}
 

@@ -12,16 +12,18 @@ import (
 type CommandAction string
 
 const (
-	CommandActionTerminateIssue     = CommandAction("terminate_issue")
-	CommandActionResolveIssue       = CommandAction("resolve_issue")
-	CommandActionUnresolveIssue     = CommandAction("unresolve_issue")
-	CommandActionInvestigateIssue   = CommandAction("investigate_issue")
-	CommandActionUninvestigateIssue = CommandAction("uninvestigate_issue")
-	CommandActionMuteIssue          = CommandAction("mute_issue")
-	CommandActionUnmuteIssue        = CommandAction("unmute_issue")
-	CommandActionMoveIssue          = CommandAction("move_issue")
-	CommandActionCreateIssue        = CommandAction("create_issue")
-	CommandActionWebhook            = CommandAction("webhook")
+	CommandActionTerminateIssue         = CommandAction("terminate_issue")
+	CommandActionResolveIssue           = CommandAction("resolve_issue")
+	CommandActionUnresolveIssue         = CommandAction("unresolve_issue")
+	CommandActionInvestigateIssue       = CommandAction("investigate_issue")
+	CommandActionUninvestigateIssue     = CommandAction("uninvestigate_issue")
+	CommandActionMuteIssue              = CommandAction("mute_issue")
+	CommandActionUnmuteIssue            = CommandAction("unmute_issue")
+	CommandActionMoveIssue              = CommandAction("move_issue")
+	CommandActionCreateIssue            = CommandAction("create_issue")
+	CommandActionShowIssueOptionButtons = CommandAction("show_issue_option_buttons")
+	CommandActionHideIssueOptionButtons = CommandAction("hide_issue_option_buttons")
+	CommandActionWebhook                = CommandAction("webhook")
 )
 
 type Command struct {
@@ -85,7 +87,7 @@ func (c *Command) ID() string {
 }
 
 func (c *Command) DedupID() string {
-	return fmt.Sprintf("command::%s::%s", c.SlackChannelID, c.Timestamp.Format(time.RFC3339Nano))
+	return fmt.Sprintf("command::%s::%s::%s", c.SlackChannelID, c.Action, c.Timestamp.Format(time.RFC3339Nano))
 }
 
 func (c *Command) LogFields() map[string]interface{} {
