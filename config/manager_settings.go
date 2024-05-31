@@ -27,6 +27,7 @@ const (
 	DefaultIssueResolveEmoji              = ":white_check_mark:"
 	DefaultIssueInvestigateEmoji          = ":eyes:"
 	DefaultIssueMuteEmoji                 = ":mask:"
+	DefaultIssueShowOptionButtonsEmoji    = ":information_source:"
 	DefaultMinIssueCountForThrottle       = 5
 	DefaultMaxThrottleDurationSeconds     = 90 // 1.5 minutes
 	DefaultAppFriendlyName                = "Slack Manager"
@@ -138,6 +139,9 @@ type IssueReactionSettings struct {
 
 	// MuteEmojis is a list of emojis used to indicate that an issue should be muted.
 	MuteEmojis []string `json:"muteEmojis" yaml:"muteEmojis"`
+
+	// MoveIssueEmojis is a list of emojis used to indicate that an issue should be moved to another channel.
+	ShowOptionButtonsEmojis []string `json:"showOptionButtonsEmojis" yaml:"showOptionButtonsEmojis"`
 }
 
 // IssueStatusSettings contains the settings for Slack post status emojis.
@@ -270,6 +274,7 @@ func (s *ManagerSettings) InitAndValidate() error {
 	s.IssueReactions.ResolveEmojis = initReactionEmojiSlice(s.IssueReactions.ResolveEmojis, DefaultIssueResolveEmoji)
 	s.IssueReactions.InvestigateEmojis = initReactionEmojiSlice(s.IssueReactions.InvestigateEmojis, DefaultIssueInvestigateEmoji)
 	s.IssueReactions.MuteEmojis = initReactionEmojiSlice(s.IssueReactions.MuteEmojis, DefaultIssueMuteEmoji)
+	s.IssueReactions.ShowOptionButtonsEmojis = initReactionEmojiSlice(s.IssueReactions.ShowOptionButtonsEmojis, DefaultIssueShowOptionButtonsEmoji)
 
 	if s.IssueStatus == nil {
 		s.IssueStatus = &IssueStatusSettings{}
@@ -485,6 +490,8 @@ func (s *ManagerSettings) MapSlackPostReaction(reaction string) IssueReaction {
 		r = IssueReactionInvestigate
 	case containsString(s.IssueReactions.MuteEmojis, reaction):
 		r = IssueReactionMute
+	case containsString(s.IssueReactions.ShowOptionButtonsEmojis, reaction):
+		r = IssueReactionShowOptionButtons
 	default:
 		r = ""
 	}

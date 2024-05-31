@@ -79,6 +79,8 @@ func (c *ReactionsController) reactionAdded(ctx context.Context, evt *socketmode
 		c.sendReactionAddedCommand(ctx, reactionAddedEvent, models.CommandActionInvestigateIssue, false)
 	case config.IssueReactionMute:
 		c.sendReactionAddedCommand(ctx, reactionAddedEvent, models.CommandActionMuteIssue, true)
+	case config.IssueReactionShowOptionButtons:
+		c.sendReactionAddedCommand(ctx, reactionAddedEvent, models.CommandActionShowIssueOptionButtons, true)
 	default:
 	}
 }
@@ -109,6 +111,8 @@ func (c *ReactionsController) reactionRemoved(ctx context.Context, evt *socketmo
 		c.sendReactionRemovedCommand(ctx, reactionRemovedEvent, models.CommandActionUninvestigateIssue, false)
 	case config.IssueReactionMute:
 		c.sendReactionRemovedCommand(ctx, reactionRemovedEvent, models.CommandActionUnmuteIssue, true)
+	case config.IssueReactionShowOptionButtons:
+		c.sendReactionRemovedCommand(ctx, reactionRemovedEvent, models.CommandActionHideIssueOptionButtons, true)
 	case config.IssueReactionTerminate:
 		// This can't really happen (we can't un-terminate an issue)
 	default:

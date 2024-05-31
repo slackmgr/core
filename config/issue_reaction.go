@@ -14,4 +14,7 @@ const (
 
 	// IssueReactionMute is the reaction used to indicate that an issue has been muted.
 	IssueReactionMute IssueReaction = "mute"
+
+	// IssueReactionShowOptionButtons is the reaction used to indicate that option buttons should be shown for an issue.
+	IssueReactionShowOptionButtons IssueReaction = "show_option_buttons"
 )

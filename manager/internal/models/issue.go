@@ -44,6 +44,7 @@ type Issue struct {
 	IsEmojiResolved           bool          `json:"slackPostEmojiResolved"`
 	IsEmojiInvestigated       bool          `json:"slackPostEmojiInvestigated"`
 	IsEmojiMuted              bool          `json:"slackPostEmojiMuted"`
+	IsEmojiButtonsActivated   bool          `json:"slackPostEmojiButtonsActivated"`
 	IsMoved                   bool          `json:"isMoved"`
 	TerminatedByUser          string        `json:"terminatedByUser"`
 	ResolvedByUser            string        `json:"resolvedByUser"`
@@ -313,6 +314,16 @@ func (issue *Issue) RegisterUnmuteRequest() {
 	issue.IsEmojiMuted = false
 	issue.MutedByUser = ""
 	issue.MutedSince = time.Time{}
+	issue.SlackPostNeedsUpdate = true
+}
+
+func (issue *Issue) RegisterShowOptionButtonsRequest() {
+	issue.IsEmojiButtonsActivated = true
+	issue.SlackPostNeedsUpdate = true
+}
+
+func (issue *Issue) RegisterHideOptionButtonsRequest() {
+	issue.IsEmojiButtonsActivated = false
 	issue.SlackPostNeedsUpdate = true
 }
 

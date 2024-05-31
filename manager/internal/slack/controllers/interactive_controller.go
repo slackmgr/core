@@ -17,14 +17,15 @@ import (
 )
 
 const (
-	CreateIssueAction    = "issue_create"
-	CreateIssueModal     = "issue_create_modal"
-	MoveIssueAction      = "issue_move"
-	MoveIssueModal       = "issue_move_modal"
-	ViewIssueAction      = "view_issue_details"
-	ViewIssueActionModal = "view_issue_details_modal" // #nosec G101
-	ConfirmWebhookModal  = "confirm_webhook_modal"
-	WebhookActionID      = "webhook_action"
+	CreateIssueAction          = "issue_create"
+	CreateIssueModal           = "issue_create_modal"
+	MoveIssueAction            = "issue_move"
+	MoveIssueModal             = "issue_move_modal"
+	ViewIssueAction            = "view_issue_details"
+	ViewIssueActionModal       = "view_issue_details_modal" // #nosec G101
+	ConfirmWebhookModal        = "confirm_webhook_modal"
+	WebhookActionIDPrefix      = "webhook_action"
+	OptionButtonActionIDPrefix = "option_button_action"
 )
 
 type PrivateModalMetadata struct {
@@ -138,7 +139,7 @@ func (c *InteractiveController) blockActionsHandler(ctx context.Context, evt *so
 
 	actionID := interaction.ActionCallback.BlockActions[0].ActionID
 
-	if strings.HasPrefix(actionID, WebhookActionID) {
+	if strings.HasPrefix(actionID, WebhookActionIDPrefix) {
 		c.handleWebhookRequest(ctx, interaction, interaction.ActionCallback.BlockActions[0], logger)
 	} else {
 		logger.Errorf("Unknown action ID %s in block action event", interaction.ActionCallback.BlockActions[0].ActionID)
