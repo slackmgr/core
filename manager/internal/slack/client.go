@@ -574,7 +574,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 			blocks = append(blocks, slack.NewActionBlock("issue_actions", webhookButtons...))
 		}
 
-		if !issue.IsEmojiButtonsActivated {
+		if issue.IsEmojiButtonsActivated {
 			optionButtons := getIssueOptionButtons(issue)
 
 			if len(optionButtons) > 0 {
@@ -688,6 +688,10 @@ func getIssueOptionButtons(issue *models.Issue) []slack.BlockElement {
 		button := slack.NewButtonBlockElement(actionID, controllers.MoveIssueAction, slack.NewTextBlockObject("plain_text", "Move issue...", false, false))
 		buttons = append(buttons, button)
 	}
+
+	actionID := fmt.Sprintf("%s_%s", controllers.OptionButtonActionIDPrefix, controllers.ViewIssueAction)
+	button := slack.NewButtonBlockElement(actionID, controllers.ViewIssueAction, slack.NewTextBlockObject("plain_text", "Details...", false, false))
+	buttons = append(buttons, button)
 
 	return buttons
 }
