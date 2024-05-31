@@ -603,7 +603,7 @@ func callAPI[V any, W any](ctx context.Context, logger commonlib.Logger, metrics
 			WithField("action", action).
 			WithField("response_val_1", val1).
 			WithField("response_val_2", val2).
-			WithField("error", err.Error()).
+			WithField("error", err).
 			Debug("Slack API call response")
 
 		if err == nil {
