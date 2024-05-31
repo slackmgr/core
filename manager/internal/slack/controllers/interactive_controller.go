@@ -456,6 +456,8 @@ func (c *InteractiveController) handleIssueOptionsButtonRequest(ctx context.Cont
 	switch action.Value {
 	case MoveIssueAction:
 		c.handleMoveIssueRequest(ctx, interaction, logger)
+	case ViewIssueAction:
+		c.handleViewIssueDetailsRequest(ctx, interaction, logger)
 	default:
 		logger.Errorf("Unknown action value %s in issue options button event", action.Value)
 	}
