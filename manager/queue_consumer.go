@@ -10,8 +10,8 @@ import (
 )
 
 func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.Message, unmarshalFunc models.UnmarshalFunc, logger common.Logger) error {
-	logger.Debug("queueConsumer started")
-	defer logger.Debug("queueConsumer exited")
+	logger.WithField("queue_name", queue.Name()).Info("Queue consumer started")
+	defer logger.WithField("queue_name", queue.Name()).Info("Queue consumer exited")
 
 	defer close(sinkCh)
 

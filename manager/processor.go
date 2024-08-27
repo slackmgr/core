@@ -9,8 +9,8 @@ import (
 )
 
 func processor(ctx context.Context, coordinator *coordinator, alertCh <-chan models.Message, commandCh <-chan models.Message, extenderCh chan<- models.Message, logger common.Logger) error {
-	logger.Debug("processor started")
-	defer logger.Debug("processor exited")
+	logger.Info("Message processor started")
+	defer logger.Info("Message processor exited")
 
 	for {
 		select {
