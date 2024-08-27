@@ -87,6 +87,9 @@ func (s *Server) WithRawAlertConsumer(consumer FifoQueueConsumer) *Server {
 //
 // This method blocks until the context is cancelled, or a server error occurs.
 func (s *Server) Run(ctx context.Context) error {
+	s.logger.Info("API server started")
+	defer s.logger.Infof("API server exited")
+
 	if s.alertQueue == nil {
 		return errors.New("alert queue cannot be nil")
 	}
@@ -172,7 +175,8 @@ func (s *Server) Run(ctx context.Context) error {
 		WithField("read_header_timeout", fmt.Sprintf("%v", srv.ReadHeaderTimeout)).
 		WithField("idle_timeout", fmt.Sprintf("%v", srv.IdleTimeout)).
 		WithField("request_timeout", fmt.Sprintf("%v", requestTimeout)).
-		Infof("API available on port %s", s.cfg.RestPort)
+		WithField("port", s.cfg.RestPort).
+		Info("Starting API listener")
 
 	errg, ctx := errgroup.WithContext(ctx)
 
@@ -213,6 +217,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 func (s *Server) runRawAlertConsumer(ctx context.Context) error {
 	s.logger.Info("Starting raw alert consumer")
+	defer s.logger.Info("Raw alert consumer exited")
 
 	queueCh := make(chan *common.FifoQueueItem, 100)
 
@@ -266,6 +271,8 @@ func (s *Server) UpdateSettings(settings *config.APISettings) error {
 	}
 
 	s.apiSettings = settings
+
+	s.logger.Infof("API settings updated")
 
 	return nil
 }

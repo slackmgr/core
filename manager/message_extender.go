@@ -12,14 +12,13 @@ import (
 )
 
 func messageExtender(ctx context.Context, sourceCh <-chan models.Message, logger common.Logger) error {
-	logger.Debug("messageExtender started")
-	defer logger.Debug("messageExtender exited")
-
 	interval := 10 * time.Second
+
+	logger.WithField("interval", interval).Info("Message extender started")
+	defer logger.Info("Message extender exited")
+
 	inFlightMessages := make(map[string]models.Message)
 	timeout := time.After(interval)
-
-	logger.Infof("Starting message extender with interval %v", interval)
 
 	for {
 		select {

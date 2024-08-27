@@ -64,6 +64,9 @@ type DB interface {
 
 // FifoQueue is an interface for interacting with a fifo queue.
 type FifoQueue interface {
+	// Name returns the name of the queue.
+	Name() string
+
 	// Send sends a single message to the queue.
 	//
 	// slackChannelID is the Slack channel to which the message belongs.
@@ -122,8 +125,8 @@ func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.S
 }
 
 func (m *Manager) Run(ctx context.Context) error {
-	m.logger.Debug("manager.Run started")
-	defer m.logger.Debug("manager.Run exited")
+	m.logger.Info("Manager started")
+	defer m.logger.Info("Manager exited")
 
 	if m.db == nil {
 		return errors.New("database cannot be nil")

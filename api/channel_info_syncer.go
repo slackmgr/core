@@ -52,6 +52,9 @@ func (c *channelInfoSyncer) Init(ctx context.Context) error {
 }
 
 func (c *channelInfoSyncer) Run(ctx context.Context) error {
+	c.logger.Info("Slack channel info syncer started")
+	defer c.logger.Info("Slack channel info syncer exited")
+
 	refreshChannelInfoInterval := 30 * time.Second
 	refreshAllManagedChannelsInterval := 5 * time.Minute
 	pruneInterval := 30 * time.Minute
