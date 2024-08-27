@@ -72,15 +72,18 @@ func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, log
 
 // WithRawAlertConsumer defines an alternative alert consumer, which reads from a FIFO queue and processes the items similarly to the main rest API.
 // The consumer is started by Run(ctx), and the queue is consumed in a separate goroutine.
+// The server can receive alerts from both the main rest API and the raw alert consumer simultaneously.
+//
 // The queue item body must be a single JSON-serialized common.Alert. Prometheus webhooks are not supported here.
 //
-// Validation errors are logged, but are otherwise ignored (i.e. no retries are attempted).
-func (s *Server) WithRawAlertConsumer(consumer FifoQueueConsumer) {
+// Validation errors are logged, but otherwise ignored (i.e. no retries on bad input).
+func (s *Server) WithRawAlertConsumer(consumer FifoQueueConsumer) *Server {
 	s.rawAlertConsumer = consumer
+	return s
 }
 
-// Run starts the HTTP server and handles incoming requests.
-// If a raw alert consumer is set, it will also start a dedicated consumer for that queue.
+// Run starts the HTTP server and handles incoming requests. It also initializes the Slack API client and the channel info syncer.
+// If a raw alert consumer is set, it will start a dedicated consumer for that queue.
 //
 // This method blocks until the context is cancelled, or a server error occurs.
 func (s *Server) Run(ctx context.Context) error {
