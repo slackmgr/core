@@ -22,11 +22,16 @@ import (
 	"golang.org/x/time/rate"
 )
 
+type FifoQueueConsumer interface {
+	Receive(ctx context.Context, sinkCh chan<- *common.FifoQueueItem) error
+}
+
 type FifoQueueProducer interface {
 	Send(ctx context.Context, slackChannelID, dedupID, body string) error
 }
 
 type Server struct {
+	rawAlertConsumer  FifoQueueConsumer
 	alertQueue        FifoQueueProducer
 	limitersByChannel map[string]*rate.Limiter
 	limitersLock      *sync.Mutex
@@ -65,7 +70,19 @@ func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, log
 	}
 }
 
-// Run starts the server and handles incoming requests. This method blocks until the context is cancelled, or a server error occurs.
+// WithRawAlertConsumer defines an alternative alert consumer, which reads from a FIFO queue and processes the items similarly to the main rest API.
+// The consumer is started by Run(ctx), and the queue is consumed in a separate goroutine.
+// The queue item body must be a single JSON-serialized common.Alert. Prometheus webhooks are not supported here.
+//
+// Validation errors are logged, but are otherwise ignored (i.e. no retries are attempted).
+func (s *Server) WithRawAlertConsumer(consumer FifoQueueConsumer) {
+	s.rawAlertConsumer = consumer
+}
+
+// Run starts the HTTP server and handles incoming requests.
+// If a raw alert consumer is set, it will also start a dedicated consumer for that queue.
+//
+// This method blocks until the context is cancelled, or a server error occurs.
 func (s *Server) Run(ctx context.Context) error {
 	if s.alertQueue == nil {
 		return errors.New("alert queue cannot be nil")
@@ -156,6 +173,12 @@ func (s *Server) Run(ctx context.Context) error {
 
 	errg, ctx := errgroup.WithContext(ctx)
 
+	if s.rawAlertConsumer != nil {
+		errg.Go(func() error {
+			return s.runRawAlertConsumer(ctx)
+		})
+	}
+
 	errg.Go(func() error {
 		return s.channelInfoSyncer.Run(ctx)
 	})
@@ -183,6 +206,51 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (s *Server) runRawAlertConsumer(ctx context.Context) error {
+	s.logger.Info("Starting raw alert consumer")
+
+	queueCh := make(chan *common.FifoQueueItem, 100)
+
+	errg, ctx := errgroup.WithContext(ctx)
+
+	errg.Go(func() error {
+		return s.rawAlertConsumer.Receive(ctx, queueCh)
+	})
+
+	errg.Go(func() error {
+		for item := range queueCh {
+			logger := s.logger.WithField("message_id", item.MessageID).WithField("slack_channel_id", item.SlackChannelID)
+			logger.Debug("Alert received")
+
+			if item.Ack == nil {
+				logger.Error("Alert ack function is nil")
+				continue
+			}
+
+			var alert *common.Alert
+
+			if err := json.Unmarshal([]byte(item.Body), &alert); err != nil {
+				logger.Errorf("Failed to json unmarshal queued alert: %s", err)
+			} else {
+				if err := s.processQueuedAlert(ctx, alert, logger); err != nil {
+					logger.Errorf("Failed to process queued alert: %s", err)
+					continue
+				}
+			}
+
+			if err := item.Ack(ctx); err != nil {
+				logger.Errorf("Failed to ack queued alert: %s", err)
+			}
+
+			logger.Debug("Alert acked")
+		}
+
+		return nil
+	})
+
+	return errg.Wait()
 }
 
 func (s *Server) UpdateSettings(settings *config.APISettings) error {

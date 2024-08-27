@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -110,26 +111,7 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 			return
 		}
 
-		if !channelInfo.ChannelExists {
-			err := fmt.Errorf("unable to find channel %s in workspace", channel)
-			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]), resp, req, started)
-			return
-		}
-
-		if channelInfo.ChannelIsArchived {
-			err := fmt.Errorf("channel %s is archived", channel)
-			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]), resp, req, started)
-			return
-		}
-
-		if !channelInfo.ManagerIsInChannel {
-			err := fmt.Errorf("the Slack Manager integration is not in channel %s", channel)
-			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]), resp, req, started)
-			return
-		}
-
-		if channelInfo.UserCount > s.cfg.MaxUsersInAlertChannel {
-			err := fmt.Errorf("the number of users (%d) in channel %s exceeds the limit (%d)", channelInfo.UserCount, channel, s.cfg.MaxUsersInAlertChannel)
+		if err := s.validateChannelInfo(channel, channelInfo); err != nil {
 			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]), resp, req, started)
 			return
 		}
@@ -187,6 +169,55 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusNoContent, time.Since(started))
 }
 
+// processQueuedAlert processes a single alert from the raw alert input queue (rather than from an API request).
+// It is similar to processAlerts, but skips for example rate limiting.
+func (s *Server) processQueuedAlert(ctx context.Context, alert *common.Alert, logger common.Logger) error {
+	started := time.Now()
+
+	if err := s.setSlackChannelID(nil, alert); err != nil {
+		logger.Errorf("Failed to set alert Slack channel ID: %s", err)
+		return err
+	}
+
+	alert.Clean()
+
+	if err := alert.Validate(); err != nil {
+		logger.Errorf("Alert input validation failed: %s", err)
+		return nil
+	}
+
+	ignore, ignoreReason := ignoreAlert(alert)
+
+	if ignore {
+		s.logAlerts("Alert ignored", ignoreReason, started, alert)
+		return nil
+	}
+
+	channelInfo, err := s.channelInfoSyncer.GetChannelInfo(ctx, alert.SlackChannelID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch info for channel %s: %w", alert.SlackChannelID, err)
+	}
+
+	if err := s.validateChannelInfo(alert.SlackChannelID, channelInfo); err != nil {
+		logger.Errorf("Alert channel validation failed: %s", err)
+		return nil
+	}
+
+	for _, w := range alert.Webhooks {
+		if err := internal.EncryptWebhookPayload(w, []byte(s.cfg.EncryptionKey)); err != nil {
+			return fmt.Errorf("failed to encrypt webhook payload: %w", err)
+		}
+	}
+
+	if err := s.queueAlert(ctx, alert); err != nil {
+		return err
+	}
+
+	s.logAlerts("Alert accepted", "", started, alert)
+
+	return nil
+}
+
 func (s *Server) handleAlertsTest(resp http.ResponseWriter, req *http.Request) {
 	started := time.Now()
 
@@ -225,6 +256,26 @@ func (s *Server) handleAlertsTest(resp http.ResponseWriter, req *http.Request) {
 	s.logger.Infof("BODY: %s", string(body))
 
 	resp.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) validateChannelInfo(channel string, channelInfo *channelInfo) error {
+	if !channelInfo.ChannelExists {
+		return fmt.Errorf("unable to find channel %s in workspace", channel)
+	}
+
+	if channelInfo.ChannelIsArchived {
+		return fmt.Errorf("channel %s is archived", channel)
+	}
+
+	if !channelInfo.ManagerIsInChannel {
+		return fmt.Errorf("the Slack Manager integration is not in channel %s", channel)
+	}
+
+	if channelInfo.UserCount > s.cfg.MaxUsersInAlertChannel {
+		return fmt.Errorf("the number of users (%d) in channel %s exceeds the limit (%d)", channelInfo.UserCount, channel, s.cfg.MaxUsersInAlertChannel)
+	}
+
+	return nil
 }
 
 func (s *Server) createClientErrorAlert(err error, statusCode int, debugText map[string]string, targetChannel string) *common.Alert {
@@ -280,27 +331,30 @@ func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) e
 	var getChannelIDFromURL sync.Once
 
 	for _, alert := range alerts {
-		// The channel ID may actually be a channel name. If so, attempt to map to channel ID.
-		alert.SlackChannelID = s.channelInfoSyncer.MapChannelNameToIDIfNeeded(alert.SlackChannelID)
+		// Try to get the channel ID from the URL (exactly once).
+		// Only relevant when the alert has no channel ID set in the body AND the http request is not nil.
+		if alert.SlackChannelID == "" && req != nil {
+			getChannelIDFromURL.Do(func() {
+				vars := mux.Vars(req)
+				if vars != nil {
+					if val, ok := vars["slackChannelId"]; ok {
+						channelIDFromURL = strings.TrimSpace(val)
+					}
+				}
+			})
 
-		// Channel found in the alert body -> move on
-		if alert.SlackChannelID != "" {
-			continue
+			// Channel found in the url -> set it in the alert body
+			if channelIDFromURL != "" {
+				alert.SlackChannelID = channelIDFromURL
+			}
 		}
 
-		// Try to get the channel ID from the URL, exactly once
-		getChannelIDFromURL.Do(func() {
-			vars := mux.Vars(req)
-			if vars != nil {
-				if val, ok := vars["slackChannelId"]; ok {
-					channelIDFromURL = strings.TrimSpace(val)
-				}
-			}
-		})
+		// The channel ID may actually be a channel name. If so, attempt to map the name to a channel ID.
+		// This does nothing if the channel ID in the body is empty.
+		alert.SlackChannelID = s.channelInfoSyncer.MapChannelNameToIDIfNeeded(alert.SlackChannelID)
 
-		// Channel found in the url, no need to check the route key
-		if channelIDFromURL != "" {
-			alert.SlackChannelID = channelIDFromURL
+		// Channel ID found in the alert body -> move on (no need to process the route key)
+		if alert.SlackChannelID != "" {
 			continue
 		}
 
