@@ -49,7 +49,7 @@ type DB interface {
 	LoadMoveMappings(ctx context.Context, channelID string) ([]json.RawMessage, error)
 
 	// SaveMoveMapping saves a move mapping to the database.
-	SaveMoveMapping(ctx context.Context, channelID string, moveMapping *models.MoveMapping) error
+	SaveMoveMapping(ctx context.Context, channelID string, moveMapping common.MoveMapping) error
 }
 
 // FifoQueue is an interface for interacting with a fifo queue.
