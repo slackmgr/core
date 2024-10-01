@@ -25,17 +25,17 @@ type DB interface {
 	// A database implementation can choose to skip saving the alerts, since they are never read by the manager.
 	//
 	// id is the unique identifier for the alert, and body is the json formatted alert.
-	SaveAlert(ctx context.Context, channelID string, alert *models.Alert) error
+	SaveAlert(ctx context.Context, channelID string, alert *common.Alert) error
 
 	// CreateOrUpdateIssue creates or updates a single issue in the database.
 	//
 	// id is the unique identifier for the issue, and body is the json formatted issue.
-	CreateOrUpdateIssue(ctx context.Context, channelID string, issue *models.Issue) error
+	CreateOrUpdateIssue(ctx context.Context, channelID string, issue common.Issue) error
 
 	// UpdateIssues updates multiple existing issues in the database.
 	//
 	// issues is a map of issue IDs to json formatted issue bodies.
-	UpdateIssues(ctx context.Context, channelID string, issues ...*models.Issue) error
+	UpdateIssues(ctx context.Context, channelID string, issues ...common.Issue) error
 
 	// FindIssueBySlackPostID finds a single issue in the database, based on the provided channel ID and Slack post ID.
 	//

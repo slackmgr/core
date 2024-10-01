@@ -264,7 +264,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		}
 	}
 
-	if err := c.db.SaveAlert(ctx, alert.ID, alert); err != nil {
+	if err := c.db.SaveAlert(ctx, alert.ID, &alert.Alert); err != nil {
 		return fmt.Errorf("failed to save alert to database: %w", err)
 	}
 
@@ -499,7 +499,7 @@ func (c *channelManager) saveIssuesToDB(ctx context.Context, issues []*models.Is
 		return c.saveIssueToDB(ctx, issues[0])
 	}
 
-	issuesToUpdate := []*models.Issue{}
+	issuesToUpdate := []common.Issue{}
 	issueHashes := make(map[string]string)
 
 	for _, issue := range issues {
