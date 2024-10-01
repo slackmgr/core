@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"time"
@@ -102,12 +103,25 @@ func NewIssue(alert *Alert, logger common.Logger) *Issue {
 	return &issue
 }
 
+// DedupID returns the ID of the Issue (for database/storage purposes)
+func (issue *Issue) DedupID() string {
+	return issue.ID
+}
+
+func (issue *Issue) IsOpen() bool {
+	return !issue.Archived
+}
+
 func (issue *Issue) SlackChannelID() string {
 	return issue.LastAlert.SlackChannelID
 }
 
 func (issue *Issue) OriginalSlackChannelID() string {
 	return issue.LastAlert.OriginalSlackChannelID
+}
+
+func (issue *Issue) CurrentPostID() string {
+	return issue.SlackPostID
 }
 
 func (issue *Issue) FollowUpEnabled() bool {
@@ -523,6 +537,16 @@ func (issue *Issue) FindWebhook(id string) *common.Webhook {
 	}
 
 	return nil
+}
+
+func (issue *Issue) MarshalJSON() ([]byte, error) {
+	type Alias Issue
+
+	return json.Marshal(&struct {
+		*Alias
+	}{
+		Alias: (*Alias)(issue),
+	})
 }
 
 func (issue *Issue) setArchivingTime() {
