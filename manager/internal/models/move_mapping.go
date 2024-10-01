@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/peteraglen/slack-manager/internal"
@@ -22,4 +23,19 @@ func NewMoveMapping(correlationID, originalChannelID, targetChannelID string) *M
 		OriginalChannelID: originalChannelID,
 		TargetChannelID:   targetChannelID,
 	}
+}
+
+// DedupID returns the ID of the MoveMapping (for database/storage purposes)
+func (m *MoveMapping) DedupID() string {
+	return m.ID
+}
+
+func (m *MoveMapping) MarshalJSON() ([]byte, error) {
+	type Alias MoveMapping
+
+	return json.Marshal(&struct {
+		*Alias
+	}{
+		Alias: (*Alias)(m),
+	})
 }
