@@ -52,7 +52,7 @@ func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, cacheStore
 
 func (c *coordinator) init(ctx context.Context) error {
 	// Load all active issues from the database (i.e. issues that are not archived)
-	issueBodies, err := c.db.LoadIssues(ctx, common.WithFieldNotEquals("archived", true))
+	issueBodies, err := c.db.LoadOpenIssues(ctx)
 	if err != nil {
 		return err
 	}
@@ -231,12 +231,7 @@ func (c *coordinator) addMoveMapping(ctx context.Context, mapping *models.MoveMa
 
 	moveMappingsForChannel[mapping.CorrelationID] = mapping
 
-	body, err := json.Marshal(mapping)
-	if err != nil {
-		return fmt.Errorf("failed to marshal move mapping: %w", err)
-	}
-
-	if err := c.db.SaveMoveMapping(ctx, mapping.ID, body); err != nil {
+	if err := c.db.SaveMoveMapping(ctx, mapping.ID, mapping); err != nil {
 		return err
 	}
 
@@ -254,7 +249,7 @@ func (c *coordinator) getOrCreateMoveMappingsForChannel(ctx context.Context, cha
 		return mappings, nil
 	}
 
-	mappingsList, err := c.db.GetMoveMappings(ctx, common.WithFieldEquals("originalChannelId", channelID))
+	mappingsList, err := c.db.LoadMoveMappings(ctx, channelID)
 	if err != nil {
 		return nil, err
 	}
