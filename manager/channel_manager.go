@@ -264,7 +264,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		}
 	}
 
-	if err := c.db.SaveAlert(ctx, alert.ID, &alert.Alert); err != nil {
+	if err := c.db.SaveAlert(ctx, c.channelID, &alert.Alert); err != nil {
 		return fmt.Errorf("failed to save alert to database: %w", err)
 	}
 
@@ -481,7 +481,7 @@ func (c *channelManager) saveIssueToDB(ctx context.Context, issue *models.Issue)
 		return nil
 	}
 
-	if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, issue); err != nil {
+	if err := c.db.CreateOrUpdateIssue(ctx, c.channelID, issue); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 

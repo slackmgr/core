@@ -231,7 +231,7 @@ func (c *coordinator) addMoveMapping(ctx context.Context, mapping *models.MoveMa
 
 	moveMappingsForChannel[mapping.CorrelationID] = mapping
 
-	if err := c.db.SaveMoveMapping(ctx, mapping.ID, mapping); err != nil {
+	if err := c.db.SaveMoveMapping(ctx, mapping.OriginalChannelID, mapping); err != nil {
 		return err
 	}
 
