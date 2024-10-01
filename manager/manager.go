@@ -25,41 +25,31 @@ type DB interface {
 	// A database implementation can choose to skip saving the alerts, since they are never read by the manager.
 	//
 	// id is the unique identifier for the alert, and body is the json formatted alert.
-	SaveAlert(ctx context.Context, id string, body json.RawMessage) error
+	SaveAlert(ctx context.Context, channelID string, alert *models.Alert) error
 
 	// CreateOrUpdateIssue creates or updates a single issue in the database.
 	//
 	// id is the unique identifier for the issue, and body is the json formatted issue.
-	CreateOrUpdateIssue(ctx context.Context, id string, body json.RawMessage) error
+	CreateOrUpdateIssue(ctx context.Context, channelID string, issue *models.Issue) error
 
 	// UpdateIssues updates multiple existing issues in the database.
 	//
 	// issues is a map of issue IDs to json formatted issue bodies.
-	UpdateIssues(ctx context.Context, issues map[string]json.RawMessage) error
+	UpdateIssues(ctx context.Context, channelID string, issues ...*models.Issue) error
 
-	// FindSingleIssue finds a single issue in the database, based on the provided find options, and returns the issue ID and the issue body.
-	// The find options specify conditions on individual json fields, which may be nested.
-	//
-	// For example; [common.WithFieldEquals("lastAlert.slackChannelId", "C12345678"), common.WithFieldEquals("slackPostId", "1234567890")]
-	// will find an issue where the 'lastAlert.slackChannelId' field is "C12345678" and the 'slackPostId' field is "1234567890".
+	// FindIssueBySlackPostID finds a single issue in the database, based on the provided channel ID and Slack post ID.
 	//
 	// The database implementation should return an error if the query matches multiple issues, and ["", nil, nil] if no issue is found.
-	FindSingleIssue(ctx context.Context, opts ...common.FindOption) (string, json.RawMessage, error)
+	FindIssueBySlackPostID(ctx context.Context, channelID, postID string) (string, json.RawMessage, error)
 
-	// LoadIssues loads multiple issues from the database, based on the provided find options.
-	// See FindSingleIssue for more information on find options.
-	LoadIssues(ctx context.Context, opts ...common.FindOption) (map[string]json.RawMessage, error)
+	// LoadOpenIssues loads all open (non-archived) issues from the database, across all channels.
+	LoadOpenIssues(ctx context.Context) (map[string]json.RawMessage, error)
 
-	// GetMoveMappings returns all move mappings from the database, matching the provided find options.
-	//
-	// For example; [common.WithFieldEquals("originalChannelId", "C12345678")] will return all move mappings
-	// where the 'originalChannelId' field is "C12345678".
-	GetMoveMappings(ctx context.Context, opts ...common.FindOption) ([]json.RawMessage, error)
+	// LoadMoveMappings returns all move mappings from the database, for the specified channel ID.
+	LoadMoveMappings(ctx context.Context, channelID string) ([]json.RawMessage, error)
 
 	// SaveMoveMapping saves a move mapping to the database.
-	//
-	// id is the unique identifier for the move mapping, and body is the json formatted move mapping.
-	SaveMoveMapping(ctx context.Context, id string, body json.RawMessage) error
+	SaveMoveMapping(ctx context.Context, channelID string, moveMapping *models.MoveMapping) error
 }
 
 // FifoQueue is an interface for interacting with a fifo queue.

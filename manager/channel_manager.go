@@ -208,7 +208,7 @@ func (c *channelManager) findIssueBySlackPost(ctx context.Context, slackPostID s
 		return nil, nil
 	}
 
-	_, issueBody, err := c.db.FindSingleIssue(ctx, common.WithFieldEquals("lastAlert.slackChannelId", c.channelID), common.WithFieldEquals("slackPostId", slackPostID))
+	_, issueBody, err := c.db.FindIssueBySlackPostID(ctx, c.channelID, slackPostID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for issue in database: %w", err)
 	}
@@ -264,12 +264,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		}
 	}
 
-	alertBody, err := json.Marshal(alert)
-	if err != nil {
-		return fmt.Errorf("failed to marshal alert body: %w", err)
-	}
-
-	if err := c.db.SaveAlert(ctx, alert.ID, alertBody); err != nil {
+	if err := c.db.SaveAlert(ctx, alert.ID, alert); err != nil {
 		return fmt.Errorf("failed to save alert to database: %w", err)
 	}
 
@@ -486,7 +481,7 @@ func (c *channelManager) saveIssueToDB(ctx context.Context, issue *models.Issue)
 		return nil
 	}
 
-	if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, body); err != nil {
+	if err := c.db.CreateOrUpdateIssue(ctx, issue.ID, issue); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
@@ -504,7 +499,7 @@ func (c *channelManager) saveIssuesToDB(ctx context.Context, issues []*models.Is
 		return c.saveIssueToDB(ctx, issues[0])
 	}
 
-	issueBodies := make(map[string]json.RawMessage)
+	issuesToUpdate := []*models.Issue{}
 	issueHashes := make(map[string]string)
 
 	for _, issue := range issues {
@@ -519,15 +514,15 @@ func (c *channelManager) saveIssuesToDB(ctx context.Context, issues []*models.Is
 			return nil
 		}
 
-		issueBodies[issue.ID] = body
+		issuesToUpdate = append(issuesToUpdate, issue)
 		issueHashes[cacheKey] = issueHash
 	}
 
-	if err := c.db.UpdateIssues(ctx, issueBodies); err != nil {
+	if err := c.db.UpdateIssues(ctx, c.channelID, issuesToUpdate...); err != nil {
 		return fmt.Errorf("failed to update issues in database: %w", err)
 	}
 
-	updated := len(issueBodies)
+	updated := len(issuesToUpdate)
 	c.logger.WithField("count", len(issues)).WithField("updated", updated).WithField("skipped", len(issues)-updated).Debug("Updated issue collection in database")
 
 	for cacheKey, issueHash := range issueHashes {
