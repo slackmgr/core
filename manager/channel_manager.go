@@ -353,7 +353,7 @@ func (c *channelManager) processIncomingMovedIssue(ctx context.Context, issue *m
 
 	c.issueCollection.Add(issue)
 
-	if err := c.slackClient.UpdateSingleIssue(ctx, issue); err != nil {
+	if err := c.slackClient.UpdateSingleIssue(ctx, issue, "incoming moved issue"); err != nil {
 		return fmt.Errorf("failed to update issue in Slack: %w", err)
 	}
 
@@ -435,7 +435,7 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
-	if err := c.slackClient.UpdateSingleIssueWithThrottling(ctx, issue, c.issueCollection.Count()); err != nil {
+	if err := c.slackClient.UpdateSingleIssueWithThrottling(ctx, issue, "alert added to existing issue", c.issueCollection.Count()); err != nil {
 		return fmt.Errorf("failed to update issue in Slack: %w", err)
 	}
 
@@ -458,7 +458,7 @@ func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
-	if err := c.slackClient.UpdateSingleIssue(ctx, issue); err != nil {
+	if err := c.slackClient.UpdateSingleIssue(ctx, issue, "new issue created"); err != nil {
 		return fmt.Errorf("failed to update issue in Slack: %w", err)
 	}
 
@@ -542,7 +542,7 @@ func (c *channelManager) terminateIssue(ctx context.Context, issue *models.Issue
 
 	if issue != nil {
 		issue.RegisterTerminationRequest(cmd.UserRealName)
-		return c.slackClient.Delete(ctx, issue, "Issue deleted via Slack command", false, nil)
+		return c.slackClient.Delete(ctx, issue, "terminate issue request", false, nil)
 	}
 
 	return c.slackClient.DeletePost(ctx, cmd.SlackChannelID, cmd.SlackPostID)
@@ -553,7 +553,7 @@ func (c *channelManager) resolveIssue(ctx context.Context, issue *models.Issue, 
 
 	issue.RegisterResolveRequest(cmd.UserRealName)
 
-	return c.slackClient.UpdateSingleIssue(ctx, issue)
+	return c.slackClient.UpdateSingleIssue(ctx, issue, "resolve issue request")
 }
 
 func (c *channelManager) unresolveIssue(ctx context.Context, issue *models.Issue, _ *models.Command, logger common.Logger) error {
@@ -561,7 +561,7 @@ func (c *channelManager) unresolveIssue(ctx context.Context, issue *models.Issue
 
 	issue.RegisterUnresolveRequest()
 
-	return c.slackClient.UpdateSingleIssue(ctx, issue)
+	return c.slackClient.UpdateSingleIssue(ctx, issue, "unresolve issue request")
 }
 
 func (c *channelManager) investigateIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) error {
@@ -569,7 +569,7 @@ func (c *channelManager) investigateIssue(ctx context.Context, issue *models.Iss
 
 	issue.RegisterInvestigateRequest(cmd.UserRealName)
 
-	return c.slackClient.UpdateSingleIssue(ctx, issue)
+	return c.slackClient.UpdateSingleIssue(ctx, issue, "investigate issue request")
 }
 
 func (c *channelManager) uninvestigateIssue(ctx context.Context, issue *models.Issue, _ *models.Command, logger common.Logger) error {
@@ -577,7 +577,7 @@ func (c *channelManager) uninvestigateIssue(ctx context.Context, issue *models.I
 
 	issue.RegisterUninvestigateRequest()
 
-	return c.slackClient.UpdateSingleIssue(ctx, issue)
+	return c.slackClient.UpdateSingleIssue(ctx, issue, "uninvestigate issue request")
 }
 
 func (c *channelManager) muteIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) error {
@@ -585,7 +585,7 @@ func (c *channelManager) muteIssue(ctx context.Context, issue *models.Issue, cmd
 
 	issue.RegisterMuteRequest(cmd.UserRealName)
 
-	return c.slackClient.UpdateSingleIssue(ctx, issue)
+	return c.slackClient.UpdateSingleIssue(ctx, issue, "mute issue request")
 }
 
 func (c *channelManager) unmuteIssue(ctx context.Context, issue *models.Issue, _ *models.Command, logger common.Logger) error {
@@ -593,7 +593,7 @@ func (c *channelManager) unmuteIssue(ctx context.Context, issue *models.Issue, _
 
 	issue.RegisterUnmuteRequest()
 
-	return c.slackClient.UpdateSingleIssue(ctx, issue)
+	return c.slackClient.UpdateSingleIssue(ctx, issue, "unmute issue request")
 }
 
 func (c *channelManager) handleMoveIssueCmd(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) error {
@@ -621,7 +621,7 @@ func (c *channelManager) showIssueOptionButtons(ctx context.Context, issue *mode
 
 	issue.RegisterShowOptionButtonsRequest()
 
-	return c.slackClient.UpdateSingleIssue(ctx, issue)
+	return c.slackClient.UpdateSingleIssue(ctx, issue, "show issue option buttons request")
 }
 
 func (c *channelManager) hideIssueOptionButtons(ctx context.Context, issue *models.Issue, _ *models.Command, logger common.Logger) error {
@@ -629,7 +629,7 @@ func (c *channelManager) hideIssueOptionButtons(ctx context.Context, issue *mode
 
 	issue.RegisterHideOptionButtonsRequest()
 
-	return c.slackClient.UpdateSingleIssue(ctx, issue)
+	return c.slackClient.UpdateSingleIssue(ctx, issue, "hide issue option buttons request")
 }
 
 func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, targetChannel, username string, logger common.Logger) error {

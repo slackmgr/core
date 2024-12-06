@@ -234,7 +234,9 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 			continue
 		}
 
-		if err := c.createOrUpdate(ctx, issue, action); err != nil {
+		reason := fmt.Sprintf("channel update: issue requests action: %s", action)
+
+		if err := c.createOrUpdate(ctx, issue, reason, action); err != nil {
 			return err
 		}
 	}
@@ -242,17 +244,17 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 	return nil
 }
 
-func (c *Client) UpdateSingleIssue(ctx context.Context, issue *models.Issue) error {
+func (c *Client) UpdateSingleIssue(ctx context.Context, issue *models.Issue, reason string) error {
 	action := issue.GetSlackAction()
 
 	if action == models.ActionNone {
 		return nil
 	}
 
-	return c.createOrUpdate(ctx, issue, issue.GetSlackAction())
+	return c.createOrUpdate(ctx, issue, reason, issue.GetSlackAction())
 }
 
-func (c *Client) UpdateSingleIssueWithThrottling(ctx context.Context, issue *models.Issue, issuesInChannel int) error {
+func (c *Client) UpdateSingleIssueWithThrottling(ctx context.Context, issue *models.Issue, reason string, issuesInChannel int) error {
 	action := issue.GetSlackAction()
 
 	if action == models.ActionNone {
@@ -265,7 +267,7 @@ func (c *Client) UpdateSingleIssueWithThrottling(ctx context.Context, issue *mod
 		return nil
 	}
 
-	return c.createOrUpdate(ctx, issue, action)
+	return c.createOrUpdate(ctx, issue, reason, action)
 }
 
 func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string, updateIfMessageHasReplies bool, sem *semaphore.Weighted) error {
@@ -274,8 +276,10 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string,
 		return nil
 	}
 
+	logger := c.logger.WithFields(issue.LogFields()).WithField("post_update_reason", reason)
+
 	if c.cfg.SlackClient.DryRun {
-		c.logger.Infof("DRYRUN: Slack DELETE issue %s, post %s", issue.CorrelationID, issue.SlackPostID)
+		logger.Infof("DRYRUN: Slack DELETE issue %s, post %s", issue.CorrelationID, issue.SlackPostID)
 		return nil
 	}
 
@@ -287,7 +291,6 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string,
 	}
 
 	hardDelete := true
-	logger := c.logger.WithFields(issue.LogFields()).WithField("delete_reason", reason)
 
 	if updateIfMessageHasReplies {
 		hasReplies, err := c.api.MessageHasReplies(ctx, issue.LastAlert.SlackChannelID, issue.SlackPostID)
@@ -413,25 +416,30 @@ func (c *Client) GetChannelName(ctx context.Context, channelID string) string {
 	return info.Name
 }
 
-func (c *Client) createOrUpdate(ctx context.Context, issue *models.Issue, action models.SlackAction) error {
+func (c *Client) createOrUpdate(ctx context.Context, issue *models.Issue, reason string, action models.SlackAction) error {
 	if issue.SlackPostID == PostIDInvalidChannel {
 		issue.RegisterSlackPostCreatedOrUpdated(PostIDInvalidChannel, action)
 		return nil
 	}
 
 	if !issue.HasSlackPost() {
-		return c.create(ctx, issue, action)
+		reason = fmt.Sprintf("%s: issue has no Slack post", reason)
+		return c.create(ctx, issue, reason, action)
 	}
 
-	return c.update(ctx, issue, action)
+	reason = fmt.Sprintf("%s: issue has existing Slack post", reason)
+
+	return c.update(ctx, issue, reason, action)
 }
 
-func (c *Client) create(ctx context.Context, issue *models.Issue, action models.SlackAction) error {
+func (c *Client) create(ctx context.Context, issue *models.Issue, reason string, action models.SlackAction) error {
 	options := c.getMessageOptionsBlocks(issue, action, UpdateMethodPost)
+
+	logger := c.logger.WithFields(issue.LogFields()).WithField("post_update_reason", reason)
 
 	postID, err := c.api.ChatPostMessage(ctx, issue.LastAlert.SlackChannelID, options...)
 	if err != nil {
-		logger := c.logger.WithFields(issue.LogFields()).WithField("reason", err.Error())
+		logger = logger.WithField("reason", err.Error())
 		errMsg := fmt.Sprintf("Failed to create Slack post for issue %s in channel %s: %s", issue.CorrelationID, issue.LastAlert.SlackChannelID, err.Error())
 
 		// Channel not found or channel is archived.
@@ -467,17 +475,19 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, action models.
 
 	issue.RegisterSlackPostCreatedOrUpdated(postID, action)
 
-	c.logger.WithFields(issue.LogFields()).Info("Create Slack post")
+	logger.Info("Create Slack post")
 
 	return nil
 }
 
-func (c *Client) update(ctx context.Context, issue *models.Issue, action models.SlackAction) error {
+func (c *Client) update(ctx context.Context, issue *models.Issue, reason string, action models.SlackAction) error {
 	options := c.getMessageOptionsBlocks(issue, action, UpdateMethodUpdate)
+
+	logger := c.logger.WithFields(issue.LogFields()).WithField("post_update_reason", reason)
 
 	postID, err := c.api.ChatUpdateMessage(ctx, issue.LastAlert.SlackChannelID, options...)
 	if err != nil {
-		logger := c.logger.WithFields(issue.LogFields()).WithField("reason", err.Error())
+		logger = logger.WithField("reason", err.Error())
 		errMsg := fmt.Sprintf("Failed to update Slack post for issue %s in channel %s: %s", issue.CorrelationID, issue.LastAlert.SlackChannelID, err.Error())
 
 		// Channel not found or channel is archived.
@@ -521,7 +531,7 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, action models.
 
 	issue.RegisterSlackPostCreatedOrUpdated(postID, action)
 
-	c.logger.WithFields(issue.LogFields()).Info("Update Slack post")
+	logger.Info("Update Slack post")
 
 	return nil
 }
