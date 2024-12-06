@@ -542,7 +542,7 @@ func (c *channelManager) terminateIssue(ctx context.Context, issue *models.Issue
 
 	if issue != nil {
 		issue.RegisterTerminationRequest(cmd.UserRealName)
-		return c.slackClient.Delete(ctx, issue, false, nil)
+		return c.slackClient.Delete(ctx, issue, "Issue deleted via Slack command", false, nil)
 	}
 
 	return c.slackClient.DeletePost(ctx, cmd.SlackChannelID, cmd.SlackPostID)
@@ -634,7 +634,7 @@ func (c *channelManager) hideIssueOptionButtons(ctx context.Context, issue *mode
 
 func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, targetChannel, username string, logger common.Logger) error {
 	// Remove the current Slack post (if any)
-	if err := c.slackClient.Delete(ctx, issue, false, nil); err != nil {
+	if err := c.slackClient.Delete(ctx, issue, "Issue moved between channels", false, nil); err != nil {
 		return err
 	}
 

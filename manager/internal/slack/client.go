@@ -188,7 +188,7 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 		// Delete Slack post when requested by the issue (for whatever reason)
 		if issue.SlackPostNeedsDelete {
 			errg.Go(func() error {
-				return c.Delete(gctx, issue, true, sem)
+				return c.Delete(gctx, issue, "Issue flagged with SlackPostNeedsDelete", true, sem)
 			})
 			atLeastOnePostDeleted = true
 			continue
@@ -197,7 +197,7 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 		// Delete Slack post when reordering is allowed AND issue follow up is enabled AND at least one Slack post exists where the connected issue has lower priority
 		if allowIssueReordering && issue.FollowUpEnabled() && newerSlackPostWithLowerPriorityExists(issue, issues) {
 			errg.Go(func() error {
-				return c.Delete(gctx, issue, true, sem)
+				return c.Delete(gctx, issue, "Issue re-ordering", true, sem)
 			})
 			atLeastOnePostDeleted = true
 		}
@@ -268,7 +268,7 @@ func (c *Client) UpdateSingleIssueWithThrottling(ctx context.Context, issue *mod
 	return c.createOrUpdate(ctx, issue, action)
 }
 
-func (c *Client) Delete(ctx context.Context, issue *models.Issue, updateIfMessageHasReplies bool, sem *semaphore.Weighted) error {
+func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string, updateIfMessageHasReplies bool, sem *semaphore.Weighted) error {
 	if !issue.HasSlackPost() || issue.SlackPostID == PostIDInvalidChannel {
 		issue.RegisterSlackPostDeleted()
 		return nil
@@ -287,7 +287,7 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, updateIfMessag
 	}
 
 	hardDelete := true
-	logger := c.logger.WithFields(issue.LogFields())
+	logger := c.logger.WithFields(issue.LogFields()).WithField("delete_reason", reason)
 
 	if updateIfMessageHasReplies {
 		hasReplies, err := c.api.MessageHasReplies(ctx, issue.LastAlert.SlackChannelID, issue.SlackPostID)
@@ -574,7 +574,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 			blocks = append(blocks, slack.NewActionBlock("issue_actions", webhookButtons...))
 		}
 
-		if issue.IsEmojiButtonsActivated {
+		if c.managerSettings.Settings.AlwaysShowOptionButtons || issue.IsEmojiButtonsActivated {
 			optionButtons := getIssueOptionButtons(issue)
 
 			if len(optionButtons) > 0 {
@@ -586,6 +586,14 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 	if issue.LastAlert.Footer != "" {
 		text := newMrkdwnTextBlock(issue.LastAlert.Footer)
 		blocks = append(blocks, slack.NewContextBlock("", text))
+	}
+
+	if c.managerSettings.Settings.ShowIssueCorrelationIDInSlackPost {
+		text := fmt.Sprintf("Correlation ID: %s", issue.CorrelationID)
+		fields := []slack.MixedElement{
+			slack.NewTextBlockObject("plain_text", text, false, false),
+		}
+		blocks = append(blocks, slack.NewContextBlock("", fields...))
 	}
 
 	if issue.FollowUpEnabled() {
