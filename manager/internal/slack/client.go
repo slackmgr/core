@@ -234,7 +234,7 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 			continue
 		}
 
-		reason := fmt.Sprintf("channel update: issue requests action: %s", action)
+		reason := fmt.Sprintf("channel update: issue requests action '%s'", action)
 
 		if err := c.createOrUpdate(ctx, issue, reason, action); err != nil {
 			return err
