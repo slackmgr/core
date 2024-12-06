@@ -16,7 +16,7 @@ import (
 // EncryptWebhookPayload encrypts the existing webhook payload (if any) and replaces it with an encrypted version.
 // This function modifies the state of the webhook.
 func EncryptWebhookPayload(w *common.Webhook, key []byte) error {
-	if w.Payload == nil || len(w.Payload) == 0 {
+	if len(w.Payload) == 0 {
 		return nil
 	}
 
@@ -68,7 +68,7 @@ func encrypt(key, data []byte) ([]byte, error) {
 // DecryptWebhookPayload decrypts the encrypted webhook payload (if any) and returns it, or nil if payload is empty.
 // This function does not modify the state of the webhook.
 func DecryptWebhookPayload(w *common.Webhook, key []byte) (map[string]interface{}, error) {
-	if w.Payload == nil || len(w.Payload) == 0 {
+	if len(w.Payload) == 0 {
 		return map[string]interface{}{}, nil
 	}
 
@@ -120,5 +120,5 @@ func decrypt(key, encryptedData []byte) ([]byte, error) {
 
 	nonce, ciphertext := encryptedData[:nonceSize], encryptedData[nonceSize:]
 
-	return gcm.Open(nil, nonce, ciphertext, nil)
+	return gcm.Open(nil, nonce, ciphertext, nil) // #nosec G407
 }
