@@ -347,17 +347,20 @@ func ackCommand(ctx context.Context, cmd *models.Command, logger common.Logger) 
 func (c *channelManager) processIncomingMovedIssue(ctx context.Context, issue *models.Issue) error {
 	logger := c.logger.WithFields(issue.LogFields())
 
+	c.issueCollection.Add(issue)
+
+	// Slack errors are eventually returned, but we first need to store the issue in the database
+	slackErr := c.slackClient.UpdateSingleIssue(ctx, issue, "incoming moved issue")
+
 	if err := c.saveIssueToDB(ctx, issue); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
-	c.issueCollection.Add(issue)
-
-	if err := c.slackClient.UpdateSingleIssue(ctx, issue, "incoming moved issue"); err != nil {
-		return fmt.Errorf("failed to update issue in Slack: %w", err)
-	}
-
 	logger.Info("Add issue to channel")
+
+	if slackErr != nil {
+		return fmt.Errorf("failed to update issue in Slack: %w", slackErr)
+	}
 
 	return nil
 }
@@ -422,27 +425,29 @@ func (c *channelManager) moveEscalatedIssue(ctx context.Context, escalationResul
 	return c.moveIssue(ctx, escalationResult.Issue, escalationResult.MoveToChannel, "Issue escalation", logger)
 }
 
-// addAlertToExistingIssue adds a new alert to an existing issue, updates the issue in the database and finally updates the corresponding Slack post.
+// addAlertToExistingIssue adds a new alert to an existing issue, updates the corresponding Slack post, and finally updates the issue in the database.
 func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *models.Issue, alert *models.Alert) error {
 	updated := issue.AddAlert(alert, c.logger)
 
-	// No point in updating db or Slack if the alert was ignored
+	// No point in updating db or Slack if the alert was ignored by the existing issue
 	if !updated {
 		return nil
 	}
+
+	slackErr := c.slackClient.UpdateSingleIssueWithThrottling(ctx, issue, "alert added to existing issue", c.issueCollection.Count())
 
 	if err := c.saveIssueToDB(ctx, issue); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
-	if err := c.slackClient.UpdateSingleIssueWithThrottling(ctx, issue, "alert added to existing issue", c.issueCollection.Count()); err != nil {
-		return fmt.Errorf("failed to update issue in Slack: %w", err)
+	if slackErr != nil {
+		return fmt.Errorf("failed to update issue in Slack: %w", slackErr)
 	}
 
 	return nil
 }
 
-// createNewIssue creates a new issue with the specified alert, stores the issue in the database and finally creates a new Slack post.
+// createNewIssue creates a new issue with the specified alert, creates a new Slack post, and finally stores the issue in the database.
 // Some alerts may be ignored.
 func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert, logger common.Logger) error {
 	// Do not create a new issue for an alert that is already resolved
@@ -454,22 +459,29 @@ func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert
 	issue := models.NewIssue(alert, c.logger)
 	logger = logger.WithFields(issue.LogFields())
 
+	c.issueCollection.Add(issue)
+
+	// Slack errors are eventually returned, but we first need to store the issue in the database
+	slackErr := c.slackClient.UpdateSingleIssue(ctx, issue, "new issue created")
+
 	if err := c.saveIssueToDB(ctx, issue); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
-	if err := c.slackClient.UpdateSingleIssue(ctx, issue, "new issue created"); err != nil {
-		return fmt.Errorf("failed to update issue in Slack: %w", err)
-	}
-
-	c.issueCollection.Add(issue)
-
 	logger.Info("Create issue")
+
+	if slackErr != nil {
+		return fmt.Errorf("failed to update issue in Slack: %w", slackErr)
+	}
 
 	return nil
 }
 
 func (c *channelManager) saveIssueToDB(ctx context.Context, issue *models.Issue) error {
+	if issue == nil {
+		return nil
+	}
+
 	body, err := json.Marshal(issue)
 	if err != nil {
 		return fmt.Errorf("failed to marshal issue body: %w", err)
@@ -477,6 +489,7 @@ func (c *channelManager) saveIssueToDB(ctx context.Context, issue *models.Issue)
 
 	cacheKey, issueHash := hashIssue(issue.ID, body)
 
+	// No point in updating db if the issue has not changed
 	if existingHash, ok := c.cache.Get(ctx, cacheKey); ok && existingHash == issueHash {
 		return nil
 	}
@@ -495,10 +508,6 @@ func (c *channelManager) saveIssuesToDB(ctx context.Context, issues []*models.Is
 		return nil
 	}
 
-	if len(issues) == 1 {
-		return c.saveIssueToDB(ctx, issues[0])
-	}
-
 	issuesToUpdate := []common.Issue{}
 	issueHashes := make(map[string]string)
 
@@ -510,19 +519,27 @@ func (c *channelManager) saveIssuesToDB(ctx context.Context, issues []*models.Is
 
 		cacheKey, issueHash := hashIssue(issue.ID, body)
 
+		// No point in updating db if the issue has not changed
 		if existingHash, ok := c.cache.Get(ctx, cacheKey); ok && existingHash == issueHash {
-			return nil
+			continue
 		}
 
 		issuesToUpdate = append(issuesToUpdate, issue)
 		issueHashes[cacheKey] = issueHash
 	}
 
+	// No changed issues found
+	if len(issuesToUpdate) == 0 {
+		return nil
+	}
+
+	// Batch update all changed issues
 	if err := c.db.UpdateIssues(ctx, c.channelID, issuesToUpdate...); err != nil {
 		return fmt.Errorf("failed to update issues in database: %w", err)
 	}
 
 	updated := len(issuesToUpdate)
+
 	c.logger.WithField("count", len(issues)).WithField("updated", updated).WithField("skipped", len(issues)-updated).Debug("Updated issue collection in database")
 
 	for cacheKey, issueHash := range issueHashes {
