@@ -29,7 +29,7 @@ func processor(ctx context.Context, coordinator *coordinator, alertCh <-chan mod
 
 			if err := coordinator.AddAlert(ctx, alert); err != nil {
 				msg.MarkAsFailed()
-				logger.WithFields(alert.LogFields()).Errorf("Failed to process alert %s: %s", alert.ID, err)
+				logger.WithFields(alert.LogFields()).Errorf("Failed to process alert %s: %s", alert.DedupID(), err)
 				continue
 			}
 

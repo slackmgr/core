@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	commonlib "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
@@ -14,11 +13,9 @@ import (
 type Alert struct {
 	commonlib.Alert
 	message
-	ID                     string    `json:"-"`
-	DBTimestamp            time.Time `json:"@timestamp"`
-	SlackChannelName       string    `json:"slackChannelName"`
-	OriginalSlackChannelID string    `json:"originalSlackChannelId"`
-	OriginalText           string    `json:"originalText"`
+	SlackChannelName       string `json:"slackChannelName"`
+	OriginalSlackChannelID string `json:"originalSlackChannelId"`
+	OriginalText           string `json:"originalText"`
 }
 
 func NewAlert(queueItem *commonlib.FifoQueueItem) (Message, error) { //nolint:ireturn
@@ -33,10 +30,8 @@ func NewAlert(queueItem *commonlib.FifoQueueItem) (Message, error) { //nolint:ir
 	}
 
 	return &Alert{
-		ID:          internal.Hash(alert.SlackChannelID, alert.CorrelationID, alert.Timestamp.Format(time.RFC3339Nano)),
-		DBTimestamp: alert.Timestamp,
-		Alert:       alert,
-		message:     newMessage(queueItem),
+		Alert:   alert,
+		message: newMessage(queueItem),
 	}, nil
 }
 
