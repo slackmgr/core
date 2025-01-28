@@ -56,8 +56,9 @@ func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.S
 	}
 }
 
-func (m *Manager) RegisterWebhookHandler(handler WebhookHandler) {
+func (m *Manager) RegisterWebhookHandler(handler WebhookHandler) *Manager {
 	m.webhookHandlers = append(m.webhookHandlers, handler)
+	return m
 }
 
 func (m *Manager) Run(ctx context.Context) error {
