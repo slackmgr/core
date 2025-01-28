@@ -24,6 +24,7 @@ type coordinator struct {
 	cacheStore               store.StoreInterface
 	logger                   common.Logger
 	metrics                  common.Metrics
+	webhookHandlers          []WebhookHandler
 	cfg                      *config.ManagerConfig
 	managerSettings          *models.ManagerSettingsWrapper
 	mappingsLock             *sync.Mutex
@@ -31,7 +32,7 @@ type coordinator struct {
 	moveMappings             map[string]map[string]*models.MoveMapping
 }
 
-func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *coordinator {
+func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *coordinator {
 	return &coordinator{
 		channelManagers:          make(map[string]*channelManager),
 		channelManagersWaitGroup: &sync.WaitGroup{},
@@ -43,6 +44,7 @@ func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, cacheStore
 		logger:                   logger,
 		metrics:                  metrics,
 		cfg:                      cfg,
+		webhookHandlers:          webhookHandlers,
 		managerSettings:          managerSettings,
 		mappingsLock:             &sync.Mutex{},
 		moveRequestCh:            make(chan *models.MoveRequest, 10),
@@ -301,7 +303,7 @@ func (c *coordinator) findOrCreateChannelManager(ctx context.Context, channelID 
 		return manager, nil
 	}
 
-	manager := newChannelManager(channelID, c.slack, c.db, c.moveRequestCh, c.cacheStore, c.logger, c.metrics, c.cfg, c.managerSettings)
+	manager := newChannelManager(channelID, c.slack, c.db, c.moveRequestCh, c.cacheStore, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings)
 
 	if err := manager.init(ctx, existingIssues); err != nil {
 		return nil, fmt.Errorf("failed to initialize channel manager: %w", err)

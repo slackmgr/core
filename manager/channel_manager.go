@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/eko/gocache/lib/v4/store"
-	"github.com/go-resty/resty/v2"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
@@ -26,7 +25,7 @@ type channelManager struct {
 	issueCollection *models.IssueCollection
 	slackClient     *slack.Client
 	db              DB
-	webhookClient   *resty.Client
+	webhookHandlers []WebhookHandler
 	cache           *internal.Cache[string]
 	logger          common.Logger
 	metrics         common.Metrics
@@ -40,30 +39,29 @@ type channelManager struct {
 	initialized     bool
 }
 
-func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveRequestCh chan<- *models.MoveRequest, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *channelManager {
+func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveRequestCh chan<- *models.MoveRequest,
+	cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
+	managerSettings *models.ManagerSettingsWrapper,
+) *channelManager {
 	cacheKeyPrefix := cfg.CacheKeyPrefix + "channel-manager::" + channelID + "::"
 	cache := internal.NewCache[string](cacheStore, cacheKeyPrefix, logger)
 
-	restyLogger := newRestyLogger(logger)
-
-	webhookClient := resty.New().
-		SetRetryCount(2).
-		SetRetryWaitTime(time.Second).
-		AddRetryCondition(webhookRetryPolicy).
-		SetLogger(restyLogger).
-		SetTimeout(time.Duration(cfg.WebhookTimeoutSeconds) * time.Second)
-
 	logger = logger.WithField("slack_channel_id", channelID)
+
+	if len(webhookHandlers) == 0 {
+		defaultHandler := NewHttpWebhookHandler(logger, cfg)
+		webhookHandlers = append(webhookHandlers, defaultHandler)
+	}
 
 	c := &channelManager{
 		channelID:       channelID,
 		slackClient:     slackClient,
 		db:              db,
-		webhookClient:   webhookClient,
 		moveRequestCh:   moveRequestCh,
 		cache:           cache,
 		logger:          logger,
 		metrics:         metrics,
+		webhookHandlers: webhookHandlers,
 		cfg:             cfg,
 		managerSettings: managerSettings,
 		alertCh:         make(chan *models.Alert, 1000),
@@ -688,11 +686,24 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 		return fmt.Errorf("no webhook found with ID %s", cmd.WebhookParameters.WebhookID)
 	}
 
-	logger = c.logger.WithField("url", webhook.URL)
+	logger = c.logger.WithField("webhook_target", webhook.URL)
 
 	payload, err := internal.DecryptWebhookPayload(webhook, []byte(c.cfg.EncryptionKey))
 	if err != nil {
 		return fmt.Errorf("failed to decrypt webhook payload: %w", err)
+	}
+
+	var handler WebhookHandler
+
+	for _, h := range c.webhookHandlers {
+		if h.ShouldHandleWebhook(ctx, webhook.URL) {
+			handler = h
+			break
+		}
+	}
+
+	if handler == nil {
+		return fmt.Errorf("no webhook handler found for target %s", webhook.URL)
 	}
 
 	data := &common.WebhookCallback{
@@ -707,25 +718,15 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 		Payload:       payload,
 	}
 
-	go postWebhook(ctx, c.webhookClient, webhook.URL, data, logger)
+	// We do this in a separate goroutine to avoid blocking the command processing.
+	// The webhook may fail, in which case we log the error and continue.
+	go postWebhook(ctx, handler, webhook.URL, data, logger)
 
 	return nil
 }
 
-func postWebhook(ctx context.Context, client *resty.Client, url string, data *common.WebhookCallback, logger common.Logger) {
-	response, err := client.R().SetContext(ctx).SetBody(data).Post(url)
-	if err != nil {
-		logger.Errorf("Webhook POST %s failed: %w", response.Request.URL, err)
-		return
+func postWebhook(ctx context.Context, handler WebhookHandler, target string, data *common.WebhookCallback, logger common.Logger) {
+	if err := handler.HandleWebhook(ctx, target, data, logger); err != nil {
+		logger.Errorf("Failed to handle webhook: %s", err)
 	}
-
-	logger.Debugf("Webhook POST %s %s", response.Request.URL, response.Status())
-
-	if !response.IsSuccess() {
-		logger.Errorf("Webhook POST %s failed with status code %d", response.Request.URL, response.StatusCode())
-	}
-}
-
-func webhookRetryPolicy(r *resty.Response, err error) bool {
-	return err == nil && r.StatusCode() >= 500
 }
