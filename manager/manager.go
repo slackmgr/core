@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -17,64 +16,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// DB is an interface for interacting with the database.
-type DB interface {
-	// SaveAlert saves an alert to the database (for auditing purposes).
-	// The same alert may be saved multiple times, in case of errors and retries.
-	//
-	// A database implementation can choose to skip saving the alerts, since they are never read by the manager.
-	//
-	// id is the unique identifier for the alert, and body is the json formatted alert.
-	SaveAlert(ctx context.Context, channelID string, alert *common.Alert) error
-
-	// CreateOrUpdateIssue creates or updates a single issue in the database.
-	//
-	// id is the unique identifier for the issue, and body is the json formatted issue.
-	CreateOrUpdateIssue(ctx context.Context, channelID string, issue common.Issue) error
-
-	// UpdateIssues updates multiple existing issues in the database.
-	//
-	// issues is a map of issue IDs to json formatted issue bodies.
-	UpdateIssues(ctx context.Context, channelID string, issues ...common.Issue) error
-
-	// FindIssueBySlackPostID finds a single issue in the database, based on the provided channel ID and Slack post ID.
-	//
-	// The database implementation should return an error if the query matches multiple issues, and ["", nil, nil] if no issue is found.
-	FindIssueBySlackPostID(ctx context.Context, channelID, postID string) (string, json.RawMessage, error)
-
-	// LoadOpenIssues loads all open (non-archived) issues from the database, across all channels.
-	LoadOpenIssues(ctx context.Context) (map[string]json.RawMessage, error)
-
-	// LoadMoveMappings returns all move mappings from the database, for the specified channel ID.
-	LoadMoveMappings(ctx context.Context, channelID string) ([]json.RawMessage, error)
-
-	// SaveMoveMapping saves a move mapping to the database.
-	SaveMoveMapping(ctx context.Context, channelID string, moveMapping common.MoveMapping) error
-}
-
-// FifoQueue is an interface for interacting with a fifo queue.
-type FifoQueue interface {
-	// Name returns the name of the queue.
-	Name() string
-
-	// Send sends a single message to the queue.
-	//
-	// slackChannelID is the Slack channel to which the message belongs.
-	// A queue implementation should use this value to partition the queue (i.e. group ID in an AWS SQS Fifo queue),
-	// but it is not required.
-	//
-	// dedupID is a unique identifier for the message.
-	// A queue implementation should use this value to deduplicate messages, but it is not required.
-	//
-	// body is the json formatted message body.
-	Send(ctx context.Context, slackChannelID, dedupID, body string) error
-
-	// Receive receives messages from the queue, until the context is cancelled.
-	// Messages are sent to the provided channel.
-	// The channel must be closed when Receive returns.
-	Receive(ctx context.Context, sinkCh chan<- *common.FifoQueueItem) error
-}
-
 type Manager struct {
 	db              DB
 	slackClient     *slack.Client
@@ -84,6 +25,7 @@ type Manager struct {
 	cacheStore      store.StoreInterface
 	logger          common.Logger
 	metrics         common.Metrics
+	webhookHandlers []WebhookHandler
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 }
@@ -112,6 +54,10 @@ func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.S
 		cfg:             cfg,
 		managerSettings: &models.ManagerSettingsWrapper{Settings: managerSettings},
 	}
+}
+
+func (m *Manager) RegisterWebhookHandler(handler WebhookHandler) {
+	m.webhookHandlers = append(m.webhookHandlers, handler)
 }
 
 func (m *Manager) Run(ctx context.Context) error {
@@ -152,7 +98,7 @@ func (m *Manager) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to connect Slack client: %w", err)
 	}
 
-	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.cacheStore, m.logger, m.metrics, m.cfg, m.managerSettings)
+	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.cacheStore, m.logger, m.metrics, m.webhookHandlers, m.cfg, m.managerSettings)
 
 	if err := m.coordinator.init(ctx); err != nil {
 		return fmt.Errorf("failed to initialize coordinator: %w", err)
