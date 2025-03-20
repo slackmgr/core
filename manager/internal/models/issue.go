@@ -130,9 +130,14 @@ func (issue *Issue) FollowUpEnabled() bool {
 
 // AddAlert adds a new alert to an existing issue.
 // Alerts that are older than the previous alert are ignored.
+// Alerts with status Resolved are ignored if the issue is already resolved.
 // This method is only relevant for issues that have follow-up enabled. For issues without follow-up, all new alerts are ignored.
 func (issue *Issue) AddAlert(alert *Alert, logger common.Logger) bool {
 	if !alert.Timestamp.After(issue.LastAlert.Timestamp) {
+		return false
+	}
+
+	if issue.IsResolved() && alert.Severity == common.AlertResolved {
 		return false
 	}
 
