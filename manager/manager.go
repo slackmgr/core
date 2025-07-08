@@ -23,6 +23,7 @@ type Manager struct {
 	alertQueue      FifoQueue
 	commandQueue    FifoQueue
 	cacheStore      store.StoreInterface
+	locker          Locker
 	logger          common.Logger
 	metrics         common.Metrics
 	webhookHandlers []WebhookHandler
@@ -30,7 +31,7 @@ type Manager struct {
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
+func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, locker Locker, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
 	if cacheStore == nil {
 		gocacheClient := gocache.New(5*time.Minute, time.Minute)
 		cacheStore = gocache_store.NewGoCache(gocacheClient)
@@ -49,6 +50,7 @@ func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.S
 		alertQueue:      alertQueue,
 		commandQueue:    commandQueue,
 		cacheStore:      cacheStore,
+		locker:          locker,
 		logger:          logger,
 		metrics:         metrics,
 		cfg:             cfg,
@@ -99,7 +101,7 @@ func (m *Manager) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to connect Slack client: %w", err)
 	}
 
-	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.cacheStore, m.logger, m.metrics, m.webhookHandlers, m.cfg, m.managerSettings)
+	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.cacheStore, m.locker, m.logger, m.metrics, m.webhookHandlers, m.cfg, m.managerSettings)
 
 	if err := m.coordinator.init(ctx); err != nil {
 		return fmt.Errorf("failed to initialize coordinator: %w", err)

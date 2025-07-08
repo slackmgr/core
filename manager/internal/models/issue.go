@@ -103,13 +103,17 @@ func NewIssue(alert *Alert, logger common.Logger) *Issue {
 	return &issue
 }
 
-// DedupID returns the ID of the Issue (for database/storage purposes)
-func (issue *Issue) DedupID() string {
+// UniqueID returns the ID of the Issue (for database/storage purposes)
+func (issue *Issue) UniqueID() string {
 	return issue.ID
 }
 
 func (issue *Issue) IsOpen() bool {
 	return !issue.Archived
+}
+
+func (issue *Issue) GetCorrelationID() string {
+	return issue.CorrelationID
 }
 
 func (issue *Issue) SlackChannelID() string {

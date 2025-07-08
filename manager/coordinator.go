@@ -22,17 +22,18 @@ type coordinator struct {
 	alertQueue               FifoQueue
 	slack                    *slack.Client
 	cacheStore               store.StoreInterface
+	locker                   Locker
 	logger                   common.Logger
 	metrics                  common.Metrics
 	webhookHandlers          []WebhookHandler
 	cfg                      *config.ManagerConfig
 	managerSettings          *models.ManagerSettingsWrapper
-	mappingsLock             *sync.Mutex
-	moveRequestCh            chan *models.MoveRequest
-	moveMappings             map[string]map[string]*models.MoveMapping
+	// mappingsLock             *sync.Mutex
+	moveRequestCh chan *models.MoveRequest
+	// moveMappings             map[string]map[string]*models.MoveMapping
 }
 
-func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *coordinator {
+func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, cacheStore store.StoreInterface, locker Locker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *coordinator {
 	return &coordinator{
 		channelManagers:          make(map[string]*channelManager),
 		channelManagersWaitGroup: &sync.WaitGroup{},
@@ -41,14 +42,15 @@ func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, cacheStore
 		alertQueue:               alertQueue,
 		slack:                    slack,
 		cacheStore:               cacheStore,
+		locker:                   locker,
 		logger:                   logger,
 		metrics:                  metrics,
 		cfg:                      cfg,
 		webhookHandlers:          webhookHandlers,
 		managerSettings:          managerSettings,
-		mappingsLock:             &sync.Mutex{},
-		moveRequestCh:            make(chan *models.MoveRequest, 10),
-		moveMappings:             make(map[string]map[string]*models.MoveMapping),
+		// mappingsLock:             &sync.Mutex{},
+		moveRequestCh: make(chan *models.MoveRequest, 10),
+		// moveMappings:             make(map[string]map[string]*models.MoveMapping),
 	}
 }
 
@@ -61,16 +63,16 @@ func (c *coordinator) init(ctx context.Context) error {
 
 	issues := make(map[string][]*models.Issue)
 
-	for id, body := range issueBodies {
+	for _, body := range issueBodies {
 		issue := &models.Issue{}
 
 		if err := json.Unmarshal(body, issue); err != nil {
-			return fmt.Errorf("failed to unmarshal issue %s: %w", id, err)
+			return fmt.Errorf("failed to unmarshal issue: %w", err)
 		}
 
 		// Sanity check: we asked the database for non-archived issues, but we should check that the filter actually worked
 		if issue.Archived {
-			return fmt.Errorf("database filter failed when loading active issues: issue %s is archived", id)
+			return fmt.Errorf("database filter failed when loading active issues: issue %s is archived", issue.UniqueID())
 		}
 
 		issues[issue.SlackChannelID()] = append(issues[issue.SlackChannelID()], issue)
@@ -180,7 +182,7 @@ func (c *coordinator) handleMoveRequest(ctx context.Context, request *models.Mov
 	moveMapping := models.NewMoveMapping(issue.CorrelationID, issue.OriginalSlackChannelID(), request.TargetChannel)
 
 	// Save information about the move, so that future alerts are routed correctly
-	if err := c.addMoveMapping(ctx, moveMapping); err != nil {
+	if err := c.saveMoveMapping(ctx, moveMapping); err != nil {
 		return fmt.Errorf("failed to register move mapping from %s to %s: %w", moveMapping.OriginalChannelID, moveMapping.TargetChannelID, err)
 	}
 
@@ -206,34 +208,51 @@ func (c *coordinator) handleMoveRequest(ctx context.Context, request *models.Mov
 
 // findMoveMapping finds a move mapping for the specified channel and correlation ID, if it exists.
 func (c *coordinator) findMoveMapping(ctx context.Context, channelID, correlationID string) (*models.MoveMapping, bool, error) {
-	c.mappingsLock.Lock()
-	defer c.mappingsLock.Unlock()
+	// c.mappingsLock.Lock()
+	// defer c.mappingsLock.Unlock()
 
-	moveMappingsForChannel, err := c.getOrCreateMoveMappingsForChannel(ctx, channelID)
+	// moveMappingsForChannel, err := c.getOrCreateMoveMappingsForChannel(ctx, channelID)
+	// if err != nil {
+	// 	return nil, false, fmt.Errorf("failed to get move mappings for channel %s: %w", channelID, err)
+	// }
+
+	// if mapping, ok := moveMappingsForChannel[correlationID]; ok {
+	// 	return mapping, true, nil
+	// }
+
+	// return nil, false, nil
+
+	moveMappingBody, err := c.db.FindMoveMapping(ctx, channelID, correlationID)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to get move mappings for channel %s: %w", channelID, err)
+		return nil, false, fmt.Errorf("failed to find move mapping for channel %s and correlation ID %s: %w", channelID, correlationID, err)
 	}
 
-	if mapping, ok := moveMappingsForChannel[correlationID]; ok {
-		return mapping, true, nil
+	if moveMappingBody == nil {
+		return nil, false, nil
 	}
 
-	return nil, false, nil
+	moveMapping := &models.MoveMapping{}
+
+	if err := json.Unmarshal(moveMappingBody, moveMapping); err != nil {
+		return nil, false, fmt.Errorf("failed to unmarshal move mapping for channel %s and correlation ID %s: %w", channelID, correlationID, err)
+	}
+
+	return moveMapping, true, nil
 }
 
-// addMoveMapping adds a new move mapping to the settings database (and the local cache).
-func (c *coordinator) addMoveMapping(ctx context.Context, mapping *models.MoveMapping) error {
-	c.mappingsLock.Lock()
-	defer c.mappingsLock.Unlock()
+// saveMoveMapping saves a move mapping to the database.
+func (c *coordinator) saveMoveMapping(ctx context.Context, mapping *models.MoveMapping) error {
+	// c.mappingsLock.Lock()
+	// defer c.mappingsLock.Unlock()
 
-	moveMappingsForChannel, err := c.getOrCreateMoveMappingsForChannel(ctx, mapping.OriginalChannelID)
-	if err != nil {
-		return err
-	}
+	// moveMappingsForChannel, err := c.getOrCreateMoveMappingsForChannel(ctx, mapping.OriginalChannelID)
+	// if err != nil {
+	// 	return err
+	// }
 
-	moveMappingsForChannel[mapping.CorrelationID] = mapping
+	// moveMappingsForChannel[mapping.CorrelationID] = mapping
 
-	if err := c.db.SaveMoveMapping(ctx, mapping.OriginalChannelID, mapping); err != nil {
+	if err := c.db.CreateOrUpdateMoveMapping(ctx, mapping.OriginalChannelID, mapping); err != nil {
 		return err
 	}
 
@@ -242,51 +261,51 @@ func (c *coordinator) addMoveMapping(ctx context.Context, mapping *models.MoveMa
 	return nil
 }
 
-// getOrCreateMoveMappingsForChannel gets the move mappings for the specified channel, either from the local cache or from the settings database.
-// The caller of this function must lock c.mappingsLock!
-func (c *coordinator) getOrCreateMoveMappingsForChannel(ctx context.Context, channelID string) (map[string]*models.MoveMapping, error) {
-	mappings, found := c.moveMappings[channelID]
+// // getOrCreateMoveMappingsForChannel gets the move mappings for the specified channel, either from the local cache or from the settings database.
+// // The caller of this function must lock c.mappingsLock!
+// func (c *coordinator) getOrCreateMoveMappingsForChannel(ctx context.Context, channelID string) (map[string]*models.MoveMapping, error) {
+// 	mappings, found := c.moveMappings[channelID]
 
-	if found {
-		return mappings, nil
-	}
+// 	if found {
+// 		return mappings, nil
+// 	}
 
-	mappingsList, err := c.db.LoadMoveMappings(ctx, channelID)
-	if err != nil {
-		return nil, err
-	}
+// 	mappingsList, err := c.db.LoadMoveMappings(ctx, channelID)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 
-	mappings = make(map[string]*models.MoveMapping, len(mappingsList))
+// 	mappings = make(map[string]*models.MoveMapping, len(mappingsList))
 
-	for _, body := range mappingsList {
-		mapping := &models.MoveMapping{}
+// 	for _, body := range mappingsList {
+// 		mapping := &models.MoveMapping{}
 
-		if err := json.Unmarshal(body, mapping); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal move mapping: %w", err)
-		}
+// 		if err := json.Unmarshal(body, mapping); err != nil {
+// 			return nil, fmt.Errorf("failed to unmarshal move mapping: %w", err)
+// 		}
 
-		// Sanity check
-		if mapping.OriginalChannelID != channelID {
-			return nil, fmt.Errorf("move mapping for channel %s has incorrect original channel ID %s", channelID, mapping.OriginalChannelID)
-		}
+// 		// Sanity check
+// 		if mapping.OriginalChannelID != channelID {
+// 			return nil, fmt.Errorf("move mapping for channel %s has incorrect original channel ID %s", channelID, mapping.OriginalChannelID)
+// 		}
 
-		if mapping.CorrelationID == "" {
-			return nil, fmt.Errorf("move mapping for channel %s has empty correlation ID", channelID)
-		}
+// 		if mapping.CorrelationID == "" {
+// 			return nil, fmt.Errorf("move mapping for channel %s has empty correlation ID", channelID)
+// 		}
 
-		if mapping.TargetChannelID == "" {
-			return nil, fmt.Errorf("move mapping for channel %s has empty target channel ID", channelID)
-		}
+// 		if mapping.TargetChannelID == "" {
+// 			return nil, fmt.Errorf("move mapping for channel %s has empty target channel ID", channelID)
+// 		}
 
-		mappings[mapping.CorrelationID] = mapping
-	}
+// 		mappings[mapping.CorrelationID] = mapping
+// 	}
 
-	c.moveMappings[channelID] = mappings
+// 	c.moveMappings[channelID] = mappings
 
-	c.logger.WithField("slack_channel_id", channelID).WithField("count", len(mappings)).Info("Loaded move mappings")
+// 	c.logger.WithField("slack_channel_id", channelID).WithField("count", len(mappings)).Info("Loaded move mappings")
 
-	return mappings, err
-}
+// 	return mappings, err
+// }
 
 // findOrCreateChannelManager finds an existing channel manager, or creates a new.
 func (c *coordinator) findOrCreateChannelManager(ctx context.Context, channelID string, existingIssues ...*models.Issue) (*channelManager, error) {
@@ -303,7 +322,7 @@ func (c *coordinator) findOrCreateChannelManager(ctx context.Context, channelID 
 		return manager, nil
 	}
 
-	manager := newChannelManager(channelID, c.slack, c.db, c.moveRequestCh, c.cacheStore, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings)
+	manager := newChannelManager(channelID, c.slack, c.db, c.moveRequestCh, c.cacheStore, c.locker, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings)
 
 	if err := manager.init(ctx, existingIssues); err != nil {
 		return nil, fmt.Errorf("failed to initialize channel manager: %w", err)
@@ -353,5 +372,5 @@ func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.
 		return fmt.Errorf("failed to marshal alert: %w", err)
 	}
 
-	return c.alertQueue.Send(ctx, alert.SlackChannelID, alert.DedupID(), string(body))
+	return c.alertQueue.Send(ctx, alert.SlackChannelID, alert.UniqueID(), string(body))
 }

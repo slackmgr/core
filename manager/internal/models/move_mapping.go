@@ -25,9 +25,8 @@ func NewMoveMapping(correlationID, originalChannelID, targetChannelID string) *M
 	}
 }
 
-// DedupID returns the ID of the MoveMapping (for database/storage purposes)
-func (m *MoveMapping) DedupID() string {
-	return m.ID
+func (m *MoveMapping) GetCorrelationID() string {
+	return m.CorrelationID
 }
 
 func (m *MoveMapping) MarshalJSON() ([]byte, error) {

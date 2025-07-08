@@ -318,7 +318,7 @@ func (s *Server) queueAlert(ctx context.Context, alert *common.Alert) error {
 		return fmt.Errorf("failed to marshal alert: %w", err)
 	}
 
-	if err := s.alertQueue.Send(ctx, alert.SlackChannelID, alert.DedupID(), string(body)); err != nil {
+	if err := s.alertQueue.Send(ctx, alert.SlackChannelID, alert.UniqueID(), string(body)); err != nil {
 		return fmt.Errorf("failed to send message to queue: %w", err)
 	}
 
