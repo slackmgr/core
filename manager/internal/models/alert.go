@@ -13,6 +13,7 @@ import (
 type Alert struct {
 	commonlib.Alert
 	message
+
 	SlackChannelName       string `json:"slackChannelName"`
 	OriginalSlackChannelID string `json:"originalSlackChannelId"`
 	OriginalText           string `json:"originalText"`

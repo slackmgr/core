@@ -24,6 +24,7 @@ const NA = "N/A"
 //  2. Multiple alerts, where each alert is an object in an array
 type alertsInput struct {
 	common.Alert
+
 	Alerts []*common.Alert `json:"alerts"`
 }
 

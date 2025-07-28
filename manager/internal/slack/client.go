@@ -423,11 +423,11 @@ func (c *Client) createOrUpdate(ctx context.Context, issue *models.Issue, reason
 	}
 
 	if !issue.HasSlackPost() {
-		reason = fmt.Sprintf("%s: issue has no Slack post", reason)
+		reason += ": issue has no Slack post"
 		return c.create(ctx, issue, reason, action)
 	}
 
-	reason = fmt.Sprintf("%s: issue has existing Slack post", reason)
+	reason += ": issue has existing Slack post"
 
 	return c.update(ctx, issue, reason, action)
 }
@@ -599,7 +599,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 	}
 
 	if c.managerSettings.Settings.ShowIssueCorrelationIDInSlackPost {
-		text := fmt.Sprintf("Correlation ID: %s", issue.CorrelationID)
+		text := "Correlation ID: " + issue.CorrelationID
 		fields := []slack.MixedElement{
 			slack.NewTextBlockObject("plain_text", text, false, false),
 		}

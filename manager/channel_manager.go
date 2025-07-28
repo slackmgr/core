@@ -51,7 +51,7 @@ func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveR
 	logger = logger.WithField("slack_channel_id", channelID)
 
 	if len(webhookHandlers) == 0 {
-		defaultHandler := NewHttpWebhookHandler(logger, cfg)
+		defaultHandler := NewHTTPWebhookHandler(logger, cfg)
 		webhookHandlers = append(webhookHandlers, defaultHandler)
 	}
 
@@ -282,7 +282,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	alert.SetDefaultValues(c.managerSettings.Settings)
 	alert.SlackChannelName = c.slackClient.GetChannelName(ctx, c.channelID)
 
-	if err := alert.Alert.Validate(); err != nil {
+	if err := alert.Validate(); err != nil {
 		return fmt.Errorf("alert is invalid: %w", err)
 	}
 
@@ -292,7 +292,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		logger.Errorf("Failed to clean alert escalations: %s", err)
 	}
 
-	issueBody, err := c.db.FindOpenIssueByCorrelationID(ctx, c.channelID, alert.Alert.CorrelationID)
+	issueBody, err := c.db.FindOpenIssueByCorrelationID(ctx, c.channelID, alert.CorrelationID)
 	if err != nil {
 		return fmt.Errorf("failed to find open issue by correlation ID: %w", err)
 	}

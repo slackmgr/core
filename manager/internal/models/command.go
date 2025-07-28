@@ -27,6 +27,8 @@ const (
 )
 
 type Command struct {
+	message
+
 	IDValue                 string                 `json:"id,omitempty"`
 	Timestamp               time.Time              `json:"timestamp,omitempty"`
 	SlackChannelID          string                 `json:"slackChannelId,omitempty"`
@@ -39,8 +41,6 @@ type Command struct {
 	WebhookParameters       *WebhookCommandParams  `json:"webhookParameters,omitempty"`
 	IncludeArchivedIssues   bool                   `json:"includeArchivedIssues"`
 	ExecuteWhenNoIssueFound bool                   `json:"executeWhenNoIssueFound"`
-
-	message
 }
 
 type WebhookCommandParams struct {

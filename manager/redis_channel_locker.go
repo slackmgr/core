@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/bsm/redislock"
@@ -34,7 +35,7 @@ func (r *RedisChannelLocker) WithRetryBackoff(backoff time.Duration) *RedisChann
 	return r
 }
 
-func (r *RedisChannelLocker) Obtain(ctx context.Context, key string, ttl time.Duration, maxWait time.Duration) (ChannelLock, error) {
+func (r *RedisChannelLocker) Obtain(ctx context.Context, key string, ttl time.Duration, maxWait time.Duration) (ChannelLock, error) { //nolint:ireturn
 	var retryStrategy redislock.RetryStrategy
 
 	// If maxWait is zero or less than the retry backoff, we do not retry.
@@ -53,7 +54,7 @@ func (r *RedisChannelLocker) Obtain(ctx context.Context, key string, ttl time.Du
 
 	lock, err := r.client.Obtain(ctx, key, ttl, opts)
 	if err != nil {
-		if err == redislock.ErrNotObtained {
+		if errors.Is(err, redislock.ErrNotObtained) {
 			return nil, ErrChannelLockUnavailable
 		}
 		return nil, err
@@ -67,8 +68,10 @@ func (l *RedisChannelLock) Release(ctx context.Context) error {
 		return nil
 	}
 
-	if err := l.lock.Release(ctx); err != nil && err != redislock.ErrLockNotHeld {
-		return err
+	if err := l.lock.Release(ctx); err != nil {
+		if !errors.Is(err, redislock.ErrLockNotHeld) {
+			return err
+		}
 	}
 
 	l.lock = nil

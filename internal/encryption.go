@@ -82,7 +82,12 @@ func DecryptWebhookPayload(w *common.Webhook, key []byte) (map[string]interface{
 		return map[string]interface{}{}, nil
 	}
 
-	encryptedData, err := base64.StdEncoding.DecodeString(encryptedDataBase64.(string))
+	encryptedDataBase64Str, ok := encryptedDataBase64.(string)
+	if !ok {
+		return nil, fmt.Errorf("expected __encrypted_data to be a string, got %T", encryptedDataBase64)
+	}
+
+	encryptedData, err := base64.StdEncoding.DecodeString(encryptedDataBase64Str)
 	if err != nil {
 		return nil, err
 	}

@@ -115,7 +115,7 @@ type ManagerSettings struct {
 	// ShowIssueCorrelationIDInSlackPost is a flag that determines whether the issue correlation ID should be shown in the Slack post.
 	// If set to true, the issue correlation ID is shown in the post footer.
 	// If set to false, the issue correlation ID is not shown (but can be found under Issue Details).
-	ShowIssueCorrelationIDInSlackPost bool `json:"showIssueCorrelationIDInSlackPost" yaml:"showIssueCorrelationIDInSlackPost"`
+	ShowIssueCorrelationIDInSlackPost bool `json:"showIssueCorrelationIdInSlackPost" yaml:"showIssueCorrelationIdInSlackPost"`
 
 	// DocsURL is the URL to the Slack Manager documentation (if any).
 	DocsURL string `json:"docsUrl" yaml:"docsUrl"`

@@ -54,41 +54,6 @@ func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, cacheStore
 	}
 }
 
-func (c *coordinator) init(ctx context.Context) error {
-	// Load all active issues from the database (i.e. issues that are not archived)
-	issueBodies, err := c.db.LoadOpenIssues(ctx)
-	if err != nil {
-		return err
-	}
-
-	issues := make(map[string][]*models.Issue)
-
-	for _, body := range issueBodies {
-		issue := &models.Issue{}
-
-		if err := json.Unmarshal(body, issue); err != nil {
-			return fmt.Errorf("failed to unmarshal issue: %w", err)
-		}
-
-		// Sanity check: we asked the database for non-archived issues, but we should check that the filter actually worked
-		if issue.Archived {
-			return fmt.Errorf("database filter failed when loading active issues: issue %s is archived", issue.UniqueID())
-		}
-
-		issues[issue.SlackChannelID()] = append(issues[issue.SlackChannelID()], issue)
-	}
-
-	for channelID, channelIssues := range issues {
-		if _, err := c.findOrCreateChannelManager(ctx, channelID, channelIssues...); err != nil {
-			return fmt.Errorf("failed to find or create channel manager for channel %s: %w", channelID, err)
-		}
-	}
-
-	c.logger.Infof("Coordinator initialized with %d issue(s) in %d channel(s)", len(issueBodies), len(c.channelManagers))
-
-	return nil
-}
-
 func (c *coordinator) Run(ctx context.Context) error {
 	c.logger.Info("Channel coordinator started")
 	defer c.logger.Info("Channel coordinator exited")
@@ -174,6 +139,41 @@ func (c *coordinator) FindIssueBySlackPost(ctx context.Context, channelID string
 	}
 
 	return issue
+}
+
+func (c *coordinator) init(ctx context.Context) error {
+	// Load all active issues from the database (i.e. issues that are not archived)
+	issueBodies, err := c.db.LoadOpenIssues(ctx)
+	if err != nil {
+		return err
+	}
+
+	issues := make(map[string][]*models.Issue)
+
+	for _, body := range issueBodies {
+		issue := &models.Issue{}
+
+		if err := json.Unmarshal(body, issue); err != nil {
+			return fmt.Errorf("failed to unmarshal issue: %w", err)
+		}
+
+		// Sanity check: we asked the database for non-archived issues, but we should check that the filter actually worked
+		if issue.Archived {
+			return fmt.Errorf("database filter failed when loading active issues: issue %s is archived", issue.UniqueID())
+		}
+
+		issues[issue.SlackChannelID()] = append(issues[issue.SlackChannelID()], issue)
+	}
+
+	for channelID, channelIssues := range issues {
+		if _, err := c.findOrCreateChannelManager(ctx, channelID, channelIssues...); err != nil {
+			return fmt.Errorf("failed to find or create channel manager for channel %s: %w", channelID, err)
+		}
+	}
+
+	c.logger.Infof("Coordinator initialized with %d issue(s) in %d channel(s)", len(issueBodies), len(c.channelManagers))
+
+	return nil
 }
 
 func (c *coordinator) handleMoveRequest(ctx context.Context, request *models.MoveRequest) error {

@@ -15,7 +15,7 @@ type HTTPWebhookHandler struct {
 	client *resty.Client
 }
 
-func NewHttpWebhookHandler(logger common.Logger, cfg *config.ManagerConfig) *HTTPWebhookHandler {
+func NewHTTPWebhookHandler(logger common.Logger, cfg *config.ManagerConfig) *HTTPWebhookHandler {
 	restyLogger := newRestyLogger(logger)
 
 	client := resty.New().

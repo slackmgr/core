@@ -215,6 +215,22 @@ func (s *Server) Run(ctx context.Context) error {
 	return nil
 }
 
+func (s *Server) UpdateSettings(settings *config.APISettings) error {
+	if settings == nil {
+		settings = &config.APISettings{}
+	}
+
+	if err := settings.InitAndValidate(s.logger); err != nil {
+		return fmt.Errorf("failed to initialize updated API settings (the existing settings will continue to be used): %w", err)
+	}
+
+	s.apiSettings = settings
+
+	s.logger.Infof("API settings updated")
+
+	return nil
+}
+
 func (s *Server) runRawAlertConsumer(ctx context.Context) error {
 	s.logger.Info("Starting raw alert consumer")
 	defer s.logger.Info("Raw alert consumer exited")
@@ -259,22 +275,6 @@ func (s *Server) runRawAlertConsumer(ctx context.Context) error {
 	})
 
 	return errg.Wait()
-}
-
-func (s *Server) UpdateSettings(settings *config.APISettings) error {
-	if settings == nil {
-		settings = &config.APISettings{}
-	}
-
-	if err := settings.InitAndValidate(s.logger); err != nil {
-		return fmt.Errorf("failed to initialize updated API settings (the existing settings will continue to be used): %w", err)
-	}
-
-	s.apiSettings = settings
-
-	s.logger.Infof("API settings updated")
-
-	return nil
 }
 
 func (s *Server) writeErrorResponse(ctx context.Context, clientErr error, statusCode int, debugText map[string]string, targetChannel string, resp http.ResponseWriter, req *http.Request, started time.Time) {
@@ -389,16 +389,4 @@ func (s *Server) getRequestTimeout() time.Duration {
 	)
 
 	return time.Duration(timeoutSeconds+1) * time.Second
-}
-
-func max(values ...int) int {
-	max := 0
-
-	for _, v := range values {
-		if v > max {
-			max = v
-		}
-	}
-
-	return max
 }
