@@ -23,7 +23,7 @@ type Manager struct {
 	alertQueue      FifoQueue
 	commandQueue    FifoQueue
 	cacheStore      store.StoreInterface
-	locker          Locker
+	locker          ChannelLocker
 	logger          common.Logger
 	metrics         common.Metrics
 	webhookHandlers []WebhookHandler
@@ -31,7 +31,7 @@ type Manager struct {
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, locker Locker, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
+func New(db DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, locker ChannelLocker, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
 	if cacheStore == nil {
 		gocacheClient := gocache.New(5*time.Minute, time.Minute)
 		cacheStore = gocache_store.NewGoCache(gocacheClient)

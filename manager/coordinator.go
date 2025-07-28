@@ -22,7 +22,7 @@ type coordinator struct {
 	alertQueue               FifoQueue
 	slack                    *slack.Client
 	cacheStore               store.StoreInterface
-	locker                   Locker
+	locker                   ChannelLocker
 	logger                   common.Logger
 	metrics                  common.Metrics
 	webhookHandlers          []WebhookHandler
@@ -33,7 +33,7 @@ type coordinator struct {
 	// moveMappings             map[string]map[string]*models.MoveMapping
 }
 
-func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, cacheStore store.StoreInterface, locker Locker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *coordinator {
+func newCoordinator(db DB, alertQueue FifoQueue, slack *slack.Client, cacheStore store.StoreInterface, locker ChannelLocker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *coordinator {
 	return &coordinator{
 		channelManagers:          make(map[string]*channelManager),
 		channelManagersWaitGroup: &sync.WaitGroup{},

@@ -3,6 +3,7 @@ module github.com/peteraglen/slack-manager
 go 1.22
 
 require (
+	github.com/bsm/redislock v0.9.4
 	github.com/eko/gocache/lib/v4 v4.1.6
 	github.com/eko/gocache/store/go_cache/v4 v4.2.1
 	github.com/go-resty/resty/v2 v2.12.0
@@ -10,6 +11,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/peteraglen/slack-manager-common v0.0.27-rc.4
+	github.com/redis/go-redis/v9 v9.11.0
 	github.com/segmentio/ksuid v1.0.4
 	github.com/slack-go/slack v0.12.5
 	github.com/stretchr/testify v1.9.0
@@ -19,8 +21,9 @@ require (
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/cespare/xxhash/v2 v2.2.0 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect

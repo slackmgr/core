@@ -27,7 +27,7 @@ type channelManager struct {
 	db              DB
 	webhookHandlers []WebhookHandler
 	// cache           *internal.Cache[string]
-	locker          Locker
+	locker          ChannelLocker
 	logger          common.Logger
 	metrics         common.Metrics
 	cfg             *config.ManagerConfig
@@ -42,7 +42,7 @@ type channelManager struct {
 }
 
 func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveRequestCh chan<- *models.MoveRequest,
-	_ store.StoreInterface, locker Locker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
+	_ store.StoreInterface, locker ChannelLocker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
 	managerSettings *models.ManagerSettingsWrapper,
 ) *channelManager {
 	// cacheKeyPrefix := cfg.CacheKeyPrefix + "channel-manager::" + channelID + "::"
@@ -101,7 +101,7 @@ func (c *channelManager) init(ctx context.Context, issues []*models.Issue) error
 
 	lock, err := c.locker.Obtain(ctx, c.channelID, time.Minute, 10*time.Second)
 	if err != nil {
-		if errors.Is(err, ErrLockUnavailable) {
+		if errors.Is(err, ErrChannelLockUnavailable) {
 			c.logger.Info("Failed to obtain lock for channel in 10 seconds - skipping channel name update on channel initialization")
 			return nil
 		}
@@ -842,7 +842,7 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 	return nil
 }
 
-func (c *channelManager) releaseLock(ctx context.Context, lock Lock) {
+func (c *channelManager) releaseLock(ctx context.Context, lock ChannelLock) {
 	if err := lock.Release(ctx); err != nil {
 		c.logger.Errorf("Failed to release lock for channel %s: %s", c.channelID, err)
 	}
