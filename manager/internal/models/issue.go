@@ -59,7 +59,7 @@ type Issue struct {
 
 // NewIssue creates a new Issue from an Alert
 func NewIssue(alert *Alert, logger common.Logger) *Issue {
-	now := time.Now()
+	now := time.Now().UTC()
 
 	issue := Issue{
 		ID:                   internal.Hash(alert.CorrelationID, alert.SlackChannelID, now.Format(time.RFC3339Nano)),
