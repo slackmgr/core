@@ -25,6 +25,10 @@ func NewMoveMapping(correlationID, originalChannelID, targetChannelID string) *M
 	}
 }
 
+func (m *MoveMapping) ChannelID() string {
+	return m.OriginalChannelID
+}
+
 func (m *MoveMapping) UniqueID() string {
 	return m.ID
 }

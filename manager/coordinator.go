@@ -162,7 +162,7 @@ func (c *coordinator) init(ctx context.Context) error {
 			return fmt.Errorf("database filter failed when loading active issues: issue %s is archived", issue.UniqueID())
 		}
 
-		issues[issue.SlackChannelID()] = append(issues[issue.SlackChannelID()], issue)
+		issues[issue.ChannelID()] = append(issues[issue.ChannelID()], issue)
 	}
 
 	for channelID, channelIssues := range issues {

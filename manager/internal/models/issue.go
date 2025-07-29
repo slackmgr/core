@@ -103,6 +103,11 @@ func NewIssue(alert *Alert, logger common.Logger) *Issue {
 	return &issue
 }
 
+// ChannelID returns the Slack channel ID that this issue belongs to
+func (issue *Issue) ChannelID() string {
+	return issue.LastAlert.SlackChannelID
+}
+
 // UniqueID returns the ID of the Issue (for database/storage purposes)
 func (issue *Issue) UniqueID() string {
 	return issue.ID
@@ -114,10 +119,6 @@ func (issue *Issue) IsOpen() bool {
 
 func (issue *Issue) GetCorrelationID() string {
 	return issue.CorrelationID
-}
-
-func (issue *Issue) SlackChannelID() string {
-	return issue.LastAlert.SlackChannelID
 }
 
 func (issue *Issue) OriginalSlackChannelID() string {
@@ -516,7 +517,7 @@ func (issue *Issue) ApplyEscalationRules() *EscalationResult {
 	issue.LastAlert.Severity = escalation.Severity
 
 	// Register the new channel to move the issue to, if applicable
-	if escalation.MoveToChannel != "" && escalation.MoveToChannel != issue.SlackChannelID() {
+	if escalation.MoveToChannel != "" && escalation.MoveToChannel != issue.ChannelID() {
 		result.MoveToChannel = escalation.MoveToChannel
 	}
 
