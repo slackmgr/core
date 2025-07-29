@@ -85,12 +85,12 @@ func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*common.Alert 
 		ignoreIfTextContains := find(promAlert.Annotations, promAlert.Labels, "ignoreiftextcontains")
 		failOnRateLimitError := find(promAlert.Annotations, promAlert.Labels, "failonratelimiterror")
 
-		// No specifig fallback text found, use the header.
+		// No specific fallback text found, use the header.
 		if fallbackText == "" {
 			fallbackText = header
 		}
 
-		// If no alert type is specified, default to "alert".
+		// If no severity is specified, default to 'error'.
 		// Replace 'critical' with 'error'.
 		if severityString == "critical" || severityString == "" {
 			severityString = "error"
