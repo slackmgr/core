@@ -216,19 +216,7 @@ func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, chan
 }
 
 func (d *dbCacheMiddleware) DropAllData(ctx context.Context) error {
-	if err := d.issueHashCache.Clear(ctx); err != nil {
-		return fmt.Errorf("failed to clear issue hash cache: %w", err)
-	}
-
-	if err := d.channelProcessingStateCache.Clear(ctx); err != nil {
-		return fmt.Errorf("failed to clear channel processing state cache: %w", err)
-	}
-
-	if err := d.moveMappingCache.Clear(ctx); err != nil {
-		return fmt.Errorf("failed to clear move mapping cache: %w", err)
-	}
-
-	return d.db.DropAllData(ctx)
+	return errors.New("dbCacheMiddleware does not support the DropAllData method")
 }
 
 // moveMappingCacheKey generates a cache key for the move mapping based on channel ID and correlation ID.

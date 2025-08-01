@@ -10,13 +10,11 @@ import (
 	"github.com/eko/gocache/lib/v4/cache"
 	"github.com/eko/gocache/lib/v4/store"
 	common "github.com/peteraglen/slack-manager-common"
-	"github.com/segmentio/ksuid"
 )
 
 type Cache[T any] struct {
 	cache     cache.CacheInterface[T]
 	keyPrefix string
-	itemTags  []string
 	logger    common.Logger
 	rng       *rand.Rand
 }
@@ -27,7 +25,6 @@ func NewCache[T any](cacheStore store.StoreInterface, keyPrefix string, logger c
 	return &Cache[T]{
 		cache:     cache.New[T](cacheStore),
 		keyPrefix: keyPrefix,
-		itemTags:  []string{ksuid.New().String()},
 		logger:    logger,
 		rng:       rand.New(rand.NewSource(time.Now().UnixNano())), // #nosec
 	}
@@ -60,7 +57,7 @@ func (c *Cache[T]) Get(ctx context.Context, key string) (T, bool) {
 func (c *Cache[T]) Set(ctx context.Context, key string, value T, expiration time.Duration) {
 	key = c.keyPrefix + key
 
-	if err := c.cache.Set(ctx, key, value, store.WithExpiration(expiration), store.WithTags(c.itemTags)); err != nil {
+	if err := c.cache.Set(ctx, key, value, store.WithExpiration(expiration)); err != nil {
 		c.logger.Errorf("Cache write failed: %s", err)
 	}
 }
@@ -81,7 +78,7 @@ func (c *Cache[T]) SetWithRandomExpiration(ctx context.Context, key string, valu
 		expiration += (time.Duration(extra) * time.Second)
 	}
 
-	if err := c.cache.Set(ctx, key, value, store.WithExpiration(expiration), store.WithTags(c.itemTags)); err != nil {
+	if err := c.cache.Set(ctx, key, value, store.WithExpiration(expiration)); err != nil {
 		c.logger.Errorf("Cache write failed: %s", err)
 	}
 }
@@ -94,15 +91,6 @@ func (c *Cache[T]) Delete(ctx context.Context, key string) error {
 
 	if err := c.cache.Delete(ctx, key); err != nil {
 		return fmt.Errorf("cache delete failed: %w", err)
-	}
-
-	return nil
-}
-
-// Clear invalidates all cache items that have been stored by this particular cache instance.
-func (c *Cache[T]) Clear(ctx context.Context) error {
-	if err := c.cache.Invalidate(ctx, store.WithInvalidateTags(c.itemTags)); err != nil {
-		return fmt.Errorf("cache clear failed: %w", err)
 	}
 
 	return nil
