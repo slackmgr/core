@@ -185,6 +185,10 @@ func (d *dbCacheMiddleware) FindMoveMapping(ctx context.Context, channelID, corr
 }
 
 func (d *dbCacheMiddleware) SaveChannelProcessingState(ctx context.Context, state *common.ChannelProcessingState) error {
+	if state == nil {
+		return errors.New("channel processing state cannot be nil")
+	}
+
 	if err := d.db.SaveChannelProcessingState(ctx, state); err != nil {
 		return err
 	}
@@ -204,7 +208,9 @@ func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, chan
 		return nil, err
 	}
 
-	d.channelProcessingStateCache.Set(ctx, channelID, state, 24*time.Hour)
+	if state != nil {
+		d.channelProcessingStateCache.Set(ctx, channelID, state, 24*time.Hour)
+	}
 
 	return state, nil
 }
