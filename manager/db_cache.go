@@ -215,7 +215,7 @@ func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, chan
 	return state, nil
 }
 
-func (d *dbCacheMiddleware) DropAllData(ctx context.Context) error {
+func (d *dbCacheMiddleware) DropAllData(_ context.Context) error {
 	return errors.New("dbCacheMiddleware does not support the DropAllData method")
 }
 
