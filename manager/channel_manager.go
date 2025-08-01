@@ -436,6 +436,10 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		return fmt.Errorf("failed to find channel processing state: %w", err)
 	}
 
+	if processingState == nil {
+		processingState = common.NewChannelProcessingState(c.channelID)
+	}
+
 	// Skip processing if the last processing time is within the min interval.
 	if time.Since(processingState.LastProcessed) < minInterval {
 		c.logger.WithField("last_processed", processingState.LastProcessed).Debug("Skipping issue processing due to recent processing by other manager")
