@@ -43,7 +43,7 @@ type Client struct {
 func New(cacheStore cachestore.StoreInterface, cacheKeyPrefix string, logger commonlib.Logger, metrics commonlib.Metrics, cfg *config.SlackClientConfig) *Client {
 	cfg.SetDefaults()
 
-	cacheKeyPrefix += "slack-api-client::"
+	cacheKeyPrefix += "slack-api-client:"
 	cache := internal.NewCache[string](cacheStore, cacheKeyPrefix, logger)
 
 	return &Client{
@@ -282,7 +282,7 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := "GetChannelInfo::" + channelID
+	cacheKey := "GetChannelInfo:" + channelID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
@@ -409,7 +409,7 @@ func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := "GetUserInfo::" + userID
+	cacheKey := "GetUserInfo:" + userID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
@@ -452,7 +452,7 @@ func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := "ListUserGroupMembers::" + groupID
+	cacheKey := "ListUserGroupMembers:" + groupID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
@@ -504,7 +504,7 @@ func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 
 	c.metrics.AddToCounter(slackRequestMetric, 1, action)
 
-	cacheKey := "GetUserIDsInChannel::" + channelID
+	cacheKey := "GetUserIDsInChannel:" + channelID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
@@ -566,7 +566,7 @@ func (c *Client) BotIsInChannel(ctx context.Context, channelID string) (bool, er
 		return false, errors.New("channelID cannot be empty")
 	}
 
-	cacheKey := "BotIsInChannel::" + channelID
+	cacheKey := "BotIsInChannel:" + channelID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		return val == "true", nil

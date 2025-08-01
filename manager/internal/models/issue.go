@@ -55,6 +55,12 @@ type Issue struct {
 	MutedSince                time.Time     `json:"mutedSince"`
 	MovedByUser               string        `json:"movedByUser"`
 	IsEscalated               bool          `json:"isEscalated"`
+
+	// cachedJSONBody is used to store the raw JSON body of the issue, after marshalling.
+	// This is used to avoid marshalling in both the database cache middleware and the database driver.
+	// The middleware uses the MarshalJSONAndCache method to marshal the issue and store the raw JSON body in this field,
+	// and MUST then call ResetCachedJSONBody to reset the cachedJSONBody field before returning.
+	cachedJSONBody json.RawMessage `json:"-"`
 }
 
 // NewIssue creates a new Issue from an Alert
@@ -550,6 +556,11 @@ func (issue *Issue) FindWebhook(id string) *common.Webhook {
 }
 
 func (issue *Issue) MarshalJSON() ([]byte, error) {
+	// If the cached JSON body is set, return it directly to avoid re-marshalling
+	if issue.cachedJSONBody != nil {
+		return issue.cachedJSONBody, nil
+	}
+
 	type Alias Issue
 
 	return json.Marshal(&struct {
@@ -557,6 +568,21 @@ func (issue *Issue) MarshalJSON() ([]byte, error) {
 	}{
 		Alias: (*Alias)(issue),
 	})
+}
+
+func (issue *Issue) MarshalJSONAndCache() ([]byte, error) {
+	data, err := issue.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+
+	issue.cachedJSONBody = data
+
+	return data, nil
+}
+
+func (issue *Issue) ResetCachedJSONBody() {
+	issue.cachedJSONBody = nil
 }
 
 func (issue *Issue) setArchivingTime() {

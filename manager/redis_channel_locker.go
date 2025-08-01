@@ -9,22 +9,41 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
+// RedisChannelLocker is an implementation of the ChannelLocker interface that uses Redis for distributed locking.
+// It allows multiple instances of the manager to coordinate access to channels, ensuring that only one instance can perform
+// operations on a channel at a time.
+// The locker uses a key prefix to avoid conflicts with other locks in Redis.
+// It also supports retry backoff for obtaining locks, allowing for configurable retry strategies.
+// The default retry backoff is 2 seconds, but it can be configured using the WithRetryBackoff method.
 type RedisChannelLocker struct {
 	client       *redislock.Client
 	retryBackoff time.Duration
+	keyPrefix    string
 }
 
+// RedisChannelLock is an implementation of the ChannelLock interface that uses Redis locks.
+// It represents a lock on a specific channel.
+// It is returned by the RedisChannelLocker when a lock is successfully obtained.
+// The lock can be released using the Release method, which will remove the lock from Redis.
 type RedisChannelLock struct {
 	lock *redislock.Lock
 }
 
+// NewRedisChannelLocker creates a new RedisChannelLocker instance.
+// It takes a Redis client as an argument, which is used to communicate with the Redis server.
+// The client should be configured with the appropriate Redis server address and authentication details.
+// The RedisChannelLocker can be configured with a custom retry backoff and key prefix using the WithRetryBackoff and WithKeyPrefix methods.
+// If no custom values are provided, it defaults to a retry backoff of 2 seconds and a key prefix of "slack-manager:channel-lock:".
 func NewRedisChannelLocker(client *redis.Client) *RedisChannelLocker {
 	return &RedisChannelLocker{
 		client:       redislock.New(client),
 		retryBackoff: 2 * time.Second,
+		keyPrefix:    "slack-manager:channel-lock:",
 	}
 }
 
+// WithRetryBackoff sets the retry backoff duration for obtaining locks.
+// If the backoff is less than or equal to zero, it defaults to 2 seconds.
 func (r *RedisChannelLocker) WithRetryBackoff(backoff time.Duration) *RedisChannelLocker {
 	if backoff <= 0 {
 		backoff = 2 * time.Second
@@ -35,6 +54,20 @@ func (r *RedisChannelLocker) WithRetryBackoff(backoff time.Duration) *RedisChann
 	return r
 }
 
+// WithKeyPrefix sets the Redis key prefix for the locks.
+// The default prefix is "slack-manager:channel-lock:".
+// This prefix is used to avoid conflicts with other keys in Redis.
+// An empty prefix means that the locks will have keys equal to the Slack channel ID.
+func (r *RedisChannelLocker) WithKeyPrefix(prefix string) *RedisChannelLocker {
+	r.keyPrefix = prefix
+	return r
+}
+
+// Obtain tries to obtain a lock for the given key (channel ID) with a specified TTL (time to live).
+// It uses a retry strategy based on the configured retry backoff and max wait duration.
+// If the lock is successfully obtained, it returns a RedisChannelLock instance.
+// If the lock cannot be obtained within the max wait duration, it returns ErrChannelLockUnavailable.
+// The key is prefixed with the configured key prefix to avoid conflicts with other locks in Redis.
 func (r *RedisChannelLocker) Obtain(ctx context.Context, key string, ttl time.Duration, maxWait time.Duration) (ChannelLock, error) { //nolint:ireturn
 	var retryStrategy redislock.RetryStrategy
 
@@ -52,6 +85,8 @@ func (r *RedisChannelLocker) Obtain(ctx context.Context, key string, ttl time.Du
 		RetryStrategy: retryStrategy,
 	}
 
+	key = r.keyPrefix + key
+
 	lock, err := r.client.Obtain(ctx, key, ttl, opts)
 	if err != nil {
 		if errors.Is(err, redislock.ErrNotObtained) {
@@ -63,6 +98,9 @@ func (r *RedisChannelLocker) Obtain(ctx context.Context, key string, ttl time.Du
 	return &RedisChannelLock{lock: lock}, nil
 }
 
+// Release releases the lock held by the RedisChannelLock instance.
+// It removes the lock from Redis, allowing other instances to obtain the lock.
+// If the lock is already released, or not held, it returns nil.
 func (l *RedisChannelLock) Release(ctx context.Context) error {
 	if l.lock == nil {
 		return nil

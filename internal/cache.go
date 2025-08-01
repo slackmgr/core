@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"math/rand"
 	"time"
@@ -9,24 +10,33 @@ import (
 	"github.com/eko/gocache/lib/v4/cache"
 	"github.com/eko/gocache/lib/v4/store"
 	common "github.com/peteraglen/slack-manager-common"
+	"github.com/segmentio/ksuid"
 )
 
 type Cache[T any] struct {
 	cache     cache.CacheInterface[T]
 	keyPrefix string
+	itemTags  []string
 	logger    common.Logger
 	rng       *rand.Rand
 }
 
+// NewCache creates a new Cache instance with the provided cache store, key prefix, and logger.
+// The key prefix is optional, but may be useful for namespacing cache keys.
 func NewCache[T any](cacheStore store.StoreInterface, keyPrefix string, logger common.Logger) *Cache[T] {
 	return &Cache[T]{
 		cache:     cache.New[T](cacheStore),
 		keyPrefix: keyPrefix,
+		itemTags:  []string{ksuid.New().String()},
 		logger:    logger,
 		rng:       rand.New(rand.NewSource(time.Now().UnixNano())), // #nosec
 	}
 }
 
+// Get retrieves an item from the cache with the given key.
+// If the item is not found, it returns a zero value of type T and false.
+// If an error occurs during retrieval, it logs the error and returns a zero value of type T and false.
+// Note: The key is prefixed with the cache's keyPrefix.
 func (c *Cache[T]) Get(ctx context.Context, key string) (T, bool) {
 	key = c.keyPrefix + key
 
@@ -44,14 +54,22 @@ func (c *Cache[T]) Get(ctx context.Context, key string) (T, bool) {
 	return value, true
 }
 
+// Set stores an item in the cache with the given key and expiration duration.
+// If an error occurs during storage, it logs the error.
+// Note: The key is prefixed with the cache's keyPrefix.
 func (c *Cache[T]) Set(ctx context.Context, key string, value T, expiration time.Duration) {
 	key = c.keyPrefix + key
 
-	if err := c.cache.Set(ctx, key, value, store.WithExpiration(expiration)); err != nil {
+	if err := c.cache.Set(ctx, key, value, store.WithExpiration(expiration), store.WithTags(c.itemTags)); err != nil {
 		c.logger.Errorf("Cache write failed: %s", err)
 	}
 }
 
+// SetWithRandomExpiration stores an item in the cache with a key, value, and a random expiration time.
+// The expiration time is calculated by adding a random variation to a minimum expiration duration.
+// The random variation is between 0 and the absolute value of the provided variation duration.
+// If an error occurs during storage, it logs the error.
+// Note: The key is prefixed with the cache's keyPrefix.
 func (c *Cache[T]) SetWithRandomExpiration(ctx context.Context, key string, value T, minExpiration time.Duration, variation time.Duration) {
 	key = c.keyPrefix + key
 
@@ -63,7 +81,29 @@ func (c *Cache[T]) SetWithRandomExpiration(ctx context.Context, key string, valu
 		expiration += (time.Duration(extra) * time.Second)
 	}
 
-	if err := c.cache.Set(ctx, key, value, store.WithExpiration(expiration)); err != nil {
+	if err := c.cache.Set(ctx, key, value, store.WithExpiration(expiration), store.WithTags(c.itemTags)); err != nil {
 		c.logger.Errorf("Cache write failed: %s", err)
 	}
+}
+
+// Delete removes the item from the cache with the given key.
+// This method returns an error if the deletion fails, since an explicit delete is expected to succeed.
+// Note: The key is prefixed with the cache's keyPrefix.
+func (c *Cache[T]) Delete(ctx context.Context, key string) error {
+	key = c.keyPrefix + key
+
+	if err := c.cache.Delete(ctx, key); err != nil {
+		return fmt.Errorf("cache delete failed: %w", err)
+	}
+
+	return nil
+}
+
+// Clear invalidates all cache items that have been stored by this particular cache instance.
+func (c *Cache[T]) Clear(ctx context.Context) error {
+	if err := c.cache.Invalidate(ctx, store.WithInvalidateTags(c.itemTags)); err != nil {
+		return fmt.Errorf("cache clear failed: %w", err)
+	}
+
+	return nil
 }

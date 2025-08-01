@@ -25,6 +25,6 @@ type FifoQueue interface {
 
 	// Receive receives messages from the queue, until the context is cancelled.
 	// Messages are sent to the provided channel.
-	// The channel must be closed when Receive returns.
+	// The channel must be closed by the implementation before returning, typically when the context is cancelled or a fatal error occurs.
 	Receive(ctx context.Context, sinkCh chan<- *common.FifoQueueItem) error
 }

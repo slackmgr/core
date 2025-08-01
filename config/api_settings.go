@@ -174,7 +174,7 @@ func (s *APISettings) InitAndValidate(logger common.Logger) error {
 func (s *APISettings) Match(routeKey, alertType string, logger common.Logger) (string, bool) {
 	routeKey = strings.ToLower(routeKey)
 	alertType = strings.ToLower(alertType)
-	cacheKey := routeKey + "::" + alertType
+	cacheKey := routeKey + ":" + alertType
 
 	if channel, ok := s.ruleMatchCache[cacheKey]; ok {
 		return channel, channel != ""

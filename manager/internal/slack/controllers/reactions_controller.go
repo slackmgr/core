@@ -33,7 +33,7 @@ type ReactionsController struct {
 }
 
 func NewReactionsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *ReactionsController {
-	cacheKeyPrefix := cfg.CacheKeyPrefix + "reactions-controller::"
+	cacheKeyPrefix := cfg.CacheKeyPrefix + "reactions-controller:"
 	cache := internal.NewCache[string](cacheStore, cacheKeyPrefix, logger)
 
 	c := &ReactionsController{
@@ -204,7 +204,7 @@ func (c *ReactionsController) getUserInfo(ctx context.Context, channel, userID s
 }
 
 func (c *ReactionsController) postNotAdminAlert(ctx context.Context, channel, userID, userRealName string, logger common.Logger) {
-	cacheKey := fmt.Sprintf("ReactionsController::userNotAdmin::%s::%s", channel, userID)
+	cacheKey := fmt.Sprintf("ReactionsController:userNotAdmin:%s:%s", channel, userID)
 
 	if _, ok := c.cache.Get(ctx, cacheKey); ok {
 		return

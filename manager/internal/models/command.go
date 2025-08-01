@@ -29,7 +29,6 @@ const (
 type Command struct {
 	message
 
-	IDValue                 string                 `json:"id,omitempty"`
 	Timestamp               time.Time              `json:"timestamp,omitempty"`
 	SlackChannelID          string                 `json:"slackChannelId,omitempty"`
 	SlackPostID             string                 `json:"ts,omitempty"`
@@ -66,12 +65,8 @@ func NewCommandFromQueue(queueItem *commonlib.FifoQueueItem) (Message, error) { 
 }
 
 func NewCommand(slackChannelID, ts, reaction, userID, userRealName string, action CommandAction, parameters map[string]interface{}) *Command {
-	timestamp := time.Now()
-	id := fmt.Sprintf("%s-%s", slackChannelID, timestamp.Format(time.RFC3339Nano))
-
 	return &Command{
-		IDValue:        id,
-		Timestamp:      timestamp,
+		Timestamp:      time.Now().UTC(),
 		SlackChannelID: slackChannelID,
 		SlackPostID:    ts,
 		Reaction:       reaction,
@@ -80,10 +75,6 @@ func NewCommand(slackChannelID, ts, reaction, userID, userRealName string, actio
 		Action:         action,
 		Parameters:     parameters,
 	}
-}
-
-func (c *Command) ID() string {
-	return c.IDValue
 }
 
 func (c *Command) DedupID() string {

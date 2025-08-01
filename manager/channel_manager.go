@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eko/gocache/lib/v4/store"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
@@ -21,33 +20,27 @@ const alertsTotal = "processed_alerts_total"
 type cmdFunc func(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) error
 
 type channelManager struct {
-	channelID string
-	// issueCollection *models.IssueCollection
-	slackClient     *slack.Client
-	db              DB
-	webhookHandlers []WebhookHandler
-	// cache           *internal.Cache[string]
-	locker          ChannelLocker
-	logger          common.Logger
-	metrics         common.Metrics
-	cfg             *config.ManagerConfig
-	managerSettings *models.ManagerSettingsWrapper
-	alertCh         chan *models.Alert
-	commandCh       chan *models.Command
-	movedIssueCh    chan *models.Issue
-	moveRequestCh   chan<- *models.MoveRequest
-	cmdFuncs        map[models.CommandAction]cmdFunc
-	initialized     bool
-	openIssues      int
+	channelID        string
+	slackClient      *slack.Client
+	db               common.DB
+	webhookHandlers  []WebhookHandler
+	locker           ChannelLocker
+	logger           common.Logger
+	metrics          common.Metrics
+	cfg              *config.ManagerConfig
+	managerSettings  *models.ManagerSettingsWrapper
+	alertCh          chan *models.Alert
+	commandCh        chan *models.Command
+	movedIssueCh     chan *models.Issue
+	moveRequestQueue FifoQueue
+	cmdFuncs         map[models.CommandAction]cmdFunc
+	initialized      bool
+	openIssues       int
 }
 
-func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveRequestCh chan<- *models.MoveRequest,
-	_ store.StoreInterface, locker ChannelLocker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
+func newChannelManager(channelID string, slackClient *slack.Client, db common.DB, moveRequestQueue FifoQueue, locker ChannelLocker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
 	managerSettings *models.ManagerSettingsWrapper,
 ) *channelManager {
-	// cacheKeyPrefix := cfg.CacheKeyPrefix + "channel-manager::" + channelID + "::"
-	// cache := internal.NewCache[string](cacheStore, cacheKeyPrefix, logger)
-
 	logger = logger.WithField("slack_channel_id", channelID)
 
 	if len(webhookHandlers) == 0 {
@@ -56,20 +49,19 @@ func newChannelManager(channelID string, slackClient *slack.Client, db DB, moveR
 	}
 
 	c := &channelManager{
-		channelID:     channelID,
-		slackClient:   slackClient,
-		db:            db,
-		moveRequestCh: moveRequestCh,
-		// cache:           cache,
-		locker:          locker,
-		logger:          logger,
-		metrics:         metrics,
-		webhookHandlers: webhookHandlers,
-		cfg:             cfg,
-		managerSettings: managerSettings,
-		alertCh:         make(chan *models.Alert, 1000),
-		commandCh:       make(chan *models.Command, 100),
-		movedIssueCh:    make(chan *models.Issue, 10),
+		channelID:        channelID,
+		slackClient:      slackClient,
+		db:               db,
+		moveRequestQueue: moveRequestQueue,
+		locker:           locker,
+		logger:           logger,
+		metrics:          metrics,
+		webhookHandlers:  webhookHandlers,
+		cfg:              cfg,
+		managerSettings:  managerSettings,
+		alertCh:          make(chan *models.Alert, 1000),
+		commandCh:        make(chan *models.Command, 100),
+		movedIssueCh:     make(chan *models.Issue, 10),
 	}
 
 	c.cmdFuncs = map[models.CommandAction]cmdFunc{
@@ -102,7 +94,7 @@ func (c *channelManager) init(ctx context.Context, issues []*models.Issue) error
 	lock, err := c.locker.Obtain(ctx, c.channelID, time.Minute, 10*time.Second)
 	if err != nil {
 		if errors.Is(err, ErrChannelLockUnavailable) {
-			c.logger.Info("Failed to obtain lock for channel in 10 seconds - skipping channel name update on channel initialization")
+			c.logger.Info("Failed to obtain lock for channel after 10 seconds - skipping channel name update on channel initialization")
 			return nil
 		}
 
@@ -110,8 +102,6 @@ func (c *channelManager) init(ctx context.Context, issues []*models.Issue) error
 	}
 
 	defer c.releaseLock(ctx, lock)
-
-	// c.issueCollection = models.NewIssueCollection(issues)
 
 	// The channel name may have changed since the issue(s) where created. We update where needed.
 	updated := []*models.Issue{}
@@ -186,11 +176,13 @@ func (c *channelManager) run(ctx context.Context, waitGroup *sync.WaitGroup) {
 				c.logger.WithFields(issue.LogFields()).Errorf("Failed to process incoming moved issue: %s", err)
 			}
 		case <-processorTimeout:
-			if err := c.processActiveIssues(ctx); err != nil {
+			interval := c.managerSettings.Settings.IssueProcessingInterval(c.channelID)
+
+			if err := c.processActiveIssues(ctx, interval); err != nil {
 				c.logger.Errorf("Failed to process active issues: %s", err)
 			}
 
-			processorTimeout = time.After(c.managerSettings.Settings.IssueProcessingInterval(c.channelID))
+			processorTimeout = time.After(interval)
 		}
 	}
 }
@@ -220,20 +212,9 @@ func (c *channelManager) queueMovedIssue(ctx context.Context, issue *models.Issu
 }
 
 // findIssueBySlackPost attempts to find an existing issue by the specified Slack post ID.
-// If archived issues should be included in the search, it will search the database for older issues after first searching for active issues in memory.
 // If no issue is found, nil is returned.
 func (c *channelManager) findIssueBySlackPost(ctx context.Context, slackPostID string, includeArchived bool) (*models.Issue, error) {
-	// // Search the active issues first
-	// if activeIssue, found := c.issueCollection.FindActiveIssueBySlackPost(slackPostID); found {
-	// 	return activeIssue, nil
-	// }
-
-	// // No active issue found - give up if includeArchived is false
-	// if !includeArchived {
-	// 	return nil, nil
-	// }
-
-	issueBody, err := c.db.FindIssueBySlackPostID(ctx, c.channelID, slackPostID)
+	_, issueBody, err := c.db.FindIssueBySlackPostID(ctx, c.channelID, slackPostID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for issue in database: %w", err)
 	}
@@ -270,9 +251,9 @@ func (c *channelManager) findIssueBySlackPost(ctx context.Context, slackPostID s
 //
 // This method must obtain a lock for the channel before processing the alert.
 func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) error {
-	lock, err := c.locker.Obtain(ctx, c.channelID, 5*time.Minute, 10*time.Second)
+	lock, err := c.locker.Obtain(ctx, c.channelID, 5*time.Minute, 30*time.Second)
 	if err != nil {
-		return fmt.Errorf("failed to obtain lock for channel %s after 10 seconds: %w", c.channelID, err)
+		return fmt.Errorf("failed to obtain lock for channel %s after 30 seconds: %w", c.channelID, err)
 	}
 
 	defer c.releaseLock(ctx, lock)
@@ -292,7 +273,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		logger.Errorf("Failed to clean alert escalations: %s", err)
 	}
 
-	issueBody, err := c.db.FindOpenIssueByCorrelationID(ctx, c.channelID, alert.CorrelationID)
+	_, issueBody, err := c.db.FindOpenIssueByCorrelationID(ctx, c.channelID, alert.CorrelationID)
 	if err != nil {
 		return fmt.Errorf("failed to find open issue by correlation ID: %w", err)
 	}
@@ -313,7 +294,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		}
 	}
 
-	if err := c.db.SaveAlert(ctx, c.channelID, &alert.Alert); err != nil {
+	if err := c.db.SaveAlert(ctx, &alert.Alert); err != nil {
 		return fmt.Errorf("failed to save alert to database: %w", err)
 	}
 
@@ -348,9 +329,9 @@ func (c *channelManager) cleanAlertEscalations(ctx context.Context, alert *model
 //
 // This method must obtain a lock for the channel before processing the command.
 func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) error {
-	lock, err := c.locker.Obtain(ctx, c.channelID, 5*time.Minute, 10*time.Second)
+	lock, err := c.locker.Obtain(ctx, c.channelID, 5*time.Minute, 30*time.Second)
 	if err != nil {
-		return fmt.Errorf("failed to obtain lock for channel %s after 10 seconds: %w", c.channelID, err)
+		return fmt.Errorf("failed to obtain lock for channel %s after 30 seconds: %w", c.channelID, err)
 	}
 
 	defer c.releaseLock(ctx, lock)
@@ -405,16 +386,14 @@ func ackCommand(ctx context.Context, cmd *models.Command, logger common.Logger) 
 //
 // This method must obtain a lock for the channel before processing the issue.
 func (c *channelManager) processIncomingMovedIssue(ctx context.Context, issue *models.Issue) error {
-	lock, err := c.locker.Obtain(ctx, c.channelID, 5*time.Minute, time.Minute)
+	lock, err := c.locker.Obtain(ctx, c.channelID, 5*time.Minute, 5*time.Minute)
 	if err != nil {
-		return fmt.Errorf("failed to obtain lock for channel %s after 10 seconds: %w", c.channelID, err)
+		return fmt.Errorf("failed to obtain lock for channel %s after 5 minutes: %w", c.channelID, err)
 	}
 
 	defer c.releaseLock(ctx, lock)
 
 	logger := c.logger.WithFields(issue.LogFields())
-
-	// c.issueCollection.Add(issue)
 
 	// Slack errors are eventually returned, but we first need to store the issue in the database
 	slackErr := c.slackClient.UpdateSingleIssue(ctx, issue, "incoming moved issue")
@@ -436,19 +415,38 @@ func (c *channelManager) processIncomingMovedIssue(ctx context.Context, issue *m
 }
 
 // processActiveIssues processes all active issues. It handles escalations, archiving and Slack updates (where needed).
+// It skips processing if the last processing time is within the specified interval. This may happen if there are
+// multiple managers running in parallel, e.g. in a Kubernetes cluster.
 //
 // This method must obtain a lock for the channel before processing the issues.
-func (c *channelManager) processActiveIssues(ctx context.Context) error {
-	lock, err := c.locker.Obtain(ctx, c.channelID, 5*time.Minute, 10*time.Second)
+func (c *channelManager) processActiveIssues(ctx context.Context, minInterval time.Duration) error {
+	lock, err := c.locker.Obtain(ctx, c.channelID, 5*time.Minute, 2*minInterval)
 	if err != nil {
-		return fmt.Errorf("failed to obtain lock for channel %s after 10 seconds: %w", c.channelID, err)
+		if errors.Is(err, ErrChannelLockUnavailable) {
+			c.logger.Errorf("Failed to obtain lock for channel after %d seconds - skipping channel processing", int(2*minInterval.Seconds()))
+			return nil
+		}
+		return fmt.Errorf("failed to obtain lock for channel %s: %w", c.channelID, err)
 	}
 
 	defer c.releaseLock(ctx, lock)
 
-	// if c.issueCollection.Count() == 0 {
-	// 	return nil
-	// }
+	processingState, err := c.db.FindChannelProcessingState(ctx, c.channelID)
+	if err != nil {
+		return fmt.Errorf("failed to find channel processing state: %w", err)
+	}
+
+	// Skip processing if the last processing time is within the min interval.
+	if time.Since(processingState.LastProcessed) < minInterval {
+		c.logger.WithField("last_processed", processingState.LastProcessed).Debug("Skipping issue processing due to recent processing by other manager")
+		return nil
+	}
+
+	processingState.LastProcessed = time.Now()
+
+	if err := c.db.SaveChannelProcessingState(ctx, processingState); err != nil {
+		return fmt.Errorf("failed to save channel processing state: %w", err)
+	}
 
 	issueBodies, err := c.db.LoadOpenIssuesInChannel(ctx, c.channelID)
 	if err != nil {
@@ -487,9 +485,6 @@ func (c *channelManager) processActiveIssues(ctx context.Context) error {
 		}
 	}
 
-	// archivedIssues := c.issueCollection.RegisterArchiving()
-	// escalationResults := c.issueCollection.RegisterEscalation()
-
 	for _, result := range escalationResults {
 		if !result.Escalated || result.MoveToChannel == "" {
 			continue
@@ -507,12 +502,6 @@ func (c *channelManager) processActiveIssues(ctx context.Context) error {
 	if err := c.saveIssuesToDB(ctx, issues); err != nil {
 		return fmt.Errorf("failed to save issues to database: %w", err)
 	}
-
-	// // Remove the archived issues (if any) from the issues collection. They remain in the database with an archived flag.
-	// for _, issue := range archivedIssues {
-	// 	c.issueCollection.Remove(issue)
-	// 	c.logger.WithFields(issue.LogFields()).Info("Archive issue")
-	// }
 
 	c.logger.WithField("count", openIssues).WithField("elapsed", fmt.Sprintf("%v", time.Since(started))).Debug("Issue processing completed")
 
@@ -571,8 +560,6 @@ func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert
 	issue := models.NewIssue(alert, c.logger)
 	logger = logger.WithFields(issue.LogFields())
 
-	// c.issueCollection.Add(issue)
-
 	// Slack errors are eventually returned, but we first need to store the issue in the database
 	slackErr := c.slackClient.UpdateSingleIssue(ctx, issue, "new issue created")
 
@@ -597,23 +584,9 @@ func (c *channelManager) saveIssueToDB(ctx context.Context, issue *models.Issue)
 		return nil
 	}
 
-	// body, err := json.Marshal(issue)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to marshal issue body: %w", err)
-	// }
-
-	// cacheKey, issueHash := hashIssue(issue.ID, body)
-
-	// // No point in updating db if the issue has not changed
-	// if existingHash, ok := c.cache.Get(ctx, cacheKey); ok && existingHash == issueHash {
-	// 	return nil
-	// }
-
-	if err := c.db.CreateOrUpdateIssue(ctx, c.channelID, issue); err != nil {
+	if err := c.db.SaveIssue(ctx, issue); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
-
-	// c.cache.Set(ctx, cacheKey, issueHash, 24*time.Hour)
 
 	return nil
 }
@@ -623,51 +596,20 @@ func (c *channelManager) saveIssuesToDB(ctx context.Context, issues []*models.Is
 		return nil
 	}
 
-	issuesToUpdate := []common.Issue{}
-	// issueHashes := make(map[string]string)
+	issuesToUpdate := make([]common.Issue, len(issues))
 
-	for _, issue := range issues {
-		// body, err := json.Marshal(issue)
-		// if err != nil {
-		// 	return fmt.Errorf("failed to marshal issue body: %w", err)
-		// }
-
-		// cacheKey, issueHash := hashIssue(issue.ID, body)
-
-		// // No point in updating db if the issue has not changed
-		// if existingHash, ok := c.cache.Get(ctx, cacheKey); ok && existingHash == issueHash {
-		// 	continue
-		// }
-
-		issuesToUpdate = append(issuesToUpdate, issue)
-		// issueHashes[cacheKey] = issueHash
+	for i, issue := range issues {
+		issuesToUpdate[i] = issue
 	}
 
-	// No changed issues found
-	if len(issuesToUpdate) == 0 {
-		return nil
-	}
-
-	// Batch update all changed issues
-	if err := c.db.UpdateIssues(ctx, c.channelID, issuesToUpdate...); err != nil {
+	if err := c.db.SaveIssues(ctx, issuesToUpdate...); err != nil {
 		return fmt.Errorf("failed to update issues in database: %w", err)
 	}
 
-	updated := len(issuesToUpdate)
-
-	c.logger.WithField("count", len(issues)).WithField("updated", updated).WithField("skipped", len(issues)-updated).Debug("Updated issue collection in database")
-
-	// for cacheKey, issueHash := range issueHashes {
-	// 	c.cache.Set(ctx, cacheKey, issueHash, 24*time.Hour)
-	// }
+	c.logger.WithField("count", len(issues)).Debug("Updated issue collection in database")
 
 	return nil
 }
-
-// func hashIssue(id string, body []byte) (string, string) {
-// 	key := "hashIssue::" + id
-// 	return key, string(internal.HashBytes(body))
-// }
 
 func (c *channelManager) terminateIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) error {
 	logger.Info("Cmd: terminate issue")
@@ -770,19 +712,15 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 		return err
 	}
 
-	// // Remove the issue from the issues collection.
-	// // The new channel manager(s) will ensure that the issue is updated in Slack and stored in the database.
-	// c.issueCollection.Remove(issue)
+	request := models.NewMoveRequest(issue.CorrelationID, c.channelID, targetChannel, username)
 
-	request := &models.MoveRequest{
-		Issue:         issue,
-		UserRealName:  username,
-		SourceChannel: c.channelID,
-		TargetChannel: targetChannel,
+	body, err := json.Marshal(request)
+	if err != nil {
+		return fmt.Errorf("failed to marshal move request: %w", err)
 	}
 
-	if err := internal.TrySend(ctx, request, c.moveRequestCh); err != nil {
-		return err
+	if err := c.moveRequestQueue.Send(ctx, c.channelID, request.DedupID(), string(body)); err != nil {
+		return fmt.Errorf("failed to send move request to queue: %w", err)
 	}
 
 	logger.Info("Remove issue from channel")
