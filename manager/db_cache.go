@@ -1,0 +1,232 @@
+package manager
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/eko/gocache/lib/v4/store"
+	common "github.com/peteraglen/slack-manager-common"
+	"github.com/peteraglen/slack-manager/config"
+	"github.com/peteraglen/slack-manager/internal"
+	"github.com/peteraglen/slack-manager/manager/internal/models"
+)
+
+type dbCacheMiddleware struct {
+	db                          common.DB
+	issueHashCache              *internal.Cache[string]
+	channelProcessingStateCache *internal.Cache[*common.ChannelProcessingState]
+	moveMappingCache            *internal.Cache[string]
+}
+
+func newDBCacheMiddleware(db common.DB, cacheStore store.StoreInterface, logger common.Logger, cfg config.ManagerConfig) *dbCacheMiddleware {
+	cacheKeyPrefix := cfg.CacheKeyPrefix + "db-cache:"
+
+	issueHashCache := internal.NewCache[string](cacheStore, cacheKeyPrefix+"issueHash:", logger)
+	channelProcessinStateCache := internal.NewCache[*common.ChannelProcessingState](cacheStore, cacheKeyPrefix+"channelProcessingState:", logger)
+	moveMappingCache := internal.NewCache[string](cacheStore, cacheKeyPrefix+"moveMapping:", logger)
+
+	return &dbCacheMiddleware{
+		db:                          db,
+		issueHashCache:              issueHashCache,
+		channelProcessingStateCache: channelProcessinStateCache,
+		moveMappingCache:            moveMappingCache,
+	}
+}
+
+func (d *dbCacheMiddleware) Init(_ context.Context, _ bool) error {
+	return errors.New("dbCacheMiddleware does not support the Init method")
+}
+
+func (d *dbCacheMiddleware) SaveAlert(ctx context.Context, alert *common.Alert) error {
+	return d.db.SaveAlert(ctx, alert)
+}
+
+func (d *dbCacheMiddleware) SaveIssue(ctx context.Context, issue common.Issue) error {
+	return d.SaveIssues(ctx, issue)
+}
+
+func (d *dbCacheMiddleware) SaveIssues(ctx context.Context, issues ...common.Issue) error {
+	if len(issues) == 0 {
+		return nil
+	}
+
+	issuesToUpdate := []common.Issue{}
+	issueHashes := make(map[string]string)
+	issueModels := []*models.Issue{}
+
+	// Loop through all issues and check if they have changed.
+	for _, issue := range issues {
+		issueModel, ok := issue.(*models.Issue)
+		if !ok {
+			return fmt.Errorf("expected issue to be of type *internal.Issue, got %T", issue)
+		}
+
+		issueModels = append(issueModels, issueModel)
+
+		// Marshal the issue body to JSON and cache it internally.
+		body, err := issueModel.MarshalJSONAndCache()
+		if err != nil {
+			panic(fmt.Errorf("failed to marshal issue body: %w", err))
+		}
+
+		cacheKey := issue.UniqueID()
+		issueHash := string(internal.HashBytes(body))
+		issueHashes[cacheKey] = issueHash
+
+		// No point in updating db if the issue has not changed.
+		if existingHash, ok := d.issueHashCache.Get(ctx, cacheKey); ok && existingHash == issueHash {
+			continue
+		}
+
+		// The issue has changed, so we need to update it in the database.
+		issuesToUpdate = append(issuesToUpdate, issue)
+
+		// We must explicitly remove the old issue hash from the cache, since the upcoming cache Set may fail
+		// after we save the issue to the database, thus leaving the cache in an inconsistent state.
+		if err := d.issueHashCache.Delete(ctx, cacheKey); err != nil {
+			return fmt.Errorf("failed to delete issue hash from cache: %w", err)
+		}
+	}
+
+	// Ensure cached JSON body is reset after we are done.
+	defer func() {
+		for _, issueModel := range issueModels {
+			issueModel.ResetCachedJSONBody()
+		}
+	}()
+
+	// No changed issues found.
+	if len(issuesToUpdate) == 0 {
+		return nil
+	}
+
+	if len(issuesToUpdate) == 1 {
+		if err := d.db.SaveIssue(ctx, issuesToUpdate[0]); err != nil {
+			return fmt.Errorf("failed to save issues in database: %w", err)
+		}
+	} else {
+		if err := d.db.SaveIssues(ctx, issuesToUpdate...); err != nil {
+			return fmt.Errorf("failed to update issues in database: %w", err)
+		}
+	}
+
+	// Update the cache with all issue hashes (both unchanged and changed).
+	for cacheKey, issueHash := range issueHashes {
+		d.issueHashCache.Set(ctx, cacheKey, issueHash, 30*24*time.Hour)
+	}
+
+	return nil
+}
+
+func (d *dbCacheMiddleware) FindOpenIssueByCorrelationID(ctx context.Context, channelID, correlationID string) (string, json.RawMessage, error) {
+	return d.db.FindOpenIssueByCorrelationID(ctx, channelID, correlationID)
+}
+
+func (d *dbCacheMiddleware) FindIssueBySlackPostID(ctx context.Context, channelID, postID string) (string, json.RawMessage, error) {
+	return d.db.FindIssueBySlackPostID(ctx, channelID, postID)
+}
+
+func (d *dbCacheMiddleware) LoadOpenIssues(ctx context.Context) (map[string]json.RawMessage, error) {
+	issueBodies, err := d.db.LoadOpenIssues(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the issue body hashes to avoid unnecessary write operations.
+	for id, body := range issueBodies {
+		d.issueHashCache.Set(ctx, id, string(internal.HashBytes(body)), 30*24*time.Hour)
+	}
+
+	return issueBodies, nil
+}
+
+func (d *dbCacheMiddleware) LoadOpenIssuesInChannel(ctx context.Context, channelID string) (map[string]json.RawMessage, error) {
+	issueBodies, err := d.db.LoadOpenIssuesInChannel(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the issue body hashes to avoid unnecessary write operations.
+	for id, body := range issueBodies {
+		d.issueHashCache.Set(ctx, id, string(internal.HashBytes(body)), 30*24*time.Hour)
+	}
+
+	return issueBodies, nil
+}
+
+func (d *dbCacheMiddleware) SaveMoveMapping(ctx context.Context, moveMapping common.MoveMapping) error {
+	body, err := moveMapping.MarshalJSON()
+	if err != nil {
+		return fmt.Errorf("failed to marshal move mapping: %w", err)
+	}
+
+	if err := d.db.SaveMoveMapping(ctx, moveMapping); err != nil {
+		return err
+	}
+
+	cacheKey := moveMappingCacheKey(moveMapping.ChannelID(), moveMapping.GetCorrelationID())
+
+	d.moveMappingCache.Set(ctx, cacheKey, string(body), 30*24*time.Hour)
+
+	return nil
+}
+
+func (d *dbCacheMiddleware) FindMoveMapping(ctx context.Context, channelID, correlationID string) (json.RawMessage, error) {
+	cacheKey := moveMappingCacheKey(channelID, correlationID)
+
+	if mapping, ok := d.moveMappingCache.Get(ctx, cacheKey); ok {
+		return json.RawMessage(mapping), nil
+	}
+
+	return d.db.FindMoveMapping(ctx, channelID, correlationID)
+}
+
+func (d *dbCacheMiddleware) SaveChannelProcessingState(ctx context.Context, state *common.ChannelProcessingState) error {
+	if err := d.db.SaveChannelProcessingState(ctx, state); err != nil {
+		return err
+	}
+
+	d.channelProcessingStateCache.Set(ctx, state.ChannelID, state, 24*time.Hour)
+
+	return nil
+}
+
+func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, channelID string) (*common.ChannelProcessingState, error) {
+	if state, ok := d.channelProcessingStateCache.Get(ctx, channelID); ok {
+		return state, nil
+	}
+
+	state, err := d.db.FindChannelProcessingState(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+
+	d.channelProcessingStateCache.Set(ctx, channelID, state, 24*time.Hour)
+
+	return state, nil
+}
+
+func (d *dbCacheMiddleware) DropAllData(ctx context.Context) error {
+	if err := d.issueHashCache.Clear(ctx); err != nil {
+		return fmt.Errorf("failed to clear issue hash cache: %w", err)
+	}
+
+	if err := d.channelProcessingStateCache.Clear(ctx); err != nil {
+		return fmt.Errorf("failed to clear channel processing state cache: %w", err)
+	}
+
+	if err := d.moveMappingCache.Clear(ctx); err != nil {
+		return fmt.Errorf("failed to clear move mapping cache: %w", err)
+	}
+
+	return d.db.DropAllData(ctx)
+}
+
+// moveMappingCacheKey generates a cache key for the move mapping based on channel ID and correlation ID.
+// The correlation key is user-defined, so we hash the key to ensure that it doesn't violate any key requirements.
+func moveMappingCacheKey(channelID, correlationID string) string {
+	return internal.Hash(channelID + ":" + correlationID)
+}
