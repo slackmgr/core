@@ -89,7 +89,7 @@ func (c *channelManager) init(ctx context.Context, issues []*models.Issue) error
 
 	currentChannelName := c.slackClient.GetChannelName(ctx, c.channelID)
 
-	lock, err := c.locker.Obtain(ctx, c.channelID, time.Minute, 10*time.Second)
+	lock, err := c.obtainLock(ctx, c.channelID, time.Minute, 10*time.Second)
 	if err != nil {
 		if errors.Is(err, ErrChannelLockUnavailable) {
 			c.logger.Info("Failed to obtain lock for channel after 10 seconds - skipping channel name update on channel initialization")
@@ -233,7 +233,7 @@ func (c *channelManager) findIssueBySlackPost(ctx context.Context, slackPostID s
 //
 // This method must obtain a lock for the channel before processing the alert.
 func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) error {
-	lock, err := c.locker.Obtain(ctx, c.channelID, 5*time.Minute, 30*time.Second)
+	lock, err := c.obtainLock(ctx, c.channelID, 5*time.Minute, 30*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to obtain lock for channel %s after 30 seconds: %w", c.channelID, err)
 	}
@@ -311,7 +311,7 @@ func (c *channelManager) cleanAlertEscalations(ctx context.Context, alert *model
 //
 // This method must obtain a lock for the channel before processing the command.
 func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) error {
-	lock, err := c.locker.Obtain(ctx, c.channelID, 5*time.Minute, 30*time.Second)
+	lock, err := c.obtainLock(ctx, c.channelID, 5*time.Minute, 30*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to obtain lock for channel %s after 30 seconds: %w", c.channelID, err)
 	}
@@ -370,7 +370,7 @@ func ackCommand(ctx context.Context, cmd *models.Command, logger common.Logger) 
 //
 // This method must obtain a lock for the channel before processing the issues.
 func (c *channelManager) processActiveIssues(ctx context.Context, minInterval time.Duration) error {
-	lock, err := c.locker.Obtain(ctx, c.channelID, 5*time.Minute, 2*minInterval)
+	lock, err := c.obtainLock(ctx, c.channelID, 5*time.Minute, 2*minInterval)
 	if err != nil {
 		if errors.Is(err, ErrChannelLockUnavailable) {
 			c.logger.Errorf("Failed to obtain lock for channel after %d seconds - skipping channel processing", int(2*minInterval.Seconds()))
@@ -481,7 +481,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		return fmt.Errorf("failed to save issues to database: %w", err)
 	}
 
-	c.logger.WithField("count", issuesToUpdate).WithField("moved_count", len(movedIssues)).WithField("elapsed", fmt.Sprintf("%v", time.Since(started))).Debug("Issue processing completed")
+	c.logger.WithField("count", len(issuesToUpdate)).WithField("moved_count", len(movedIssues)).WithField("elapsed", fmt.Sprintf("%v", time.Since(started))).Debug("Issue processing completed")
 
 	c.openIssues = openIssues
 
@@ -687,7 +687,7 @@ func (c *channelManager) hideIssueOptionButtons(ctx context.Context, issue *mode
 
 func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, targetChannel, username string, logger common.Logger) error {
 	// Obtain a lock for the *target channel*
-	targetChannelLock, err := c.locker.Obtain(ctx, targetChannel, 30*time.Second, time.Minute)
+	targetChannelLock, err := c.obtainLock(ctx, targetChannel, 30*time.Second, time.Minute)
 	if err != nil {
 		return fmt.Errorf("failed to obtain lock for target channel %s after 5 minutes: %w", c.channelID, err)
 	}
@@ -733,19 +733,6 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 	logger.Info("Issue moved to target channel")
 
 	return nil
-
-	// request := models.NewMoveRequest(issue.CorrelationID, c.channelID, targetChannel, username)
-
-	// body, err := json.Marshal(request)
-	// if err != nil {
-	// 	return fmt.Errorf("failed to marshal move request: %w", err)
-	// }
-
-	// if err := c.moveRequestQueue.Send(ctx, c.channelID, request.DedupID(), string(body)); err != nil {
-	// 	return fmt.Errorf("failed to send move request to queue: %w", err)
-	// }
-
-	// logger.Info("Remove issue from channel")
 }
 
 func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) error {
@@ -800,9 +787,22 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 	return nil
 }
 
+func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, maxWait time.Duration) (ChannelLock, error) {
+	lock, err := c.locker.Obtain(ctx, channelID, ttl, maxWait)
+	if err != nil {
+		return nil, fmt.Errorf("failed to obtain lock for channel %s after %d seconds: %w", c.channelID, int(maxWait.Seconds()), err)
+	}
+
+	c.logger.WithField("lock_key", channelID).Debug("Obtained lock")
+
+	return lock, nil
+}
+
 func (c *channelManager) releaseLock(ctx context.Context, lock ChannelLock) {
 	if err := lock.Release(ctx); err != nil {
-		c.logger.Errorf("Failed to release lock for channel %s: %s", c.channelID, err)
+		c.logger.WithField("lock_key", lock.Key()).Errorf("Failed to release lock: %s", err)
+	} else {
+		c.logger.WithField("lock_key", lock.Key()).Debug("Released lock")
 	}
 }
 

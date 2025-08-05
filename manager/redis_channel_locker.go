@@ -98,6 +98,15 @@ func (r *RedisChannelLocker) Obtain(ctx context.Context, key string, ttl time.Du
 	return &RedisChannelLock{lock: lock}, nil
 }
 
+// Key returns the key associated with the RedisChannelLock instance.
+func (l *RedisChannelLock) Key() string {
+	if l.lock == nil {
+		return ""
+	}
+
+	return l.lock.Key()
+}
+
 // Release releases the lock held by the RedisChannelLock instance.
 // It removes the lock from Redis, allowing other instances to obtain the lock.
 // If the lock is already released, or not held, it returns nil.

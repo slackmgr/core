@@ -19,5 +19,6 @@ type ChannelLocker interface {
 }
 
 type ChannelLock interface {
+	Key() string
 	Release(ctx context.Context) error
 }
