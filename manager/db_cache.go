@@ -169,7 +169,7 @@ func (d *dbCacheMiddleware) SaveMoveMapping(ctx context.Context, moveMapping com
 
 	cacheKey := moveMappingCacheKey(moveMapping.ChannelID(), moveMapping.GetCorrelationID())
 
-	d.moveMappingCache.Set(ctx, cacheKey, string(body), 30*24*time.Hour)
+	d.moveMappingCache.Set(ctx, cacheKey, string(body), 24*time.Hour)
 
 	return nil
 }
@@ -178,10 +178,25 @@ func (d *dbCacheMiddleware) FindMoveMapping(ctx context.Context, channelID, corr
 	cacheKey := moveMappingCacheKey(channelID, correlationID)
 
 	if mapping, ok := d.moveMappingCache.Get(ctx, cacheKey); ok {
-		return json.RawMessage(mapping), nil
+		if mapping != "" {
+			return json.RawMessage(mapping), nil
+		}
+		return nil, nil
 	}
 
-	return d.db.FindMoveMapping(ctx, channelID, correlationID)
+	mapping, err := d.db.FindMoveMapping(ctx, channelID, correlationID)
+	if err != nil {
+		return nil, err
+	}
+
+	// If no mapping is found, we still cache an empty string to avoid unnecessary database lookups.
+	if mapping != nil {
+		d.moveMappingCache.Set(ctx, cacheKey, string(mapping), 24*time.Hour)
+	} else {
+		d.moveMappingCache.Set(ctx, cacheKey, "", 24*time.Hour)
+	}
+
+	return mapping, nil
 }
 
 func (d *dbCacheMiddleware) SaveChannelProcessingState(ctx context.Context, state *common.ChannelProcessingState) error {

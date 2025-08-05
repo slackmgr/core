@@ -17,22 +17,21 @@ import (
 )
 
 type Manager struct {
-	db               common.DB
-	slackClient      *slack.Client
-	coordinator      *coordinator
-	alertQueue       FifoQueue
-	commandQueue     FifoQueue
-	moveRequestQueue FifoQueue
-	cacheStore       store.StoreInterface
-	locker           ChannelLocker
-	logger           common.Logger
-	metrics          common.Metrics
-	webhookHandlers  []WebhookHandler
-	cfg              *config.ManagerConfig
-	managerSettings  *models.ManagerSettingsWrapper
+	db              common.DB
+	slackClient     *slack.Client
+	coordinator     *coordinator
+	alertQueue      FifoQueue
+	commandQueue    FifoQueue
+	cacheStore      store.StoreInterface
+	locker          ChannelLocker
+	logger          common.Logger
+	metrics         common.Metrics
+	webhookHandlers []WebhookHandler
+	cfg             *config.ManagerConfig
+	managerSettings *models.ManagerSettingsWrapper
 }
 
-func New(db common.DB, alertQueue FifoQueue, commandQueue FifoQueue, moveRequestQueue FifoQueue, cacheStore store.StoreInterface, locker ChannelLocker, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
+func New(db common.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, locker ChannelLocker, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
 	if cacheStore == nil {
 		gocacheClient := gocache.New(5*time.Minute, time.Minute)
 		cacheStore = gocache_store.NewGoCache(gocacheClient)
@@ -52,16 +51,15 @@ func New(db common.DB, alertQueue FifoQueue, commandQueue FifoQueue, moveRequest
 	}
 
 	return &Manager{
-		db:               db,
-		alertQueue:       alertQueue,
-		commandQueue:     commandQueue,
-		moveRequestQueue: moveRequestQueue,
-		cacheStore:       cacheStore,
-		locker:           locker,
-		logger:           logger,
-		metrics:          metrics,
-		cfg:              cfg,
-		managerSettings:  &models.ManagerSettingsWrapper{Settings: managerSettings},
+		db:              db,
+		alertQueue:      alertQueue,
+		commandQueue:    commandQueue,
+		cacheStore:      cacheStore,
+		locker:          locker,
+		logger:          logger,
+		metrics:         metrics,
+		cfg:             cfg,
+		managerSettings: &models.ManagerSettingsWrapper{Settings: managerSettings},
 	}
 }
 
@@ -86,10 +84,6 @@ func (m *Manager) Run(ctx context.Context) error {
 		return errors.New("command queue cannot be nil")
 	}
 
-	if m.moveRequestQueue == nil {
-		return errors.New("move request queue cannot be nil")
-	}
-
 	if m.logger == nil {
 		return errors.New("logger cannot be nil")
 	}
@@ -112,7 +106,7 @@ func (m *Manager) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to connect Slack client: %w", err)
 	}
 
-	m.coordinator = newCoordinator(m.db, m.alertQueue, m.moveRequestQueue, m.slackClient, m.cacheStore, m.locker, m.logger, m.metrics, m.webhookHandlers, m.cfg, m.managerSettings)
+	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.cacheStore, m.locker, m.logger, m.metrics, m.webhookHandlers, m.cfg, m.managerSettings)
 
 	if err := m.coordinator.init(ctx); err != nil {
 		return fmt.Errorf("failed to initialize coordinator: %w", err)
@@ -122,7 +116,6 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	alertCh := make(chan models.Message, 1000)
 	commandCh := make(chan models.Message, 1000)
-	moveRequestCh := make(chan models.Message, 1000)
 	extenderCh := make(chan models.Message, 1000)
 
 	errg, ctx := errgroup.WithContext(ctx)
@@ -136,15 +129,11 @@ func (m *Manager) Run(ctx context.Context) error {
 	})
 
 	errg.Go(func() error {
-		return queueConsumer(ctx, m.moveRequestQueue, moveRequestCh, models.NewMoveRequestFromQueue, m.logger)
-	})
-
-	errg.Go(func() error {
 		return messageExtender(ctx, extenderCh, m.logger)
 	})
 
 	errg.Go(func() error {
-		return m.coordinator.run(ctx, alertCh, commandCh, moveRequestCh, extenderCh)
+		return m.coordinator.run(ctx, alertCh, commandCh, extenderCh)
 	})
 
 	errg.Go(func() error {
