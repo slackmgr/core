@@ -388,12 +388,12 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 
 	if processingState == nil {
 		processingState = common.NewChannelProcessingState(c.channelID)
-	}
-
-	// Skip processing if the last processing time is within the min interval.
-	if time.Since(processingState.LastProcessed) < minInterval {
-		c.logger.WithField("last_processed", processingState.LastProcessed).Debug("Skipping issue processing due to recent processing by other manager")
+		c.logger.Debug("No channel processing state found in database, creating a new one")
+	} else if time.Since(processingState.LastProcessed) < minInterval {
+		c.logger.WithField("last_processed", processingState.LastProcessed).WithField("min_interval", minInterval).Debug("Skipping issue processing due to recent processing by other manager")
 		return nil
+	} else {
+		c.logger.WithField("last_processed", processingState.LastProcessed).WithField("min_interval", minInterval).Debug("Processing issues in channel")
 	}
 
 	processingState.LastProcessed = time.Now()
@@ -799,10 +799,12 @@ func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, 
 }
 
 func (c *channelManager) releaseLock(ctx context.Context, lock ChannelLock) {
+	key := lock.Key()
+
 	if err := lock.Release(ctx); err != nil {
-		c.logger.WithField("lock_key", lock.Key()).Errorf("Failed to release lock: %s", err)
+		c.logger.WithField("lock_key", key).Errorf("Failed to release lock: %s", err)
 	} else {
-		c.logger.WithField("lock_key", lock.Key()).Debug("Released lock")
+		c.logger.WithField("lock_key", key).Debug("Released lock")
 	}
 }
 
