@@ -33,7 +33,7 @@ type retryable interface{ Retryable() bool }
 type Client struct {
 	api       *slack.Client
 	logger    commonlib.Logger
-	cache     *internal.Cache[string]
+	cache     *internal.Cache
 	metrics   commonlib.Metrics
 	cfg       *config.SlackClientConfig
 	connected bool
@@ -44,7 +44,7 @@ func New(cacheStore cachestore.StoreInterface, cacheKeyPrefix string, logger com
 	cfg.SetDefaults()
 
 	cacheKeyPrefix += "slack-api-client:"
-	cache := internal.NewCache[string](cacheStore, cacheKeyPrefix, logger)
+	cache := internal.NewCache(cacheStore, cacheKeyPrefix, logger)
 
 	return &Client{
 		logger:  logger,

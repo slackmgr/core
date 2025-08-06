@@ -26,7 +26,7 @@ var (
 type ReactionsController struct {
 	client          handler.SocketClient
 	commandHandler  handler.FifoQueueProducer
-	cache           *internal.Cache[string]
+	cache           *internal.Cache
 	logger          common.Logger
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
@@ -34,7 +34,7 @@ type ReactionsController struct {
 
 func NewReactionsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *ReactionsController {
 	cacheKeyPrefix := cfg.CacheKeyPrefix + "reactions-controller:"
-	cache := internal.NewCache[string](cacheStore, cacheKeyPrefix, logger)
+	cache := internal.NewCache(cacheStore, cacheKeyPrefix, logger)
 
 	c := &ReactionsController{
 		client:          client,

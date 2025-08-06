@@ -386,13 +386,14 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		return fmt.Errorf("failed to find channel processing state: %w", err)
 	}
 
-	if processingState == nil {
+	switch {
+	case processingState == nil:
 		processingState = common.NewChannelProcessingState(c.channelID)
 		c.logger.Debug("No channel processing state found in database, creating a new one")
-	} else if time.Since(processingState.LastProcessed) < minInterval {
+	case time.Since(processingState.LastProcessed) < minInterval:
 		c.logger.WithField("last_processed", processingState.LastProcessed).WithField("min_interval", minInterval).Debug("Skipping issue processing due to recent processing by other manager")
 		return nil
-	} else {
+	default:
 		c.logger.WithField("last_processed", processingState.LastProcessed).WithField("min_interval", minInterval).Debug("Processing issues in channel")
 	}
 
@@ -787,7 +788,7 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 	return nil
 }
 
-func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, maxWait time.Duration) (ChannelLock, error) {
+func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, maxWait time.Duration) (ChannelLock, error) { //nolint:ireturn
 	lock, err := c.locker.Obtain(ctx, channelID, ttl, maxWait)
 	if err != nil {
 		return nil, fmt.Errorf("failed to obtain lock for channel %s after %d seconds: %w", c.channelID, int(maxWait.Seconds()), err)

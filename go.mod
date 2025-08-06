@@ -6,16 +6,17 @@ require (
 	github.com/bsm/redislock v0.9.4
 	github.com/eko/gocache/lib/v4 v4.1.6
 	github.com/eko/gocache/store/go_cache/v4 v4.2.1
+	github.com/eko/gocache/store/rediscluster/v4 v4.2.1
 	github.com/go-resty/resty/v2 v2.12.0
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
 	github.com/patrickmn/go-cache v2.1.0+incompatible
-	github.com/peteraglen/slack-manager-common v0.0.27-rc.17
+	github.com/peteraglen/slack-manager-common v0.0.27-rc.19
 	github.com/redis/go-redis/v9 v9.11.0
 	github.com/segmentio/ksuid v1.0.4
 	github.com/slack-go/slack v0.12.5
 	github.com/stretchr/testify v1.9.0
-	golang.org/x/sync v0.3.0
+	golang.org/x/sync v0.7.0
 	golang.org/x/time v0.5.0
 )
 
@@ -34,7 +35,7 @@ require (
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
-	golang.org/x/exp v0.0.0-20230315142452-642cacee5cc0 // indirect
+	golang.org/x/exp v0.0.0-20240416160154-fe59bbe5cc7f // indirect
 	golang.org/x/net v0.22.0 // indirect
 	golang.org/x/sys v0.18.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect

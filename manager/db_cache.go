@@ -16,17 +16,17 @@ import (
 
 type dbCacheMiddleware struct {
 	db                          common.DB
-	issueHashCache              *internal.Cache[string]
-	channelProcessingStateCache *internal.Cache[*common.ChannelProcessingState]
-	moveMappingCache            *internal.Cache[string]
+	issueHashCache              *internal.Cache
+	channelProcessingStateCache *internal.Cache
+	moveMappingCache            *internal.Cache
 }
 
 func newDBCacheMiddleware(db common.DB, cacheStore store.StoreInterface, logger common.Logger, cfg config.ManagerConfig) *dbCacheMiddleware {
 	cacheKeyPrefix := cfg.CacheKeyPrefix + "db-cache:"
 
-	issueHashCache := internal.NewCache[string](cacheStore, cacheKeyPrefix+"issueHash:", logger)
-	channelProcessinStateCache := internal.NewCache[*common.ChannelProcessingState](cacheStore, cacheKeyPrefix+"channelProcessingState:", logger)
-	moveMappingCache := internal.NewCache[string](cacheStore, cacheKeyPrefix+"moveMapping:", logger)
+	issueHashCache := internal.NewCache(cacheStore, cacheKeyPrefix+"issueHash:", logger)
+	channelProcessinStateCache := internal.NewCache(cacheStore, cacheKeyPrefix+"channelProcessingState:", logger)
+	moveMappingCache := internal.NewCache(cacheStore, cacheKeyPrefix+"moveMapping:", logger)
 
 	return &dbCacheMiddleware{
 		db:                          db,
@@ -208,14 +208,25 @@ func (d *dbCacheMiddleware) SaveChannelProcessingState(ctx context.Context, stat
 		return err
 	}
 
-	d.channelProcessingStateCache.Set(ctx, state.ChannelID, state, 24*time.Hour)
+	jsonBody, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("failed to marshal channel processing state: %w", err)
+	}
+
+	d.channelProcessingStateCache.Set(ctx, state.ChannelID, string(jsonBody), 24*time.Hour)
 
 	return nil
 }
 
 func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, channelID string) (*common.ChannelProcessingState, error) {
-	if state, ok := d.channelProcessingStateCache.Get(ctx, channelID); ok {
-		return state, nil
+	if cachedJSONBody, ok := d.channelProcessingStateCache.Get(ctx, channelID); ok {
+		var state common.ChannelProcessingState
+
+		if err := json.Unmarshal([]byte(cachedJSONBody), &state); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal channel processing state from cache: %w", err)
+		}
+
+		return &state, nil
 	}
 
 	state, err := d.db.FindChannelProcessingState(ctx, channelID)
@@ -224,7 +235,12 @@ func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, chan
 	}
 
 	if state != nil {
-		d.channelProcessingStateCache.Set(ctx, channelID, state, 24*time.Hour)
+		jsonBody, err := json.Marshal(state)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal channel processing state: %w", err)
+		}
+
+		d.channelProcessingStateCache.Set(ctx, channelID, string(jsonBody), 24*time.Hour)
 	}
 
 	return state, nil
