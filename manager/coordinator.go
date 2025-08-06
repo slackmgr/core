@@ -143,10 +143,7 @@ messageLoop:
 		}
 	}
 
-	c.channelManagersLock.Lock()
-	defer c.channelManagersLock.Unlock()
-
-	// Wait for all channel managers to shut down before returning
+	// Wait for all channel managers to shut down in an orderly fashion.
 	c.channelManagersWaitGroup.Wait()
 
 	return ctx.Err()
@@ -272,8 +269,6 @@ func (c *coordinator) getChannelManager(ctx context.Context, channelID string) (
 	// The runChannelManagerAsync function will handle the lifecycle of the channel manager, as well as cleanup after it exits.
 	go c.runChannelManagerAsync(ctx, channelManager)
 
-	c.logger.WithField("slack_channel_id", channelID).Infof("Channel manager started")
-
 	return channelManager, nil
 }
 
@@ -291,8 +286,6 @@ func (c *coordinator) runChannelManagerAsync(ctx context.Context, channelManager
 
 	// Remove the channel manager from the map.
 	delete(c.channelManagers, channelManager.channelID)
-
-	c.logger.WithField("slack_channel_id", channelManager.channelID).Info("Channel manager exited")
 }
 
 func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.Command) error {
