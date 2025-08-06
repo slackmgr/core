@@ -30,9 +30,8 @@ type channelManager struct {
 	managerSettings *models.ManagerSettingsWrapper
 	alertCh         chan *models.Alert
 	commandCh       chan *models.Command
-	movedIssueCh    chan *models.Issue
 	cmdFuncs        map[models.CommandAction]cmdFunc
-	openIssues      int
+	openIssueCount  int
 	lastActivity    time.Time
 }
 
@@ -58,7 +57,6 @@ func newChannelManager(channelID string, slackClient *slack.Client, db common.DB
 		managerSettings: managerSettings,
 		alertCh:         make(chan *models.Alert, 1000),
 		commandCh:       make(chan *models.Command, 100),
-		movedIssueCh:    make(chan *models.Issue, 10),
 		lastActivity:    time.Now(),
 	}
 
@@ -352,26 +350,28 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		c.logger.Debug("No channel processing state found in database, creating a new one")
 	}
 
+	timeSinceLastProcessed := time.Since(processingState.LastProcessed)
+
 	// If the processing state indicates that the channel was processed recently, skip processing.
 	// This can happen if there are multiple managers running in parallel, e.g. in a Kubernetes cluster.
-	if time.Since(processingState.LastProcessed) < minInterval {
+	if timeSinceLastProcessed < minInterval {
 		// Set the last activity time to the value from the processing state.
 		// This will help the current channel manager to determine if we should stop processing the channel.
 		c.lastActivity = processingState.LastChannelActivity
 
-		c.logger.WithField("last_processed", processingState.LastProcessed).WithField("min_interval", minInterval).Debug("Skipping issue processing due to recent processing by other manager")
+		c.logger.WithField("last_processed", timeSinceLastProcessed).WithField("min_interval", minInterval).Debug("Skipping issue processing due to recent processing by other manager")
 
 		return nil
 	}
 
-	c.logger.WithField("last_processed", processingState.LastProcessed).WithField("min_interval", minInterval).Debug("Processing issues in channel")
+	c.logger.WithField("last_processed", timeSinceLastProcessed).WithField("min_interval", minInterval).Debug("Processing issues in channel")
 
 	issueBodies, err := c.db.LoadOpenIssuesInChannel(ctx, c.channelID)
 	if err != nil {
 		return fmt.Errorf("failed to load open issues from database: %w", err)
 	}
 
-	c.openIssues = len(issueBodies)
+	c.openIssueCount = len(issueBodies)
 
 	now := time.Now().UTC()
 
@@ -380,7 +380,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 
 	// We update the LastChannelActivity only if there are open issues.
 	// This will help all running managers to determine if they should stop processing the channel.
-	if c.openIssues > 0 {
+	if c.openIssueCount > 0 {
 		c.lastActivity = now
 		processingState.LastChannelActivity = now
 	}
@@ -390,8 +390,8 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		return fmt.Errorf("failed to save channel processing state: %w", err)
 	}
 
-	// Return early if there are no open issues in the channel.
-	if c.openIssues == 0 {
+	// Stop here if there are no open issues in the channel.
+	if c.openIssueCount == 0 {
 		return nil
 	}
 
@@ -447,8 +447,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 
 	issuesToUpdate := []*models.Issue{}
 
-	// If the issue was moved, we do not update it in Slack or the database.
-	// The move process has already updated the issue in Slack and the database.
+	// If the issue was moved, we do not update it in Slack or the database. The move process has already taken care of that.
 	for _, issue := range issues {
 		if _, ok := movedIssues[issue.ID]; ok {
 			c.logger.WithFields(issue.LogFields()).Info("Issue was moved, skipping update in Slack and database")
@@ -469,9 +468,9 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		return fmt.Errorf("failed to save issues to database: %w", err)
 	}
 
-	c.logger.WithField("count", len(issuesToUpdate)).WithField("moved_count", len(movedIssues)).WithField("elapsed", fmt.Sprintf("%v", time.Since(started))).Debug("Issue processing completed")
+	c.logger.WithField("count", len(issuesToUpdate)).WithField("moved_count", len(movedIssues)).WithField("elapsed", time.Since(started)).Debug("Issue processing completed")
 
-	c.openIssues = openIssues
+	c.openIssueCount = openIssues
 
 	return nil
 }
@@ -501,7 +500,7 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 		return nil
 	}
 
-	slackErr := c.slackClient.UpdateSingleIssueWithThrottling(ctx, issue, "alert added to existing issue", c.openIssues)
+	slackErr := c.slackClient.UpdateSingleIssueWithThrottling(ctx, issue, "alert added to existing issue", c.openIssueCount)
 
 	if err := c.saveIssueToDB(ctx, issue); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
@@ -573,7 +572,7 @@ func (c *channelManager) saveIssuesToDB(ctx context.Context, issues []*models.Is
 		return fmt.Errorf("failed to update issues in database: %w", err)
 	}
 
-	c.logger.WithField("count", len(issues)).Debug("Updated issue collection in database")
+	c.logger.WithField("count", len(issues)).Debug("Saved issues to database")
 
 	return nil
 }
@@ -781,7 +780,7 @@ func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, 
 		return nil, fmt.Errorf("failed to obtain lock for channel %s after %d seconds: %w", c.channelID, int(maxWait.Seconds()), err)
 	}
 
-	c.logger.WithField("lock_key", channelID).Debug("Obtained lock")
+	c.logger.WithField("lock_key", channelID).Debug("Obtained channel lock")
 
 	return lock, nil
 }
@@ -792,7 +791,7 @@ func (c *channelManager) releaseLock(ctx context.Context, lock ChannelLock) {
 	if err := lock.Release(ctx); err != nil {
 		c.logger.WithField("lock_key", key).Errorf("Failed to release lock: %s", err)
 	} else {
-		c.logger.WithField("lock_key", key).Debug("Released lock")
+		c.logger.WithField("lock_key", key).Debug("Released channel lock")
 	}
 }
 

@@ -278,7 +278,7 @@ func (c *coordinator) runChannelManagerAsync(ctx context.Context, channelManager
 	// Make sure to signal that this goroutine is done when it exits.
 	defer c.channelManagersWaitGroup.Done()
 
-	// Start the channel manager. This will block until the channel manager exits.
+	// Run the channel manager. This will block the current thread until the channel manager exits.
 	channelManager.run(ctx)
 
 	c.channelManagersLock.Lock()
