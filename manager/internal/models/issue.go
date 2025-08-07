@@ -361,9 +361,17 @@ func (issue *Issue) RegisterHideOptionButtonsRequest() {
 func (issue *Issue) RegisterMoveRequest(reason MoveIssueReason, user, newChannelID, newChannelName string) {
 	issue.LastAlert.SlackChannelID = newChannelID
 	issue.LastAlert.SlackChannelName = newChannelName
-	issue.IsMoved = true
-	issue.MoveReason = reason
-	issue.MovedByUser = user
+
+	if issue.LastAlert.OriginalSlackChannelID != newChannelID {
+		issue.IsMoved = true
+		issue.MoveReason = reason
+		issue.MovedByUser = user
+	} else {
+		issue.IsMoved = false
+		issue.MoveReason = MoveIssueReason("")
+		issue.MovedByUser = ""
+	}
+
 	issue.SlackPostNeedsUpdate = true
 }
 

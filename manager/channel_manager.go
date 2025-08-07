@@ -697,18 +697,25 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 	// As source channel, we must use the original Slack channel ID from the last alert, as the issue may have been moved before.
 	sourceChannel := issue.LastAlert.OriginalSlackChannelID
 
-	// Create a new move mapping to track the move of the issue.
-	moveMapping := models.NewMoveMapping(issue.CorrelationID, sourceChannel, targetChannel, reason)
+	if sourceChannel != targetChannel {
+		// Create a new move mapping to track the move of the issue.
+		moveMapping := models.NewMoveMapping(issue.CorrelationID, sourceChannel, targetChannel, reason)
 
-	// Save information about the move, so that future alerts are routed correctly.
-	// If a previous move mappings exists for the current combination of channel and correlation ID, it will be overwritten.
-	if err := c.db.SaveMoveMapping(ctx, moveMapping); err != nil {
-		return err
+		// Save information about the move, so that future alerts are routed correctly.
+		// If a previous move mappings exists for the current combination of channel and correlation ID, it will be overwritten.
+		if err := c.db.SaveMoveMapping(ctx, moveMapping); err != nil {
+			return err
+		}
+
+		logger.WithField("target_slack_channel_id", targetChannel).WithField("correlation_id", issue.CorrelationID).Info("Saved move mapping")
+	} else {
+		// If the source and target channels are the same, we remove any existing move mapping for the issue.
+		if err := c.db.DeleteMoveMapping(ctx, issue.CorrelationID, sourceChannel); err != nil {
+			return fmt.Errorf("failed to delete move mapping for issue %s in channel %s: %w", issue.CorrelationID, sourceChannel, err)
+		}
+
+		logger.WithField("correlation_id", issue.CorrelationID).Info("Deleted move mapping")
 	}
-
-	logger = logger.WithField("target_slack_channel_id", targetChannel).WithField("correlation_id", issue.CorrelationID)
-
-	logger.Info("Saved move mapping")
 
 	// Remove the current Slack post (if any).
 	if err := c.slackClient.Delete(ctx, issue, "Issue moved between channels", false, nil); err != nil {

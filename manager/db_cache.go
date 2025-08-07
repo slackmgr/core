@@ -222,6 +222,22 @@ func (d *dbCacheMiddleware) FindMoveMapping(ctx context.Context, channelID, corr
 	return mapping, nil
 }
 
+func (d *dbCacheMiddleware) DeleteMoveMapping(ctx context.Context, channelID, correlationID string) error {
+	cacheKey := moveMappingCacheKey(channelID, correlationID)
+
+	// Remove the mapping from the cache first.
+	if err := d.moveMappingCache.Delete(ctx, cacheKey); err != nil {
+		return fmt.Errorf("failed to delete move mapping from cache: %w", err)
+	}
+
+	// Then remove it from the database.
+	if err := d.db.DeleteMoveMapping(ctx, channelID, correlationID); err != nil {
+		return fmt.Errorf("failed to delete move mapping from database: %w", err)
+	}
+
+	return nil
+}
+
 func (d *dbCacheMiddleware) SaveChannelProcessingState(ctx context.Context, state *common.ChannelProcessingState) error {
 	if state == nil {
 		return errors.New("channel processing state cannot be nil")
