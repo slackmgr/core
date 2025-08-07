@@ -694,12 +694,14 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 
 	defer c.releaseLock(ctx, targetChannelLock)
 
-	sourceChannel := issue.ChannelID()
+	// As source channel, we must use the original Slack channel ID from the last alert, as the issue may have been moved before.
+	sourceChannel := issue.LastAlert.OriginalSlackChannelID
 
 	// Create a new move mapping to track the move of the issue.
 	moveMapping := models.NewMoveMapping(issue.CorrelationID, sourceChannel, targetChannel, reason)
 
 	// Save information about the move, so that future alerts are routed correctly.
+	// If a previous move mappings exists for the current combination of channel and correlation ID, it will be overwritten.
 	if err := c.db.SaveMoveMapping(ctx, moveMapping); err != nil {
 		return err
 	}
@@ -721,7 +723,7 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 
 	// Create a new Slack post for the issue in the target channel.
 	// Errors from the Slack client are logged, but not returned.
-	// If the Slack post is not created from some reason, it will be created on the nest issue processing cycle.
+	// If the Slack post is not created from some reason, it will be created on the next issue processing cycle.
 	if err := c.slackClient.UpdateSingleIssue(ctx, issue, "incoming moved issue"); err != nil {
 		logger.Errorf("Failed to update moved issue in Slack: %s", err)
 	}

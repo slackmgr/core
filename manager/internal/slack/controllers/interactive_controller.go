@@ -254,7 +254,7 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 	// Parse the incoming metadata
 	metadata := c.parsePrivateModalMetadata(interaction.View.PrivateMetadata)
 
-	params := map[string]interface{}{
+	params := map[string]any{
 		"targetChannelId": selectedConversation,
 	}
 

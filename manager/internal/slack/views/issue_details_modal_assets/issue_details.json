@@ -53,7 +53,7 @@
       "type": "section",
       "text": {
         "type": "mrkdwn",
-        "text": "*Escalated*: `{{ .Escalated }}"
+        "text": "*Escalated*: `{{ .Escalated }}`"
       }
     },
     {
