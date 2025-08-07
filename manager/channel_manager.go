@@ -710,7 +710,7 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 		logger.WithField("target_slack_channel_id", targetChannel).WithField("correlation_id", issue.CorrelationID).Info("Saved move mapping")
 	} else {
 		// If the source and target channels are the same, we remove any existing move mapping for the issue.
-		if err := c.db.DeleteMoveMapping(ctx, issue.CorrelationID, sourceChannel); err != nil {
+		if err := c.db.DeleteMoveMapping(ctx, sourceChannel, issue.CorrelationID); err != nil {
 			return fmt.Errorf("failed to delete move mapping for issue %s in channel %s: %w", issue.CorrelationID, sourceChannel, err)
 		}
 
