@@ -19,6 +19,7 @@ var issueDetailsAssets embed.FS
 type issueDetailsArgs struct {
 	CorrelationID             string
 	DatabaseID                string
+	SlackPostID               string
 	Created                   string
 	LastUpdated               string
 	AlertCount                int
@@ -52,6 +53,7 @@ func IssueDetailsAssets(issue *models.Issue, cfg *config.ManagerConfig) (slack.B
 	a := issueDetailsArgs{
 		CorrelationID:             issue.CorrelationID,
 		DatabaseID:                issue.ID,
+		SlackPostID:               issue.SlackPostID,
 		Created:                   formatTimestamp(issue.Created, cfg),
 		LastUpdated:               formatTimestamp(issue.LastAlertReceived, cfg),
 		AlertCount:                issue.AlertCount,

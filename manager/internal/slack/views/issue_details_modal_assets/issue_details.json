@@ -18,6 +18,13 @@
       "type": "section",
       "text": {
         "type": "mrkdwn",
+        "text": "*Slack Post ID*: `{{ .SlackPostID }}`"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
         "text": "*Created*: `{{ .Created }}`\n*Last updated*: `{{ .LastUpdated }}`\n*Alerts*: `{{ .AlertCount }}`\n*Status*: `{{ .Status }}`"
       }
     },
