@@ -121,6 +121,39 @@ func (d *dbCacheMiddleware) SaveIssues(ctx context.Context, issues ...common.Iss
 	return nil
 }
 
+func (d *dbCacheMiddleware) MoveIssue(ctx context.Context, issue common.Issue, sourceChannelID, targetChannelID string) error {
+	issueModel, ok := issue.(*models.Issue)
+	if !ok {
+		return fmt.Errorf("expected issue to be of type *internal.Issue, got %T", issue)
+	}
+
+	// Marshal the issue body to JSON and cache it internally.
+	body, err := issueModel.MarshalJSONAndCache()
+	if err != nil {
+		panic(fmt.Errorf("failed to marshal issue body: %w", err))
+	}
+
+	cacheKey := issue.UniqueID()
+	issueHash := string(internal.HashBytes(body))
+
+	// We must explicitly remove the old issue hash from the cache, since the upcoming cache Set may fail
+	// after we save the issue to the database, thus leaving the cache in an inconsistent state.
+	if err := d.issueHashCache.Delete(ctx, cacheKey); err != nil {
+		return fmt.Errorf("failed to delete issue hash from cache: %w", err)
+	}
+
+	defer issueModel.ResetCachedJSONBody()
+
+	if err := d.db.MoveIssue(ctx, issue, sourceChannelID, targetChannelID); err != nil {
+		return fmt.Errorf("failed to move issue from channel %s to %s: %w", sourceChannelID, targetChannelID, err)
+	}
+
+	// After moving the issue, we need to update the cache with the new issue hash.
+	d.issueHashCache.Set(ctx, cacheKey, issueHash, 30*24*time.Hour)
+
+	return nil
+}
+
 func (d *dbCacheMiddleware) FindOpenIssueByCorrelationID(ctx context.Context, channelID, correlationID string) (string, json.RawMessage, error) {
 	return d.db.FindOpenIssueByCorrelationID(ctx, channelID, correlationID)
 }
@@ -129,18 +162,8 @@ func (d *dbCacheMiddleware) FindIssueBySlackPostID(ctx context.Context, channelI
 	return d.db.FindIssueBySlackPostID(ctx, channelID, postID)
 }
 
-func (d *dbCacheMiddleware) LoadOpenIssues(ctx context.Context) (map[string]json.RawMessage, error) {
-	issueBodies, err := d.db.LoadOpenIssues(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Cache the issue body hashes to avoid unnecessary write operations.
-	for id, body := range issueBodies {
-		d.issueHashCache.Set(ctx, id, string(internal.HashBytes(body)), 30*24*time.Hour)
-	}
-
-	return issueBodies, nil
+func (d *dbCacheMiddleware) FindActiveChannels(ctx context.Context) ([]string, error) {
+	return d.db.FindActiveChannels(ctx)
 }
 
 func (d *dbCacheMiddleware) LoadOpenIssuesInChannel(ctx context.Context, channelID string) (map[string]json.RawMessage, error) {

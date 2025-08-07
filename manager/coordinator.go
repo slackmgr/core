@@ -19,7 +19,6 @@ import (
 type coordinator struct {
 	channelManagers          map[string]*channelManager
 	channelManagersWaitGroup *sync.WaitGroup
-	channelManagersLock      *sync.Mutex
 	db                       common.DB
 	alertQueue               FifoQueue
 	slack                    *slack.Client
@@ -39,7 +38,6 @@ func newCoordinator(db common.DB, alertQueue FifoQueue, slack *slack.Client, cac
 	return &coordinator{
 		channelManagers:          make(map[string]*channelManager),
 		channelManagersWaitGroup: &sync.WaitGroup{},
-		channelManagersLock:      &sync.Mutex{},
 		db:                       db,
 		alertQueue:               alertQueue,
 		slack:                    slack,
@@ -56,15 +54,36 @@ func newCoordinator(db common.DB, alertQueue FifoQueue, slack *slack.Client, cac
 // FindIssueBySlackPost finds an issue by its Slack post ID in the specified channel.
 // It satisfies the IssueFinder interface.
 func (c *coordinator) FindIssueBySlackPost(ctx context.Context, channelID string, slackPostID string, includeArchived bool) *models.Issue {
-	channelManager, err := c.getChannelManager(ctx, channelID)
+	_, issueBody, err := c.db.FindIssueBySlackPostID(ctx, channelID, slackPostID)
 	if err != nil {
 		c.logger.Errorf("Failed to find issue by slack post: %s", err)
 		return nil
 	}
 
-	issue, err := channelManager.findIssueBySlackPost(ctx, slackPostID, includeArchived)
-	if err != nil {
-		c.logger.Errorf("Failed to find issue by slack post: %s", err)
+	if issueBody == nil {
+		return nil
+	}
+
+	issue := &models.Issue{}
+
+	if err := json.Unmarshal(issueBody, issue); err != nil {
+		c.logger.Errorf("Failed to unmarshal issue body: %s", err)
+		return nil
+	}
+
+	// Sanity check
+	if issue.LastAlert.SlackChannelID != channelID {
+		c.logger.Errorf("Issue found in database is not associated with the current channel")
+		return nil
+	}
+
+	// Sanity check
+	if issue.SlackPostID != slackPostID {
+		c.logger.Errorf("Issue found in database does not match the specified Slack post ID")
+		return nil
+	}
+
+	if !includeArchived && issue.Archived {
 		return nil
 	}
 
@@ -72,12 +91,12 @@ func (c *coordinator) FindIssueBySlackPost(ctx context.Context, channelID string
 }
 
 func (c *coordinator) init(ctx context.Context) error {
-	issueCount, err := c.refreshChannelManagers(ctx)
+	err := c.refreshChannelManagers(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start channel managers: %w", err)
 	}
 
-	c.logger.Infof("Coordinator initialized with %d open issue(s) in %d channel(s)", issueCount, len(c.channelManagers))
+	c.logger.Infof("Coordinator initialized with %d active channel(s)", len(c.channelManagers))
 
 	return nil
 }
@@ -95,7 +114,7 @@ messageLoop:
 		case <-ctx.Done():
 			break messageLoop
 		case <-channelRefreshTimeout:
-			if _, err := c.refreshChannelManagers(ctx); err != nil {
+			if err := c.refreshChannelManagers(ctx); err != nil {
 				return fmt.Errorf("failed to refresh channel managers: %w", err)
 			}
 
@@ -157,7 +176,7 @@ func (c *coordinator) addCommand(ctx context.Context, cmd *models.Command) error
 		return nil
 	}
 
-	manager, err := c.getChannelManager(ctx, cmd.SlackChannelID)
+	manager, err := c.findOrCreateChannelManager(ctx, cmd.SlackChannelID)
 	if err != nil {
 		return fmt.Errorf("failed to find or create channel manager: %w", err)
 	}
@@ -179,7 +198,7 @@ func (c *coordinator) addAlert(ctx context.Context, alert *models.Alert) error {
 		alert.SlackChannelID = moveMapping.TargetChannelID
 	}
 
-	channelManager, err := c.getChannelManager(ctx, alert.SlackChannelID)
+	channelManager, err := c.findOrCreateChannelManager(ctx, alert.SlackChannelID)
 	if err != nil {
 		return fmt.Errorf("failed to find or create channel manager: %w", err)
 	}
@@ -212,50 +231,41 @@ func (c *coordinator) findMoveMapping(ctx context.Context, channelID, correlatio
 }
 
 // refreshChannelManagers ensures that we have a running channel manager for each channel that has open issues.
-func (c *coordinator) refreshChannelManagers(ctx context.Context) (int, error) {
-	// Load all open (active) issues from the database, i.e. issues that are not archived.
-	issuesByID, err := c.db.LoadOpenIssues(ctx)
+func (c *coordinator) refreshChannelManagers(ctx context.Context) error {
+	activeChannels, err := c.db.FindActiveChannels(ctx)
 	if err != nil {
-		return 0, err
+		return err
 	}
 
-	issuesByChannelID := make(map[string][]*models.Issue)
-
-	for _, issueBody := range issuesByID {
-		issue := &models.Issue{}
-
-		if err := json.Unmarshal(issueBody, issue); err != nil {
-			return 0, fmt.Errorf("failed to unmarshal issue: %w", err)
-		}
-
-		issuesByChannelID[issue.ChannelID()] = append(issuesByChannelID[issue.ChannelID()], issue)
-	}
-
-	for channelID := range issuesByChannelID {
-		if _, err := c.getChannelManager(ctx, channelID); err != nil {
-			return 0, fmt.Errorf("failed to find or create channel manager for channel %s: %w", channelID, err)
+	// Iterate over all channel managers and ensure they are running for each channel that has open issues.
+	// Send a keep-alive signal to existing channel managers, to ensure that the message processing loop is running.
+	for _, channelID := range activeChannels {
+		if manager, ok := c.channelManagers[channelID]; ok {
+			if err := manager.keepAlive(ctx); err != nil {
+				return err
+			}
+		} else {
+			if _, err := c.createChannelManager(ctx, channelID); err != nil {
+				return fmt.Errorf("failed to create channel manager for channel %s: %w", channelID, err)
+			}
 		}
 	}
 
-	return len(issuesByID), nil
+	return nil
 }
 
-// getChannelManager finds an existing channel manager, or creates a new.
+// findOrCreateChannelManager finds an existing channel manager, or creates a new.
 // If a new channel manager is created, it starts running in a separate goroutine.
-func (c *coordinator) getChannelManager(ctx context.Context, channelID string) (*channelManager, error) {
-	c.channelManagersLock.Lock()
-	defer c.channelManagersLock.Unlock()
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
+func (c *coordinator) findOrCreateChannelManager(ctx context.Context, channelID string) (*channelManager, error) {
 	if manager, ok := c.channelManagers[channelID]; ok {
 		return manager, nil
 	}
 
+	// If no channel manager exists for the channel, create a new one.
+	return c.createChannelManager(ctx, channelID)
+}
+
+func (c *coordinator) createChannelManager(ctx context.Context, channelID string) (*channelManager, error) {
 	channelManager := newChannelManager(channelID, c.slack, c.db, c.locker, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings)
 
 	// Add one to the wait group to ensure we wait for this channel manager to finish.
@@ -266,26 +276,18 @@ func (c *coordinator) getChannelManager(ctx context.Context, channelID string) (
 	c.channelManagers[channelID] = channelManager
 
 	// Start the channel manager in a separate goroutine.
-	// The runChannelManagerAsync function will handle the lifecycle of the channel manager, as well as cleanup after it exits.
 	go c.runChannelManagerAsync(ctx, channelManager)
 
 	return channelManager, nil
 }
 
 // runChannelManagerAsync runs the channel manager in a separate goroutine and waits for it to finish.
-// It also removes the channel manager from the map once it has finished.
 func (c *coordinator) runChannelManagerAsync(ctx context.Context, channelManager *channelManager) {
 	// Make sure to signal that this goroutine is done when it exits.
 	defer c.channelManagersWaitGroup.Done()
 
 	// Run the channel manager. This will block the current thread until the channel manager exits.
 	channelManager.run(ctx)
-
-	c.channelManagersLock.Lock()
-	defer c.channelManagersLock.Unlock()
-
-	// Remove the channel manager from the map.
-	delete(c.channelManagers, channelManager.channelID)
 }
 
 func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.Command) error {
