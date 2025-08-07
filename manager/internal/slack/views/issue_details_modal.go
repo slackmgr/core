@@ -33,7 +33,8 @@ type issueDetailsArgs struct {
 	CurrentChannel            string
 	OriginalChannel           string
 	Escalated                 string
-	Moved                     string
+	IsMoved                   string
+	MoveReason                string
 	RouteKey                  string
 }
 
@@ -67,8 +68,20 @@ func IssueDetailsAssets(issue *models.Issue, cfg *config.ManagerConfig) (slack.B
 		CurrentChannel:            issue.LastAlert.SlackChannelID,
 		OriginalChannel:           issue.OriginalSlackChannelID(),
 		Escalated:                 strconv.FormatBool(issue.IsEscalated),
-		Moved:                     strconv.FormatBool(issue.IsMoved),
+		IsMoved:                   strconv.FormatBool(issue.IsMoved),
+		MoveReason:                "-",
 		RouteKey:                  issue.LastAlert.RouteKey,
+	}
+
+	if issue.IsMoved {
+		switch issue.MoveReason {
+		case models.MoveIssueReasonEscalation:
+			a.MoveReason = "Escalation"
+		case models.MoveIssueReasonUserCommand:
+			a.MoveReason = fmt.Sprintf("User command (%s)", issue.MovedByUser)
+		default:
+			a.MoveReason = string(issue.MoveReason)
+		}
 	}
 
 	if a.RouteKey == "" {

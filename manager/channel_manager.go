@@ -511,7 +511,7 @@ func (c *channelManager) moveEscalatedIssue(ctx context.Context, escalationResul
 		return fmt.Errorf("failed to move issue to channel %s: %s", escalationResult.MoveToChannel, reason)
 	}
 
-	return c.moveIssue(ctx, escalationResult.Issue, escalationResult.MoveToChannel, "Issue escalation", logger)
+	return c.moveIssue(ctx, escalationResult.Issue, escalationResult.MoveToChannel, models.MoveIssueReasonEscalation, "N/A", logger)
 }
 
 // addAlertToExistingIssue adds a new alert to an existing issue, updates the corresponding Slack post, and finally updates the issue in the database.
@@ -666,7 +666,7 @@ func (c *channelManager) handleMoveIssueCmd(ctx context.Context, issue *models.I
 
 	// We return false, indicating that the issue does not need to be saved to the database.
 	// The moveIssue method will handle saving the issue to the database.
-	return false, c.moveIssue(ctx, issue, targetChannelStr, cmd.UserRealName, logger)
+	return false, c.moveIssue(ctx, issue, targetChannelStr, models.MoveIssueReasonUserCommand, cmd.UserRealName, logger)
 }
 
 func (c *channelManager) showIssueOptionButtons(ctx context.Context, issue *models.Issue, _ *models.Command, logger common.Logger) (bool, error) {
@@ -685,7 +685,7 @@ func (c *channelManager) hideIssueOptionButtons(ctx context.Context, issue *mode
 	return true, c.slackClient.UpdateSingleIssue(ctx, issue, "hide issue option buttons request")
 }
 
-func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, targetChannel, username string, logger common.Logger) error {
+func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, targetChannel string, reason models.MoveIssueReason, username string, logger common.Logger) error {
 	// Obtain a lock for the *target channel*
 	targetChannelLock, err := c.obtainLock(ctx, targetChannel, 30*time.Second, time.Minute)
 	if err != nil {
@@ -697,7 +697,7 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 	sourceChannel := issue.ChannelID()
 
 	// Create a new move mapping to track the move of the issue.
-	moveMapping := models.NewMoveMapping(issue.CorrelationID, sourceChannel, targetChannel)
+	moveMapping := models.NewMoveMapping(issue.CorrelationID, sourceChannel, targetChannel, reason)
 
 	// Save information about the move, so that future alerts are routed correctly.
 	if err := c.db.SaveMoveMapping(ctx, moveMapping); err != nil {
@@ -717,7 +717,7 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 	channelName := c.slackClient.GetChannelName(ctx, targetChannel)
 
 	// Register the move request on the issue. This will override the Slack channel ID on the last alert.
-	issue.RegisterMoveRequest(username, targetChannel, channelName)
+	issue.RegisterMoveRequest(reason, username, targetChannel, channelName)
 
 	// Create a new Slack post for the issue in the target channel.
 	// Errors from the Slack client are logged, but not returned.

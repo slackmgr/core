@@ -53,7 +53,14 @@
       "type": "section",
       "text": {
         "type": "mrkdwn",
-        "text": "*Escalated*: `{{ .Escalated }}`\n*Moved*: `{{ .Moved }}`"
+        "text": "*Escalated*: `{{ .Escalated }}"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "text": "*Moved*: `{{ .IsMoved }}`\n*Reason*: `{{ .MoveReason }}`"
       }
     }
   ]

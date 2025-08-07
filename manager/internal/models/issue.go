@@ -17,44 +17,45 @@ var (
 
 // Issue represents one or more alerts with the same correlation ID (in the same Slack channel)
 type Issue struct {
-	ID                        string        `json:"id"`
-	CorrelationID             string        `json:"correlationId"`
-	Created                   time.Time     `json:"created"`
-	FirstAlert                *Alert        `json:"firstAlert"`
-	LastAlert                 *Alert        `json:"lastAlert"`
-	AlertCount                int           `json:"alertCount"`
-	LastAlertReceived         time.Time     `json:"lastAlertReceived"`
-	LastSlackMention          string        `json:"lastSlackMention"`
-	LastSlackMentionTime      time.Time     `json:"lastSlackMentionTime"`
-	AutoResolvePeriod         time.Duration `json:"autoResolvePeriod"`
-	ArchiveDelay              time.Duration `json:"archiveDelay"`
-	ArchiveTime               time.Time     `json:"archiveTime"`
-	Archived                  bool          `json:"archived"`
-	ResolveTime               time.Time     `json:"resolveTime"`
-	SlackPostID               string        `json:"slackPostId"`
-	SlackPostCreated          time.Time     `json:"slackPostCreated"`
-	SlackPostUpdated          time.Time     `json:"slackPostUpdated"`
-	SlackPostHeader           string        `json:"slackPostHeader"`
-	SlackPostText             string        `json:"slackPostText"`
-	SlackPostLastAction       SlackAction   `json:"slackPostLastAction"`
-	SlackPostNeedsUpdate      bool          `json:"slackPostNeedsUpdate"`
-	SlackPostNeedsDelete      bool          `json:"slackPostNeedsDelete"`
-	SlackAlertSentAtLeastOnce bool          `json:"slackAlertSentAtLeastOnce"`
-	SlackPostDelayedUntil     time.Time     `json:"slackPostDelayedUntil"`
-	IsEmojiTerminated         bool          `json:"slackPostEmojiTerminated"`
-	IsEmojiResolved           bool          `json:"slackPostEmojiResolved"`
-	IsEmojiInvestigated       bool          `json:"slackPostEmojiInvestigated"`
-	IsEmojiMuted              bool          `json:"slackPostEmojiMuted"`
-	IsEmojiButtonsActivated   bool          `json:"slackPostEmojiButtonsActivated"`
-	IsMoved                   bool          `json:"isMoved"`
-	TerminatedByUser          string        `json:"terminatedByUser"`
-	ResolvedByUser            string        `json:"resolvedByUser"`
-	InvestigatedByUser        string        `json:"investigatedByUser"`
-	InvestigatedSince         time.Time     `json:"investigatedSince"`
-	MutedByUser               string        `json:"mutedByUser"`
-	MutedSince                time.Time     `json:"mutedSince"`
-	MovedByUser               string        `json:"movedByUser"`
-	IsEscalated               bool          `json:"isEscalated"`
+	ID                        string          `json:"id"`
+	CorrelationID             string          `json:"correlationId"`
+	Created                   time.Time       `json:"created"`
+	FirstAlert                *Alert          `json:"firstAlert"`
+	LastAlert                 *Alert          `json:"lastAlert"`
+	AlertCount                int             `json:"alertCount"`
+	LastAlertReceived         time.Time       `json:"lastAlertReceived"`
+	LastSlackMention          string          `json:"lastSlackMention"`
+	LastSlackMentionTime      time.Time       `json:"lastSlackMentionTime"`
+	AutoResolvePeriod         time.Duration   `json:"autoResolvePeriod"`
+	ArchiveDelay              time.Duration   `json:"archiveDelay"`
+	ArchiveTime               time.Time       `json:"archiveTime"`
+	Archived                  bool            `json:"archived"`
+	ResolveTime               time.Time       `json:"resolveTime"`
+	SlackPostID               string          `json:"slackPostId"`
+	SlackPostCreated          time.Time       `json:"slackPostCreated"`
+	SlackPostUpdated          time.Time       `json:"slackPostUpdated"`
+	SlackPostHeader           string          `json:"slackPostHeader"`
+	SlackPostText             string          `json:"slackPostText"`
+	SlackPostLastAction       SlackAction     `json:"slackPostLastAction"`
+	SlackPostNeedsUpdate      bool            `json:"slackPostNeedsUpdate"`
+	SlackPostNeedsDelete      bool            `json:"slackPostNeedsDelete"`
+	SlackAlertSentAtLeastOnce bool            `json:"slackAlertSentAtLeastOnce"`
+	SlackPostDelayedUntil     time.Time       `json:"slackPostDelayedUntil"`
+	IsEmojiTerminated         bool            `json:"slackPostEmojiTerminated"`
+	IsEmojiResolved           bool            `json:"slackPostEmojiResolved"`
+	IsEmojiInvestigated       bool            `json:"slackPostEmojiInvestigated"`
+	IsEmojiMuted              bool            `json:"slackPostEmojiMuted"`
+	IsEmojiButtonsActivated   bool            `json:"slackPostEmojiButtonsActivated"`
+	IsMoved                   bool            `json:"isMoved"`
+	TerminatedByUser          string          `json:"terminatedByUser"`
+	ResolvedByUser            string          `json:"resolvedByUser"`
+	InvestigatedByUser        string          `json:"investigatedByUser"`
+	InvestigatedSince         time.Time       `json:"investigatedSince"`
+	MutedByUser               string          `json:"mutedByUser"`
+	MutedSince                time.Time       `json:"mutedSince"`
+	MoveReason                MoveIssueReason `json:"moveReason"`
+	MovedByUser               string          `json:"movedByUser"`
+	IsEscalated               bool            `json:"isEscalated"`
 
 	// cachedJSONBody is used to store the raw JSON body of the issue, after marshalling.
 	// This is used to avoid marshalling in both the database cache middleware and the database driver.
@@ -357,10 +358,11 @@ func (issue *Issue) RegisterHideOptionButtonsRequest() {
 	issue.SlackPostNeedsUpdate = true
 }
 
-func (issue *Issue) RegisterMoveRequest(user, newChannelID, newChannelName string) {
+func (issue *Issue) RegisterMoveRequest(reason MoveIssueReason, user, newChannelID, newChannelName string) {
 	issue.LastAlert.SlackChannelID = newChannelID
 	issue.LastAlert.SlackChannelName = newChannelName
 	issue.IsMoved = true
+	issue.MoveReason = reason
 	issue.MovedByUser = user
 	issue.SlackPostNeedsUpdate = true
 }

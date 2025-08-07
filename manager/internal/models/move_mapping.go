@@ -8,20 +8,22 @@ import (
 )
 
 type MoveMapping struct {
-	ID                string    `json:"id"`
-	Timestamp         time.Time `json:"timestamp"`
-	CorrelationID     string    `json:"correlationId"`
-	OriginalChannelID string    `json:"originalChannelId"`
-	TargetChannelID   string    `json:"targetChannelId"`
+	ID                string          `json:"id"`
+	Timestamp         time.Time       `json:"timestamp"`
+	CorrelationID     string          `json:"correlationId"`
+	OriginalChannelID string          `json:"originalChannelId"`
+	TargetChannelID   string          `json:"targetChannelId"`
+	Reason            MoveIssueReason `json:"reason"`
 }
 
-func NewMoveMapping(correlationID, originalChannelID, targetChannelID string) *MoveMapping {
+func NewMoveMapping(correlationID, originalChannelID, targetChannelID string, reason MoveIssueReason) *MoveMapping {
 	return &MoveMapping{
 		ID:                internal.Hash(originalChannelID, correlationID),
 		Timestamp:         time.Now(),
 		CorrelationID:     correlationID,
 		OriginalChannelID: originalChannelID,
 		TargetChannelID:   targetChannelID,
+		Reason:            reason,
 	}
 }
 
