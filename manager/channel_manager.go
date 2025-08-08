@@ -223,7 +223,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		return fmt.Errorf("failed to obtain lock for channel %s after 30 seconds: %w", c.channelID, err)
 	}
 
-	defer c.releaseLock(ctx, lock)
+	defer c.releaseLock(lock) //nolint:contextcheck
 
 	c.metrics.AddToCounter(alertsTotal, float64(1), c.channelID)
 
@@ -301,7 +301,7 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 		return fmt.Errorf("failed to obtain lock for channel %s after 30 seconds: %w", c.channelID, err)
 	}
 
-	defer c.releaseLock(ctx, lock)
+	defer c.releaseLock(lock) //nolint:contextcheck
 
 	logger := c.logger.WithFields(cmd.LogFields())
 
@@ -361,7 +361,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		return 0, fmt.Errorf("failed to obtain lock for channel %s: %w", c.channelID, err)
 	}
 
-	defer c.releaseLock(ctx, lock)
+	defer c.releaseLock(lock) //nolint:contextcheck
 
 	processingState, err := c.db.FindChannelProcessingState(ctx, c.channelID)
 	if err != nil {
@@ -732,7 +732,7 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 		return fmt.Errorf("failed to obtain lock for target channel %s after 5 minutes: %w", c.channelID, err)
 	}
 
-	defer c.releaseLock(ctx, targetChannelLock)
+	defer c.releaseLock(targetChannelLock) //nolint:contextcheck
 
 	// The original channel is the channel where the issue was created. If this is the same as the target channel, we need to delete the move mapping.
 	originalChannel := issue.LastAlert.OriginalSlackChannelID
@@ -855,10 +855,12 @@ func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, 
 	return lock, nil
 }
 
-func (c *channelManager) releaseLock(ctx context.Context, lock ChannelLock) {
+// releaseLock releases the lock for the specified channel.
+// We can't use the regular context here, since it's vital that the lock is released even if the context is cancelled.
+func (c *channelManager) releaseLock(lock ChannelLock) {
 	key := lock.Key()
 
-	if err := lock.Release(ctx); err != nil {
+	if err := lock.Release(context.Background()); err != nil {
 		c.logger.WithField("lock_key", key).Errorf("Failed to release lock: %s", err)
 	} else {
 		c.logger.WithField("lock_key", key).Debug("Channel lock released")
