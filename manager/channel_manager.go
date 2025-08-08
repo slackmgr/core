@@ -32,7 +32,6 @@ type channelManager struct {
 	commandCh       chan *models.Command
 	keepAliveCh     chan struct{}
 	cmdFuncs        map[models.CommandAction]cmdFunc
-	openIssueCount  int
 }
 
 func newChannelManager(channelID string, slackClient *slack.Client, db common.DB, locker ChannelLocker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
@@ -125,14 +124,14 @@ func (c *channelManager) run(ctx context.Context) {
 				processorIsRunning = true
 			}
 		case <-processorTimeout:
-			err := c.processActiveIssues(ctx, interval)
+			openIssues, err := c.processActiveIssues(ctx, interval)
 			if err != nil {
 				c.logger.Errorf("Failed to process active issues: %s", err)
 			}
 
 			// If no error occurred AND no open issues exists, stop the processing loop (i.e. don't create a new timeout).
 			// It will be started again when a new alert or command is received, or when a keep-alive signal is received from the coordinator.
-			if err == nil && c.openIssueCount == 0 {
+			if err == nil && openIssues == 0 {
 				processorIsRunning = false
 				c.logger.Info("Issue processing stopped - no activity in channel")
 				continue
@@ -356,25 +355,21 @@ func ackCommand(ctx context.Context, cmd *models.Command, logger common.Logger) 
 // multiple managers running in parallel, e.g. in a Kubernetes cluster.
 //
 // This method must obtain a lock for the channel before processing the issues.
-func (c *channelManager) processActiveIssues(ctx context.Context, minInterval time.Duration) error {
+func (c *channelManager) processActiveIssues(ctx context.Context, minInterval time.Duration) (int, error) {
 	lock, err := c.obtainLock(ctx, c.channelID, 5*time.Minute, 2*minInterval)
 	if err != nil {
-		if errors.Is(err, ErrChannelLockUnavailable) {
-			c.logger.Errorf("Failed to obtain lock for channel after %d seconds - skipping channel processing", int(2*minInterval.Seconds()))
-			return nil
-		}
-		return fmt.Errorf("failed to obtain lock for channel %s: %w", c.channelID, err)
+		return 0, fmt.Errorf("failed to obtain lock for channel %s: %w", c.channelID, err)
 	}
 
 	defer c.releaseLock(ctx, lock)
 
 	processingState, err := c.db.FindChannelProcessingState(ctx, c.channelID)
 	if err != nil {
-		return fmt.Errorf("failed to find channel processing state: %w", err)
+		return 0, fmt.Errorf("failed to find channel processing state: %w", err)
 	}
 
 	// No processing state found means this is the first time we are processing this channel.
-	// Create a new processing state and move on.
+	// Create a new processing state and proceed.
 	if processingState == nil {
 		processingState = common.NewChannelProcessingState(c.channelID)
 		c.logger.Debug("No channel processing state found in database, creating a new one")
@@ -386,36 +381,37 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 	// This can happen if there are multiple managers running in parallel, e.g. in a Kubernetes cluster.
 	if timeSinceLastProcessed < minInterval {
 		c.logger.WithField("last_processed", timeSinceLastProcessed).WithField("min_interval", minInterval).Debug("Skipping issue processing due to recent processing by other manager")
-		return nil
+		return processingState.OpenIssues, nil
 	}
 
 	c.logger.WithField("last_processed", timeSinceLastProcessed).WithField("min_interval", minInterval).Debug("Processing issues in channel")
 
 	issueBodies, err := c.db.LoadOpenIssuesInChannel(ctx, c.channelID)
 	if err != nil {
-		return fmt.Errorf("failed to load open issues from database: %w", err)
+		return 0, fmt.Errorf("failed to load open issues from database: %w", err)
 	}
-
-	c.openIssueCount = len(issueBodies)
 
 	now := time.Now().UTC()
 
 	// Update the processing state with the current time. This is used to ensure that the processing is not repeated too often (by multiple managers).
 	processingState.LastProcessed = now
 
+	// Update the processing state with the number of open issues in the channel.
+	processingState.OpenIssues = len(issueBodies)
+
 	// We update the LastChannelActivity only if there are open issues.
-	if c.openIssueCount > 0 {
+	if processingState.OpenIssues > 0 {
 		processingState.LastChannelActivity = now
 	}
 
 	// Save the updated processing state to the database.
 	if err := c.db.SaveChannelProcessingState(ctx, processingState); err != nil {
-		return fmt.Errorf("failed to save channel processing state: %w", err)
+		return 0, fmt.Errorf("failed to save channel processing state: %w", err)
 	}
 
 	// Stop here if there are no open issues in the channel.
-	if c.openIssueCount == 0 {
-		return nil
+	if processingState.OpenIssues == 0 {
+		return 0, nil
 	}
 
 	issues := make(map[string]*models.Issue)
@@ -424,7 +420,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		issue := &models.Issue{}
 
 		if err := json.Unmarshal(body, issue); err != nil {
-			return fmt.Errorf("failed to unmarshal issue body: %w", err)
+			return 0, fmt.Errorf("failed to unmarshal issue body: %w", err)
 		}
 
 		issues[issue.ID] = issue
@@ -491,14 +487,12 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 
 	// Saved the issues to the database. This includes archived issues, which are marked as such in the database.
 	if err := c.saveIssuesToDB(ctx, issuesToUpdate); err != nil {
-		return fmt.Errorf("failed to save issues to database: %w", err)
+		return 0, fmt.Errorf("failed to save issues to database: %w", err)
 	}
 
 	c.logger.WithField("count", len(issuesToUpdate)).WithField("moved_count", len(movedIssues)).WithField("elapsed", time.Since(started)).Debug("Issue processing completed")
 
-	c.openIssueCount = openIssues
-
-	return nil
+	return processingState.OpenIssues, nil
 }
 
 // registerIssueAsArchived marks the issue as archived (but does not update it in the database).
@@ -557,9 +551,18 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 		return nil
 	}
 
+	openIssues := 0
+
+	processingState, err := c.db.FindChannelProcessingState(ctx, c.channelID)
+	if err != nil {
+		c.logger.Errorf("Failed to find channel processing state: %s", err)
+	} else if processingState != nil {
+		openIssues = processingState.OpenIssues
+	}
+
 	// Update the issue in Slack.
 	// Errors from the Slack client are logged, but not returned.
-	if err := c.slackClient.UpdateSingleIssueWithThrottling(ctx, issue, "alert added to existing issue", c.openIssueCount); err != nil {
+	if err := c.slackClient.UpdateSingleIssueWithThrottling(ctx, issue, "alert added to existing issue", openIssues); err != nil {
 		c.logger.Errorf("Failed to update issue in Slack: %s", err)
 	}
 
