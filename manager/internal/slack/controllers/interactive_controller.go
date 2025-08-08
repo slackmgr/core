@@ -264,6 +264,13 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 		return
 	}
 
+	// Check that the target channel is not the same as the current channel
+	if targetChannelID == interaction.Channel.ID {
+		errMsg := "You cannot move an issue to the same channel"
+		ackWithFieldErrorMsg(evt, clt, "select_channel", errMsg)
+		return
+	}
+
 	// All is good - send normal ack and clear the modal view
 	ackWithPayload(evt, clt, slack.NewClearViewSubmissionResponse())
 
