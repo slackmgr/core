@@ -264,8 +264,13 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 		return
 	}
 
+	// Parse the incoming metadata
+	metadata := c.parsePrivateModalMetadata(interaction.View.PrivateMetadata)
+
+	currentChannelID := metadata.Get("channelId")
+
 	// Check that the target channel is not the same as the current channel
-	if targetChannelID == interaction.Channel.ID {
+	if strings.EqualFold(targetChannelID, currentChannelID) {
 		errMsg := "You cannot move an issue to the same channel"
 		ackWithFieldErrorMsg(evt, clt, "select_channel", errMsg)
 		return
@@ -280,9 +285,6 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 		logger.Errorf("Failed to get user info: %s", err)
 		return
 	}
-
-	// Parse the incoming metadata
-	metadata := c.parsePrivateModalMetadata(interaction.View.PrivateMetadata)
 
 	params := map[string]any{
 		"targetChannelId": targetChannelID,
