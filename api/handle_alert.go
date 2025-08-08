@@ -377,7 +377,7 @@ func (s *Server) logAlerts(text, reason string, started time.Time, alerts ...*co
 	d := fmt.Sprintf("%v", time.Since(started))
 
 	for _, alert := range alerts {
-		entry := s.logger.WithField("duration", d).WithField("correlation_id", alert.CorrelationID).WithField("slack_channel_id", alert.SlackChannelID).WithField("header", alert.Header).WithField("fallback_text", alert.FallbackText)
+		entry := s.logger.WithField("duration", d).WithField("correlation_id", alert.CorrelationID).WithField("channel_id", alert.SlackChannelID).WithField("header", alert.Header).WithField("fallback_text", alert.FallbackText)
 		if reason != "" {
 			entry = entry.WithField("reason", reason)
 		}

@@ -245,7 +245,7 @@ func (s *Server) runRawAlertConsumer(ctx context.Context) error {
 
 	errg.Go(func() error {
 		for item := range queueCh {
-			logger := s.logger.WithField("message_id", item.MessageID).WithField("slack_channel_id", item.SlackChannelID)
+			logger := s.logger.WithField("message_id", item.MessageID).WithField("channel_id", item.SlackChannelID)
 			logger.Debug("Alert received")
 
 			if item.Ack == nil {

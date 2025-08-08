@@ -339,7 +339,7 @@ func (c *Client) DeletePost(ctx context.Context, channelID, ts string) error {
 		return nil
 	}
 
-	logger := c.logger.WithField("slack_channel_id", channelID).WithField("slack_post_id", ts)
+	logger := c.logger.WithField("channel_id", channelID).WithField("slack_post_id", ts)
 
 	err := c.api.ChatDeleteMessage(ctx, channelID, ts)
 	if err != nil {

@@ -73,9 +73,9 @@ func (a *Alert) LogFields() map[string]interface{} {
 		return nil
 	}
 
-	return map[string]interface{}{
-		"slack_channel_id":   a.SlackChannelID,
-		"slack_channel_name": a.SlackChannelName,
-		"correlation_id":     a.CorrelationID,
+	return map[string]any{
+		"channel_id":     a.SlackChannelID,
+		"channel_name":   a.SlackChannelName,
+		"correlation_id": a.CorrelationID,
 	}
 }

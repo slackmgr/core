@@ -120,7 +120,7 @@ func (c *ReactionsController) reactionRemoved(ctx context.Context, evt *socketmo
 }
 
 func (c *ReactionsController) sendReactionAddedCommand(ctx context.Context, evt *slackevents.ReactionAddedEvent, action models.CommandAction, requireChannelAdmin bool) {
-	logger := c.logger.WithField("slack_channel_id", evt.Item.Channel).WithField("user_id", evt.User).WithField("action_type", "added").
+	logger := c.logger.WithField("channel_id", evt.Item.Channel).WithField("user_id", evt.User).WithField("action_type", "added").
 		WithField("reaction", evt.Reaction).WithField("slack_post_id", evt.Item.Timestamp)
 
 	userInfo, err := c.getUserInfo(ctx, evt.Item.Channel, evt.User, requireChannelAdmin, logger)
@@ -148,7 +148,7 @@ func (c *ReactionsController) sendReactionAddedCommand(ctx context.Context, evt 
 }
 
 func (c *ReactionsController) sendReactionRemovedCommand(ctx context.Context, evt *slackevents.ReactionRemovedEvent, action models.CommandAction, requireChannelAdmin bool) {
-	logger := c.logger.WithField("slack_channel_id", evt.Item.Channel).WithField("user_id", evt.User).WithField("action_type", "removed").
+	logger := c.logger.WithField("channel_id", evt.Item.Channel).WithField("user_id", evt.User).WithField("action_type", "removed").
 		WithField("reaction", evt.Reaction).WithField("slack_post_id", evt.Item.Timestamp)
 
 	userInfo, err := c.getUserInfo(ctx, evt.Item.Channel, evt.User, requireChannelAdmin, logger)

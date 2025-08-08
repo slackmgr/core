@@ -451,7 +451,7 @@ func (issue *Issue) IsInfoOrResolved() bool {
 	return issue.LastAlert.Severity == common.AlertInfo || issue.IsResolved()
 }
 
-func (issue *Issue) LogFields() map[string]interface{} {
+func (issue *Issue) LogFields() map[string]any {
 	if issue == nil {
 		return nil
 	}
@@ -462,11 +462,11 @@ func (issue *Issue) LogFields() map[string]interface{} {
 		correlationID = correlationID[0:100]
 	}
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"context":              "Issue processing",
 		"correlation_id":       correlationID,
-		"slack_channel_id":     issue.LastAlert.SlackChannelID,
-		"slack_channel_name":   issue.LastAlert.SlackChannelName,
+		"channel_id":           issue.LastAlert.SlackChannelID,
+		"channel_name":         issue.LastAlert.SlackChannelName,
 		"last_alert_timestamp": issue.LastAlert.Timestamp.Format(time.RFC3339),
 		"last_alert_received":  issue.LastAlertReceived.Format(time.RFC3339),
 		"alert_count":          issue.AlertCount,

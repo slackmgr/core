@@ -47,7 +47,7 @@ func (c *GreetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 
 	userInfo, err := c.client.GetUserInfo(ctx, joinedEvent.User)
 	if err != nil {
-		c.logger.WithField("slack_channel_id", joinedEvent.Channel).WithField("user_id", joinedEvent.User).Errorf("Failed to read Slack user info: %s", err)
+		c.logger.WithField("channel_id", joinedEvent.Channel).WithField("user_id", joinedEvent.User).Errorf("Failed to read Slack user info: %s", err)
 		return
 	}
 
@@ -61,7 +61,7 @@ func (c *GreetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 		return
 	}
 
-	logger := c.logger.WithField("slack_channel_id", joinedEvent.Channel).WithField("user_name", userInfo.RealName).WithField("user_id", userInfo.ID)
+	logger := c.logger.WithField("channel_id", joinedEvent.Channel).WithField("user_name", userInfo.RealName).WithField("user_id", userInfo.ID)
 
 	if isAlertChannel {
 		logger.Info("User joined managed channel")
@@ -123,11 +123,11 @@ func (c *GreetingsController) memberLeftChannel(ctx context.Context, evt *socket
 
 	userInfo, err := c.client.GetUserInfo(ctx, leftChannelEvent.User)
 	if err != nil {
-		c.logger.WithField("slack_channel_id", leftChannelEvent.Channel).WithField("user_id", leftChannelEvent.User).Errorf("Failed to read Slack user info: %s", err)
+		c.logger.WithField("channel_id", leftChannelEvent.Channel).WithField("user_id", leftChannelEvent.User).Errorf("Failed to read Slack user info: %s", err)
 		return
 	}
 
-	logger := c.logger.WithField("slack_channel_id", leftChannelEvent.Channel).WithField("user_name", userInfo.RealName).WithField("user_id", userInfo.ID)
+	logger := c.logger.WithField("channel_id", leftChannelEvent.Channel).WithField("user_name", userInfo.RealName).WithField("user_id", userInfo.ID)
 
 	if userInfo.IsBot || userInfo.IsAppUser {
 		return

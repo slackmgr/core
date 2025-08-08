@@ -38,7 +38,7 @@ type channelManager struct {
 func newChannelManager(channelID string, slackClient *slack.Client, db common.DB, locker ChannelLocker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
 	managerSettings *models.ManagerSettingsWrapper,
 ) *channelManager {
-	logger = logger.WithField("slack_channel_id", channelID)
+	logger = logger.WithField("channel_id", channelID)
 
 	if len(webhookHandlers) == 0 {
 		defaultHandler := NewHTTPWebhookHandler(logger, cfg)
@@ -130,11 +130,11 @@ func (c *channelManager) run(ctx context.Context) {
 				c.logger.Errorf("Failed to process active issues: %s", err)
 			}
 
-			// If no error occurred AND no open issues exists, stop the processing loop.
+			// If no error occurred AND no open issues exists, stop the processing loop (i.e. don't create a new timeout).
 			// It will be started again when a new alert or command is received, or when a keep-alive signal is received from the coordinator.
 			if err == nil && c.openIssueCount == 0 {
 				processorIsRunning = false
-				c.logger.Info("No activity in channel - stopping issue processing")
+				c.logger.Info("Issue processing stopped - no activity in channel")
 				continue
 			}
 
@@ -148,7 +148,7 @@ func (c *channelManager) run(ctx context.Context) {
 			if !processorIsRunning {
 				processorTimeout = time.After(interval)
 				processorIsRunning = true
-				c.logger.Info("Received keep-alive signal - restarting issue processing")
+				c.logger.Info("Issue processing restarted - received keep-alive signal")
 			}
 		}
 	}
@@ -441,15 +441,18 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 
 	for _, issue := range issues {
 		if issue.IsReadyForArchiving() {
-			issue.RegisterArchiving()
-		} else {
-			openIssues++
-
-			// The channel name may have changed since the issue was created. Update it if needed.
-			issue.LastAlert.SlackChannelName = currentChannelName
-
-			escalationResults = append(escalationResults, issue.ApplyEscalationRules())
+			if err := c.registerIssueAsArchived(ctx, issue); err != nil {
+				c.logger.WithFields(issue.LogFields()).Errorf("Failed to archive issue: %s", err)
+			}
+			continue
 		}
+
+		openIssues++
+
+		// The channel name may have changed since the issue was created. Update it if needed.
+		issue.LastAlert.SlackChannelName = currentChannelName
+
+		escalationResults = append(escalationResults, issue.ApplyEscalationRules())
 	}
 
 	movedIssues := make(map[string]struct{})
@@ -473,7 +476,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 	// If the issue was moved, we do not update it in Slack or the database. The move process has already taken care of that.
 	for _, issue := range issues {
 		if _, ok := movedIssues[issue.ID]; ok {
-			c.logger.WithFields(issue.LogFields()).Info("Issue was moved, skipping update in Slack and database")
+			c.logger.WithFields(issue.LogFields()).Debug("Issue was moved, skipping update in Slack and database")
 			continue
 		}
 
@@ -486,7 +489,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		c.logger.Errorf("Failed to update issues in Slack: %s", err)
 	}
 
-	// Saved the issues to the database.
+	// Saved the issues to the database. This includes archived issues, which are marked as such in the database.
 	if err := c.saveIssuesToDB(ctx, issuesToUpdate); err != nil {
 		return fmt.Errorf("failed to save issues to database: %w", err)
 	}
@@ -494,6 +497,37 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 	c.logger.WithField("count", len(issuesToUpdate)).WithField("moved_count", len(movedIssues)).WithField("elapsed", time.Since(started)).Debug("Issue processing completed")
 
 	c.openIssueCount = openIssues
+
+	return nil
+}
+
+// registerIssueAsArchived marks the issue as archived (but does not update it in the database).
+// It also deletes any escalation move mappings related to the issue, if applicable.
+func (c *channelManager) registerIssueAsArchived(ctx context.Context, issue *models.Issue) error {
+	issue.RegisterArchiving()
+
+	c.logger.WithField("correlation_id", issue.CorrelationID).Info("Issue archived")
+
+	moveMappingBody, err := c.db.FindMoveMapping(ctx, c.channelID, issue.CorrelationID)
+	if err != nil {
+		return fmt.Errorf("failed to find move mapping for issue %s in channel %s: %w", issue.CorrelationID, c.channelID, err)
+	}
+
+	if moveMappingBody != nil {
+		var moveMapping *models.MoveMapping
+
+		if err := json.Unmarshal(moveMappingBody, &moveMapping); err != nil {
+			return fmt.Errorf("failed to unmarshal move mapping body: %w", err)
+		}
+
+		if moveMapping.Reason == models.MoveIssueReasonEscalation {
+			if err := c.db.DeleteMoveMapping(ctx, moveMapping.OriginalChannelID, moveMapping.CorrelationID); err != nil {
+				return fmt.Errorf("failed to delete escalation move mapping for issue %s in channel %s: %w", moveMapping.CorrelationID, moveMapping.OriginalChannelID, err)
+			}
+
+			c.logger.WithField("correlation_id", moveMapping.CorrelationID).Info("Escalation move mapping deleted for archived issue")
+		}
+	}
 
 	return nil
 }
@@ -523,14 +557,14 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 		return nil
 	}
 
-	slackErr := c.slackClient.UpdateSingleIssueWithThrottling(ctx, issue, "alert added to existing issue", c.openIssueCount)
+	// Update the issue in Slack.
+	// Errors from the Slack client are logged, but not returned.
+	if err := c.slackClient.UpdateSingleIssueWithThrottling(ctx, issue, "alert added to existing issue", c.openIssueCount); err != nil {
+		c.logger.Errorf("Failed to update issue in Slack: %s", err)
+	}
 
 	if err := c.db.SaveIssue(ctx, issue); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
-	}
-
-	if slackErr != nil {
-		return fmt.Errorf("failed to update issue in Slack: %w", slackErr)
 	}
 
 	return nil
@@ -541,15 +575,18 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert, logger common.Logger) error {
 	// Do not create a new issue for an alert that is already resolved
 	if alert.IssueFollowUpEnabled && alert.Severity == common.AlertResolved {
-		logger.Info("Ignoring resolved alert for new issue")
+		logger.Info("Resolved alert ignored for new issue")
 		return nil
 	}
 
 	issue := models.NewIssue(alert, c.logger)
 	logger = logger.WithFields(issue.LogFields())
 
-	// Slack errors are eventually returned, but we first need to store the issue in the database
-	slackErr := c.slackClient.UpdateSingleIssue(ctx, issue, "new issue created")
+	// Create the issue post in Slack.
+	// Errors from the Slack client are logged, but not returned.
+	if err := c.slackClient.UpdateSingleIssue(ctx, issue, "new issue created"); err != nil {
+		c.logger.Errorf("Failed to update new issue in Slack: %s", err)
+	}
 
 	// Save the issue to the database, regardless of any Slack errors.
 	// This ensures that the issue is available in the database, even if the Slack update fails.
@@ -557,12 +594,7 @@ func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
-	logger.Info("Create issue")
-
-	// No we can return a possible error from the Slack client, after the issue has been saved to the database.
-	if slackErr != nil {
-		return fmt.Errorf("failed to update issue in Slack: %w", slackErr)
-	}
+	logger.Info("Issue created")
 
 	return nil
 }
@@ -707,14 +739,14 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 			return err
 		}
 
-		logger.WithField("target_slack_channel_id", targetChannel).WithField("correlation_id", issue.CorrelationID).Info("Saved move mapping")
+		logger.WithField("target_slack_channel_id", targetChannel).WithField("correlation_id", issue.CorrelationID).Info("Move mapping saved")
 	} else {
 		// If the source and target channels are the same, we remove any existing move mapping for the issue.
 		if err := c.db.DeleteMoveMapping(ctx, sourceChannel, issue.CorrelationID); err != nil {
 			return fmt.Errorf("failed to delete move mapping for issue %s in channel %s: %w", issue.CorrelationID, sourceChannel, err)
 		}
 
-		logger.WithField("correlation_id", issue.CorrelationID).Info("Deleted move mapping")
+		logger.WithField("correlation_id", issue.CorrelationID).Info("Move mapping deleted")
 	}
 
 	// Remove the current Slack post (if any).
@@ -795,7 +827,7 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 	// The webhook may fail, in which case we log the error and continue.
 	go postWebhook(ctx, handler, webhook.URL, data, logger)
 
-	// We return false, indicating that the issue does not need to be saved to the database.
+	// We return false, indicating that the issue does not need to be saved to the database (since we did not modify it).
 	return false, nil
 }
 

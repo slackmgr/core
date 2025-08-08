@@ -104,6 +104,7 @@ func processInFlightMessages(ctx context.Context, messages map[string]models.Mes
 				if err := sem.Acquire(ctx, 1); err != nil {
 					return
 				}
+
 				defer sem.Release(1)
 
 				extend(ctx, msg, logger)

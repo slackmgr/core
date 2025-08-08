@@ -81,18 +81,18 @@ func (c *Command) DedupID() string {
 	return fmt.Sprintf("command::%s::%s::%s", c.SlackChannelID, c.Action, c.Timestamp.Format(time.RFC3339Nano))
 }
 
-func (c *Command) LogFields() map[string]interface{} {
+func (c *Command) LogFields() map[string]any {
 	if c == nil {
 		return nil
 	}
 
-	fields := map[string]interface{}{
-		"slack_channel_id": c.SlackChannelID,
-		"slack_post_id":    c.SlackPostID,
-		"reaction":         c.Reaction,
-		"action":           c.Action,
-		"user_id":          c.UserID,
-		"user_name":        c.UserRealName,
+	fields := map[string]any{
+		"channel_id":    c.SlackChannelID,
+		"slack_post_id": c.SlackPostID,
+		"reaction":      c.Reaction,
+		"action":        c.Action,
+		"user_id":       c.UserID,
+		"user_name":     c.UserRealName,
 	}
 
 	if c.Parameters != nil {

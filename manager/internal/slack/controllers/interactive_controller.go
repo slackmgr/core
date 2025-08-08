@@ -159,7 +159,7 @@ func (c *InteractiveController) defaultInteractiveHandler(_ context.Context, evt
 }
 
 // handleMoveIssueRequest handles a request to move an issue from one channel to another. It is triggered by a message shortcut.
-// It opens a modal view with options to move the issue, IF the user is allowed to perform this action.
+// It opens a modal view with options to move the issue, IF the user is allowed to perform this action AND the issue state allows it.
 // https://api.slack.com/interactivity/shortcuts/using#message_shortcuts
 func (c *InteractiveController) handleMoveIssueRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
 	userIsGlobalAdmin := c.managerSettings.Settings.UserIsGlobalAdmin(interaction.User.ID)
@@ -181,6 +181,29 @@ func (c *InteractiveController) handleMoveIssueRequest(ctx context.Context, inte
 	if !managedChannel {
 		msg := fmt.Sprintf("Sorry, but you can only move messages in channels managed by %s.", c.managerSettings.Settings.AppFriendlyName)
 		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", msg); err != nil {
+			logger.Errorf("Failed to send interactive response: %s", err)
+		}
+		return
+	}
+
+	issue := c.issueFinder.FindIssueBySlackPost(ctx, interaction.Channel.ID, interaction.Message.Timestamp, true)
+
+	if issue == nil {
+		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but no issue was found for this Slack message."); err != nil {
+			logger.Errorf("Failed to send interactive response: %s", err)
+		}
+		return
+	}
+
+	if issue.Archived {
+		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but the issue is archived and cannot be moved."); err != nil {
+			logger.Errorf("Failed to send interactive response: %s", err)
+		}
+		return
+	}
+
+	if len(issue.LastAlert.Escalation) > 0 {
+		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but issues with escalation rules cannot be moved."); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
@@ -713,7 +736,7 @@ func getInteractionAndLoggerFromEvent(evt *socketmode.Event, logger common.Logge
 		WithField("envelope_id", evt.Request.EnvelopeID).
 		WithField("type", interaction.Type).
 		WithField("callback_id", interaction.CallbackID).
-		WithField("slack_channel_id", interaction.Channel.ID)
+		WithField("channel_id", interaction.Channel.ID)
 
 	logger.Debug("Interactive event")
 
