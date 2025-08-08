@@ -128,10 +128,6 @@ func (issue *Issue) GetCorrelationID() string {
 	return issue.CorrelationID
 }
 
-func (issue *Issue) OriginalSlackChannelID() string {
-	return issue.LastAlert.OriginalSlackChannelID
-}
-
 func (issue *Issue) CurrentPostID() string {
 	return issue.SlackPostID
 }

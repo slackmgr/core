@@ -66,7 +66,7 @@ func IssueDetailsAssets(issue *models.Issue, cfg *config.ManagerConfig) (slack.B
 		ArchiveDelay:              formatDuration(issue.ArchiveDelay),
 		ArchiveTime:               issue.ArchiveTime.Format(time.RFC3339),
 		CurrentChannel:            issue.LastAlert.SlackChannelID,
-		OriginalChannel:           issue.OriginalSlackChannelID(),
+		OriginalChannel:           issue.LastAlert.OriginalSlackChannelID,
 		Escalated:                 strconv.FormatBool(issue.IsEscalated),
 		IsMoved:                   strconv.FormatBool(issue.IsMoved),
 		MoveReason:                "-",

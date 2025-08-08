@@ -508,9 +508,9 @@ func (c *channelManager) registerIssueAsArchived(ctx context.Context, issue *mod
 
 	c.logger.WithField("correlation_id", issue.CorrelationID).Info("Issue archived")
 
-	moveMappingBody, err := c.db.FindMoveMapping(ctx, c.channelID, issue.CorrelationID)
+	moveMappingBody, err := c.db.FindMoveMapping(ctx, issue.LastAlert.OriginalSlackChannelID, issue.CorrelationID)
 	if err != nil {
-		return fmt.Errorf("failed to find move mapping for issue %s in channel %s: %w", issue.CorrelationID, c.channelID, err)
+		return fmt.Errorf("failed to find move mapping for issue %s in channel %s: %w", issue.CorrelationID, issue.LastAlert.OriginalSlackChannelID, err)
 	}
 
 	if moveMappingBody != nil {
@@ -615,7 +615,7 @@ func (c *channelManager) saveIssuesToDB(ctx context.Context, issues []*models.Is
 		return fmt.Errorf("failed to update issues in database: %w", err)
 	}
 
-	c.logger.WithField("count", len(issues)).Debug("Saved issues to database")
+	c.logger.WithField("count", len(issues)).Debug("Issues saved to database")
 
 	return nil
 }
@@ -837,7 +837,7 @@ func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, 
 		return nil, fmt.Errorf("failed to obtain lock for channel %s after %d seconds: %w", c.channelID, int(maxWait.Seconds()), err)
 	}
 
-	c.logger.WithField("lock_key", channelID).Debug("Obtained channel lock")
+	c.logger.WithField("lock_key", channelID).Debug("Channel lock obtained")
 
 	return lock, nil
 }
@@ -848,7 +848,7 @@ func (c *channelManager) releaseLock(ctx context.Context, lock ChannelLock) {
 	if err := lock.Release(ctx); err != nil {
 		c.logger.WithField("lock_key", key).Errorf("Failed to release lock: %s", err)
 	} else {
-		c.logger.WithField("lock_key", key).Debug("Released channel lock")
+		c.logger.WithField("lock_key", key).Debug("Channel lock released")
 	}
 }
 
