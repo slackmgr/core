@@ -721,6 +721,11 @@ func (c *channelManager) hideIssueOptionButtons(ctx context.Context, issue *mode
 }
 
 func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, targetChannel string, reason models.MoveIssueReason, username string, logger common.Logger) error {
+	if issue.LastAlert.SlackChannelID == targetChannel {
+		logger.Errorf("Cannot move issue %s to the same channel", issue.CorrelationID)
+		return nil
+	}
+
 	// Obtain a lock for the *target channel*
 	targetChannelLock, err := c.obtainLock(ctx, targetChannel, 30*time.Second, time.Minute)
 	if err != nil {
@@ -729,12 +734,17 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 
 	defer c.releaseLock(ctx, targetChannelLock)
 
-	// As source channel, we must use the original Slack channel ID from the last alert, as the issue may have been moved before.
-	sourceChannel := issue.LastAlert.OriginalSlackChannelID
+	// The original channel is the channel where the issue was created. If this is the same as the target channel, we need to delete the move mapping.
+	originalChannel := issue.LastAlert.OriginalSlackChannelID
 
-	if sourceChannel != targetChannel {
-		// Create a new move mapping to track the move of the issue.
-		moveMapping := models.NewMoveMapping(issue.CorrelationID, sourceChannel, targetChannel, reason)
+	// The source channel is the channel where the issue is currently located (i.e. the channel managed by this channel manager).
+	// It may or may not be the same as the original channel, depending on how many times the issue has been moved.
+	sourceChannel := c.channelID
+
+	if originalChannel != targetChannel {
+		// Create a new move mapping to track the move of the issue. The mapping must be created for the original channel,
+		// not the current source channel, since the issue may have been moved multiple times.
+		moveMapping := models.NewMoveMapping(issue.CorrelationID, originalChannel, targetChannel, reason)
 
 		// Save information about the move, so that future alerts are routed correctly.
 		// If a previous move mappings exists for the current combination of channel and correlation ID, it will be overwritten.
@@ -744,9 +754,9 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 
 		logger.WithField("target_slack_channel_id", targetChannel).WithField("correlation_id", issue.CorrelationID).Info("Move mapping saved")
 	} else {
-		// If the source and target channels are the same, we remove any existing move mapping for the issue.
-		if err := c.db.DeleteMoveMapping(ctx, sourceChannel, issue.CorrelationID); err != nil {
-			return fmt.Errorf("failed to delete move mapping for issue %s in channel %s: %w", issue.CorrelationID, sourceChannel, err)
+		// If the original and target channels are the same, we remove any existing move mapping for the issue.
+		if err := c.db.DeleteMoveMapping(ctx, originalChannel, issue.CorrelationID); err != nil {
+			return fmt.Errorf("failed to delete move mapping for issue %s in channel %s: %w", issue.CorrelationID, originalChannel, err)
 		}
 
 		logger.WithField("correlation_id", issue.CorrelationID).Info("Move mapping deleted")

@@ -237,7 +237,7 @@ func (c *InteractiveController) handleMoveIssueRequest(ctx context.Context, inte
 // moveIssueViewSubmission handles the callback from the modal move issue dialog (created by handleMoveIssueRequest).
 // It dispatches an async command with info about the move request, IF the Slack App integration is in the receiving channel.
 func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client, interaction slack.InteractionCallback, logger common.Logger) {
-	selectedConversation, err := getSelectedValue(interaction, "select_channel", "select_channel_input")
+	targetChannelID, err := getSelectedValue(interaction, "select_channel", "select_channel_input")
 	if err != nil {
 		ack(evt, clt)
 		logger.Errorf("Move issue view failed: %s", err)
@@ -250,10 +250,10 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 		return
 	}
 
-	isAlertChannel, _, err := c.client.IsAlertChannel(ctx, selectedConversation)
+	isAlertChannel, _, err := c.client.IsAlertChannel(ctx, targetChannelID)
 	if err != nil {
 		ack(evt, clt)
-		logger.Errorf("Failed to verify if channel %s is a valid alert channel: %s", selectedConversation, err)
+		logger.Errorf("Failed to verify if channel %s is a valid alert channel: %s", targetChannelID, err)
 		return
 	}
 
@@ -278,7 +278,7 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 	metadata := c.parsePrivateModalMetadata(interaction.View.PrivateMetadata)
 
 	params := map[string]any{
-		"targetChannelId": selectedConversation,
+		"targetChannelId": targetChannelID,
 	}
 
 	// Send an async command to move the issue
