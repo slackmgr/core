@@ -12,6 +12,7 @@ import (
 	common "github.com/peteraglen/slack-manager-common"
 )
 
+// Cache is a wrapper around a cache store that provides methods for getting, setting, and deleting cached items.
 type Cache struct {
 	cache        cache.CacheInterface[string]
 	keyPrefix    string
@@ -31,16 +32,17 @@ func NewCache(cacheStore store.StoreInterface, keyPrefix string, logger common.L
 	}
 }
 
-// WithPanicOnError enables panicking on certain cache errors instead of logging them.
+// WithPanicOnError enables panicking on cache errors instead of logging them, in all Get and Set methods.
 // This is useful for testing and debugging purposes, but should be used with caution in production environments.
+// The default behavior is to log errors, not to panic.
 func (c *Cache) WithPanicOnError() *Cache {
 	c.panicOnError = true
 	return c
 }
 
 // Get retrieves an item from the cache with the given key.
-// If the item is not found, it returns ana empty string and false.
-// If an error occurs during retrieval, it logs the error and returns an empty string and false (or panics if panicOnError is set).
+// If the item is not found, it returns an empty string and false.
+// If an error occurs during retrieval, it logs the error and returns an empty string and false (or panics if WithPanicOnError is set).
 // Note: The key is prefixed with the cache's keyPrefix.
 func (c *Cache) Get(ctx context.Context, key string) (string, bool) {
 	key = c.keyPrefix + key
@@ -64,7 +66,7 @@ func (c *Cache) Get(ctx context.Context, key string) (string, bool) {
 }
 
 // Set stores an item in the cache with the given key and expiration duration.
-// If an error occurs during storage, it logs the error (or panics if panicOnError is set).
+// If an error occurs during storage, it logs the error (or panics if WithPanicOnError is set).
 // Note: The key is prefixed with the cache's keyPrefix.
 func (c *Cache) Set(ctx context.Context, key string, value string, expiration time.Duration) {
 	key = c.keyPrefix + key
@@ -81,7 +83,7 @@ func (c *Cache) Set(ctx context.Context, key string, value string, expiration ti
 // SetWithRandomExpiration stores an item in the cache with a key, value, and a random expiration time.
 // The expiration time is calculated by adding a random variation to a minimum expiration duration.
 // The random variation is between 0 and the absolute value of the provided variation duration.
-// If an error occurs during storage, it logs the error (or panics if panicOnError is set).
+// If an error occurs during storage, it logs the error (or panics if WithPanicOnError is set).
 // Note: The key is prefixed with the cache's keyPrefix.
 func (c *Cache) SetWithRandomExpiration(ctx context.Context, key string, value string, minExpiration time.Duration, variation time.Duration) {
 	key = c.keyPrefix + key
@@ -104,7 +106,7 @@ func (c *Cache) SetWithRandomExpiration(ctx context.Context, key string, value s
 }
 
 // Delete removes the item from the cache with the given key.
-// This method returns an error if the deletion fails, since an explicit delete is expected to succeed.
+// This method returns an error if the deletion fails, since an explicit delete is expected to always succeed.
 // Note: The key is prefixed with the cache's keyPrefix.
 func (c *Cache) Delete(ctx context.Context, key string) error {
 	key = c.keyPrefix + key

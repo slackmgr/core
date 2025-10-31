@@ -105,6 +105,7 @@ func (c *channelManager) run(ctx context.Context) {
 				c.logger.WithFields(alert.LogFields()).Errorf("Failed to process alert: %s", err)
 			}
 
+			// Make sure the issue processor is running after an alert is received.
 			if !processorIsRunning {
 				processorTimeout = time.After(interval)
 				processorIsRunning = true
@@ -119,6 +120,7 @@ func (c *channelManager) run(ctx context.Context) {
 				c.logger.WithFields(cmd.LogFields()).Errorf("Failed to process command: %s", err)
 			}
 
+			// Make sure the issue processor is running after a command is received.
 			if !processorIsRunning {
 				processorTimeout = time.After(interval)
 				processorIsRunning = true

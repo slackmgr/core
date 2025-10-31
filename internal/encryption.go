@@ -38,7 +38,7 @@ func EncryptWebhookPayload(w *common.Webhook, key []byte) error {
 		return err
 	}
 
-	w.Payload = map[string]interface{}{
+	w.Payload = map[string]any{
 		"__encrypted_data": base64.StdEncoding.EncodeToString(encryptedData),
 	}
 
@@ -67,9 +67,9 @@ func encrypt(key, data []byte) ([]byte, error) {
 
 // DecryptWebhookPayload decrypts the encrypted webhook payload (if any) and returns it, or nil if payload is empty.
 // This function does not modify the state of the webhook.
-func DecryptWebhookPayload(w *common.Webhook, key []byte) (map[string]interface{}, error) {
+func DecryptWebhookPayload(w *common.Webhook, key []byte) (map[string]any, error) {
 	if len(w.Payload) == 0 {
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	}
 
 	if len(key) != 32 {
@@ -79,7 +79,7 @@ func DecryptWebhookPayload(w *common.Webhook, key []byte) (map[string]interface{
 	encryptedDataBase64, dataFound := w.Payload["__encrypted_data"]
 
 	if !dataFound {
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	}
 
 	encryptedDataBase64Str, ok := encryptedDataBase64.(string)
@@ -97,7 +97,7 @@ func DecryptWebhookPayload(w *common.Webhook, key []byte) (map[string]interface{
 		return nil, err
 	}
 
-	originalPayload := make(map[string]interface{})
+	originalPayload := make(map[string]any)
 
 	if err := json.Unmarshal(data, &originalPayload); err != nil {
 		return nil, err
