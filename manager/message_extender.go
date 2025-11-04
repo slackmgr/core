@@ -1,130 +1,130 @@
 package manager
 
-import (
-	"context"
-	"fmt"
-	"sync"
-	"time"
+// import (
+// 	"context"
+// 	"fmt"
+// 	"sync"
+// 	"time"
 
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/manager/internal/models"
-	"golang.org/x/sync/semaphore"
-)
+// 	common "github.com/peteraglen/slack-manager-common"
+// 	"github.com/peteraglen/slack-manager/manager/internal/models"
+// 	"golang.org/x/sync/semaphore"
+// )
 
-func messageExtender(ctx context.Context, sourceCh <-chan models.Message, logger common.Logger) error {
-	interval := 10 * time.Second
+// func messageExtender(ctx context.Context, sourceCh <-chan models.Message, logger common.Logger) error {
+// 	interval := 10 * time.Second
 
-	logger.WithField("interval", interval).Info("Message extender started")
-	defer logger.Info("Message extender exited")
+// 	logger.WithField("interval", interval).Info("Message extender started")
+// 	defer logger.Info("Message extender exited")
 
-	inFlightMessages := make(map[string]models.Message)
-	timeout := time.After(interval)
+// 	inFlightMessages := make(map[string]models.Message)
+// 	timeout := time.After(interval)
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timeout:
-			processInFlightMessages(ctx, inFlightMessages, logger)
-			timeout = time.After(interval)
-		case msg, ok := <-sourceCh:
-			if !ok {
-				return nil
-			}
+// 	for {
+// 		select {
+// 		case <-ctx.Done():
+// 			return ctx.Err()
+// 		case <-timeout:
+// 			processInFlightMessages(ctx, inFlightMessages, logger)
+// 			timeout = time.After(interval)
+// 		case msg, ok := <-sourceCh:
+// 			if !ok {
+// 				return nil
+// 			}
 
-			// Ignore messages that can't be extended.
-			if !msg.IsExtendable() {
-				continue
-			}
+// 			// Ignore messages that can't be extended.
+// 			if !msg.IsExtendable() {
+// 				continue
+// 			}
 
-			inFlightMessages[msg.MessageID()] = msg
-		}
-	}
-}
+// 			inFlightMessages[msg.MessageID()] = msg
+// 		}
+// 	}
+// }
 
-func processInFlightMessages(ctx context.Context, messages map[string]models.Message, logger common.Logger) {
-	if len(messages) == 0 {
-		logger.Debug("No in-flight messages to process")
-		return
-	}
+// func processInFlightMessages(ctx context.Context, messages map[string]models.Message, logger common.Logger) {
+// 	if len(messages) == 0 {
+// 		logger.Debug("No in-flight messages to process")
+// 		return
+// 	}
 
-	logger.WithField("count", len(messages)).Debug("Starting in-flight message processing")
+// 	logger.WithField("count", len(messages)).Debug("Starting in-flight message processing")
 
-	started := time.Now()
-	inNeedOfExtension := []models.Message{}
+// 	started := time.Now()
+// 	inNeedOfExtension := []models.Message{}
 
-	for _, msg := range messages {
-		if !msg.IsExtendable() {
-			logger.WithField("message_id", msg.MessageID()).Debug("Removing non-extendable message from list of in-flight messages")
-			delete(messages, msg.MessageID())
-			continue
-		}
+// 	for _, msg := range messages {
+// 		if !msg.IsExtendable() {
+// 			logger.WithField("message_id", msg.MessageID()).Debug("Removing non-extendable message from list of in-flight messages")
+// 			delete(messages, msg.MessageID())
+// 			continue
+// 		}
 
-		if msg.IsAcked() {
-			logger.WithField("message_id", msg.MessageID()).Debug("Removing acked message from list of in-flight messages")
-			delete(messages, msg.MessageID())
-			continue
-		}
+// 		if msg.IsAcked() {
+// 			logger.WithField("message_id", msg.MessageID()).Debug("Removing acked message from list of in-flight messages")
+// 			delete(messages, msg.MessageID())
+// 			continue
+// 		}
 
-		if msg.IsFailed() {
-			logger.WithField("message_id", msg.MessageID()).Debug("Removing failed message from list of in-flight messages")
-			delete(messages, msg.MessageID())
-			continue
-		}
+// 		if msg.IsFailed() {
+// 			logger.WithField("message_id", msg.MessageID()).Debug("Removing failed message from list of in-flight messages")
+// 			delete(messages, msg.MessageID())
+// 			continue
+// 		}
 
-		if msg.NeedsExtensionNow() {
-			inNeedOfExtension = append(inNeedOfExtension, msg)
-		}
-	}
+// 		if msg.NeedsExtensionNow() {
+// 			inNeedOfExtension = append(inNeedOfExtension, msg)
+// 		}
+// 	}
 
-	logger = logger.WithField("count", len(messages)).WithField("extended_count", len(inNeedOfExtension))
+// 	logger = logger.WithField("count", len(messages)).WithField("extended_count", len(inNeedOfExtension))
 
-	if len(inNeedOfExtension) == 0 {
-		logger.WithField("duration", fmt.Sprintf("%v", time.Since(started))).Info("Completed in-flight message processing")
-		return
-	}
+// 	if len(inNeedOfExtension) == 0 {
+// 		logger.WithField("duration", fmt.Sprintf("%v", time.Since(started))).Info("Completed in-flight message processing")
+// 		return
+// 	}
 
-	// If less than 4 messages need to be extended, do it sequentially.
-	// Otherwise, do it concurrently with at most 3 tasks running at the same time.
-	if len(inNeedOfExtension) < 4 {
-		for _, msg := range inNeedOfExtension {
-			extend(ctx, msg, logger)
-		}
-	} else {
-		wg := sync.WaitGroup{}
-		sem := semaphore.NewWeighted(3)
+// 	// If less than 4 messages need to be extended, do it sequentially.
+// 	// Otherwise, do it concurrently with at most 3 tasks running at the same time.
+// 	if len(inNeedOfExtension) < 4 {
+// 		for _, msg := range inNeedOfExtension {
+// 			extend(ctx, msg, logger)
+// 		}
+// 	} else {
+// 		wg := sync.WaitGroup{}
+// 		sem := semaphore.NewWeighted(3)
 
-		for _, _msg := range inNeedOfExtension {
-			msg := _msg
-			wg.Add(1)
+// 		for _, _msg := range inNeedOfExtension {
+// 			msg := _msg
+// 			wg.Add(1)
 
-			go func() {
-				defer wg.Done()
+// 			go func() {
+// 				defer wg.Done()
 
-				if err := sem.Acquire(ctx, 1); err != nil {
-					return
-				}
+// 				if err := sem.Acquire(ctx, 1); err != nil {
+// 					return
+// 				}
 
-				defer sem.Release(1)
+// 				defer sem.Release(1)
 
-				extend(ctx, msg, logger)
-			}()
-		}
+// 				extend(ctx, msg, logger)
+// 			}()
+// 		}
 
-		wg.Wait()
-	}
+// 		wg.Wait()
+// 	}
 
-	logger.WithField("duration", fmt.Sprintf("%v", time.Since(started))).Info("Completed in-flight message processing")
-}
+// 	logger.WithField("duration", fmt.Sprintf("%v", time.Since(started))).Info("Completed in-flight message processing")
+// }
 
-func extend(ctx context.Context, msg models.Message, logger common.Logger) {
-	if msg.ExtendCount() >= 5 {
-		logger.Errorf("Message %s has been extended at least 5 times - giving up", msg.MessageID())
-		msg.SetExtendVisibilityFunc(nil)
-		return
-	}
+// func extend(ctx context.Context, msg models.Message, logger common.Logger) {
+// 	if msg.ExtendCount() >= 5 {
+// 		logger.Errorf("Message %s has been extended at least 5 times - giving up", msg.MessageID())
+// 		msg.SetExtendVisibilityFunc(nil)
+// 		return
+// 	}
 
-	if err := msg.ExtendVisibility(ctx); err != nil {
-		logger.Errorf("Failed to extend visibility for message %s", msg.MessageID())
-	}
-}
+// 	if err := msg.ExtendVisibility(ctx); err != nil {
+// 		logger.Errorf("Failed to extend visibility for message %s", msg.MessageID())
+// 	}
+// }

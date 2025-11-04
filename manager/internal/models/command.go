@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,7 +28,7 @@ const (
 )
 
 type Command struct {
-	message
+	// message
 
 	Timestamp               time.Time              `json:"timestamp,omitempty"`
 	SlackChannelID          string                 `json:"slackChannelId,omitempty"`
@@ -40,6 +41,9 @@ type Command struct {
 	WebhookParameters       *WebhookCommandParams  `json:"webhookParameters,omitempty"`
 	IncludeArchivedIssues   bool                   `json:"includeArchivedIssues"`
 	ExecuteWhenNoIssueFound bool                   `json:"executeWhenNoIssueFound"`
+
+	ack  func(ctx context.Context)
+	nack func(ctx context.Context)
 }
 
 type WebhookCommandParams struct {
@@ -48,7 +52,7 @@ type WebhookCommandParams struct {
 	CheckboxInput map[string][]string `json:"checkboxInput,omitempty"`
 }
 
-func NewCommandFromQueue(queueItem *commonlib.FifoQueueItem) (Message, error) { //nolint:ireturn
+func NewCommandFromQueueItem(queueItem *commonlib.FifoQueueItem) (InFlightMessage, error) { //nolint:ireturn
 	if len(queueItem.Body) == 0 {
 		return nil, errors.New("alert body is empty")
 	}
@@ -59,7 +63,8 @@ func NewCommandFromQueue(queueItem *commonlib.FifoQueueItem) (Message, error) { 
 		return nil, fmt.Errorf("failed to unmarshal message body: %w", err)
 	}
 
-	cmd.message = newMessage(queueItem)
+	cmd.ack = queueItem.Ack
+	cmd.nack = queueItem.Nack
 
 	return &cmd, nil
 }
@@ -75,6 +80,28 @@ func NewCommand(slackChannelID, ts, reaction, userID, userRealName string, actio
 		Action:         action,
 		Parameters:     parameters,
 	}
+}
+
+// Ack acknowledges the command message, indicating successful processing.
+// Any subsequent calls to Ack or Nack will have no effect.
+func (c *Command) Ack(ctx context.Context) {
+	if c.ack != nil {
+		c.ack(ctx)
+	}
+
+	c.ack = nil
+	c.nack = nil
+}
+
+// Nack negatively acknowledges the command message, indicating processing failure and requesting re-delivery.
+// Any subsequent calls to Ack or Nack will have no effect.
+func (c *Command) Nack(ctx context.Context) {
+	if c.ack != nil {
+		c.nack(ctx)
+	}
+
+	c.ack = nil
+	c.nack = nil
 }
 
 func (c *Command) DedupID() string {

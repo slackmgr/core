@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.Message, unmarshalFunc models.UnmarshalFunc, logger common.Logger) error {
+func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.InFlightMessage, msgConstructor models.InFlightMsgConstructor, logger common.Logger) error {
 	logger.WithField("queue_name", queue.Name()).Info("Queue consumer started")
 	defer logger.WithField("queue_name", queue.Name()).Info("Queue consumer exited")
 
@@ -30,19 +30,11 @@ func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.Me
 			logger = logger.WithField("message_id", item.MessageID).WithField("channel_id", item.SlackChannelID)
 			logger.Debug("Message received")
 
-			if item.Ack == nil {
-				logger.Error("Message ack function is nil")
-				continue
-			}
-
-			message, err := unmarshalFunc(item)
+			message, err := msgConstructor(item)
 			if err != nil {
 				logger.Errorf("Failed to unmarshal message: %s", err)
 				continue
 			}
-
-			message.SetAckFunc(item.Ack)
-			message.SetExtendVisibilityFunc(item.ExtendVisibility)
 
 			if err := internal.TrySend(ctx, message, sinkCh); err != nil {
 				return err

@@ -617,7 +617,7 @@ func callAPI[V any, W any](ctx context.Context, logger commonlib.Logger, metrics
 			return result1, result2, err
 		}
 
-		if len(expectedErrors) > 0 && inSlice(err.Error(), expectedErrors) {
+		if len(expectedErrors) > 0 && slices.Contains(expectedErrors, err.Error()) {
 			return result1, result2, err
 		}
 
@@ -667,15 +667,6 @@ func waitForAPIError(ctx context.Context, started time.Time, logger commonlib.Lo
 	return waitForFatalError(ctx, logger, err, attempt, action, remainingWaitTime)
 }
 
-func inSlice(s string, slice []string) bool {
-	for _, item := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
 func waitForRateLimit(ctx context.Context, logger commonlib.Logger, err *slack.RateLimitedError, attempt int, action string, remainingWaitTime time.Duration) error {
 	wait := err.RetryAfter + 2*time.Second
 
@@ -722,7 +713,7 @@ func sleep(ctx context.Context, t time.Duration) error {
 }
 
 func isTransientError(err error) bool {
-	if v, ok := interface{}(err).(retryable); ok {
+	if v, ok := any(err).(retryable); ok {
 		return v.Retryable()
 	}
 

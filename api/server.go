@@ -248,27 +248,44 @@ func (s *Server) runRawAlertConsumer(ctx context.Context) error {
 			logger := s.logger.WithField("message_id", item.MessageID).WithField("channel_id", item.SlackChannelID)
 			logger.Debug("Alert received")
 
-			if item.Ack == nil {
-				logger.Error("Alert ack function is nil")
+			var alert *common.Alert
+
+			// Unmarshal the alert from the queue item body.
+			// If the alert is invalid, we *ack* the message to avoid re-processing it.
+			if err := json.Unmarshal([]byte(item.Body), &alert); err != nil {
+				logger.Errorf("Failed to json unmarshal queued alert: %s", err)
+
+				if item.Ack != nil {
+					item.Ack(ctx)
+					logger.Debug("Alert acked")
+				}
+
 				continue
 			}
 
-			var alert *common.Alert
+			// Process the alert.
+			// If processing fails with a retryable error, we *nack* the message, thus allowing it to be re-processed later.
+			if err := s.processQueuedAlert(ctx, alert); err != nil {
+				logger.Errorf("Failed to process queued alert: %s", err)
 
-			if err := json.Unmarshal([]byte(item.Body), &alert); err != nil {
-				logger.Errorf("Failed to json unmarshal queued alert: %s", err)
-			} else {
-				if err := s.processQueuedAlert(ctx, alert, logger); err != nil {
-					logger.Errorf("Failed to process queued alert: %s", err)
+				var pErr *processingError
+
+				if errors.As(err, &pErr) && pErr.IsRetryable() {
+					if item.Nack != nil {
+						item.Nack(ctx)
+						logger.Debug("Alert nacked")
+					}
+
 					continue
 				}
 			}
 
-			if err := item.Ack(ctx); err != nil {
-				logger.Errorf("Failed to ack queued alert: %s", err)
+			// At this point, the alert has been processed successfully OR it failed with a non-retryable error.
+			// In both cases, we ack the message to avoid re-processing it.
+			if item.Ack != nil {
+				item.Ack(ctx)
+				logger.Debug("Alert acked")
 			}
-
-			logger.Debug("Alert acked")
 		}
 
 		return nil
@@ -308,16 +325,19 @@ func (s *Server) writeErrorResponse(ctx context.Context, clientErr error, status
 	}
 }
 
+// queueAlert serializes the alert and sends it to the alert queue.
+// Any returned errors are considered retryable, as they typically indicate transient queuing issues.
 func (s *Server) queueAlert(ctx context.Context, alert *common.Alert) error {
-	if alert.SlackChannelID == "" {
-		return errors.New("alert has no Slack channel ID")
-	}
-
+	// Serialize the alert to JSON
+	// This really can't fail, but if it does, we log the error and return nil.
+	// Errors from this method are supposed to indicate retryable queuing errors, not fatal serialization errors.
 	body, err := json.Marshal(alert)
 	if err != nil {
-		return fmt.Errorf("failed to marshal alert: %w", err)
+		s.logger.Errorf("Failed to marshal alert: %w", err)
+		return nil
 	}
 
+	// Send the alert to the queue. Any errors here are retryable and thus returned.
 	if err := s.alertQueue.Send(ctx, alert.SlackChannelID, alert.UniqueID(), string(body)); err != nil {
 		return fmt.Errorf("failed to send message to queue: %w", err)
 	}

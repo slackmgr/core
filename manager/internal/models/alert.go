@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,14 +13,16 @@ import (
 
 type Alert struct {
 	commonlib.Alert
-	message
 
 	SlackChannelName       string `json:"slackChannelName"`
 	OriginalSlackChannelID string `json:"originalSlackChannelId"`
 	OriginalText           string `json:"originalText"`
+
+	ack  func(ctx context.Context)
+	nack func(ctx context.Context)
 }
 
-func NewAlert(queueItem *commonlib.FifoQueueItem) (Message, error) { //nolint:ireturn
+func NewAlertFromQueueItem(queueItem *commonlib.FifoQueueItem) (InFlightMessage, error) { //nolint:ireturn
 	if len(queueItem.Body) == 0 {
 		return nil, errors.New("alert body is empty")
 	}
@@ -31,9 +34,32 @@ func NewAlert(queueItem *commonlib.FifoQueueItem) (Message, error) { //nolint:ir
 	}
 
 	return &Alert{
-		Alert:   alert,
-		message: newMessage(queueItem),
+		Alert: alert,
+		ack:   queueItem.Ack,
+		nack:  queueItem.Nack,
 	}, nil
+}
+
+// Ack acknowledges the alert message, indicating successful processing.
+// Any subsequent calls to Ack or Nack will have no effect.
+func (a *Alert) Ack(ctx context.Context) {
+	if a.ack != nil {
+		a.ack(ctx)
+	}
+
+	a.ack = nil
+	a.nack = nil
+}
+
+// Nack negatively acknowledges the alert message, indicating processing failure and requesting re-delivery.
+// Any subsequent calls to Ack or Nack will have no effect.
+func (a *Alert) Nack(ctx context.Context) {
+	if a.ack != nil {
+		a.nack(ctx)
+	}
+
+	a.ack = nil
+	a.nack = nil
 }
 
 func (a *Alert) SetDefaultValues(settings *config.ManagerSettings) {

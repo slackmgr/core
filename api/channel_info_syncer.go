@@ -114,9 +114,7 @@ func (c *channelInfoSyncer) GetChannelInfo(ctx context.Context, channel string) 
 	}
 
 	// No cached data found - fetch data directly from Slack
-	info, err := c.refreshChannelInfo(ctx, channel)
-
-	return info, err
+	return c.refreshChannelInfo(ctx, channel)
 }
 
 func (c *channelInfoSyncer) ManagedChannels() []*internal.ChannelSummary {

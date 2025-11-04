@@ -114,26 +114,21 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	m.slackClient.SetIssueFinder(m.coordinator)
 
-	alertCh := make(chan models.Message, 1000)
-	commandCh := make(chan models.Message, 1000)
-	extenderCh := make(chan models.Message, 1000)
+	alertCh := make(chan models.InFlightMessage, 1000)
+	commandCh := make(chan models.InFlightMessage, 1000)
 
 	errg, ctx := errgroup.WithContext(ctx)
 
 	errg.Go(func() error {
-		return queueConsumer(ctx, m.commandQueue, commandCh, models.NewCommandFromQueue, m.logger)
+		return queueConsumer(ctx, m.commandQueue, commandCh, models.NewCommandFromQueueItem, m.logger)
 	})
 
 	errg.Go(func() error {
-		return queueConsumer(ctx, m.alertQueue, alertCh, models.NewAlert, m.logger)
+		return queueConsumer(ctx, m.alertQueue, alertCh, models.NewAlertFromQueueItem, m.logger)
 	})
 
 	errg.Go(func() error {
-		return messageExtender(ctx, extenderCh, m.logger)
-	})
-
-	errg.Go(func() error {
-		return m.coordinator.run(ctx, alertCh, commandCh, extenderCh)
+		return m.coordinator.run(ctx, alertCh, commandCh)
 	})
 
 	errg.Go(func() error {

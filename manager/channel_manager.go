@@ -101,8 +101,10 @@ func (c *channelManager) run(ctx context.Context) {
 			}
 
 			if err := c.processAlert(ctx, alert); err != nil {
-				alert.MarkAsFailed()
+				alert.Nack(ctx)
 				c.logger.WithFields(alert.LogFields()).Errorf("Failed to process alert: %s", err)
+			} else {
+				alert.Ack(ctx)
 			}
 
 			// Make sure the issue processor is running after an alert is received.
@@ -116,8 +118,10 @@ func (c *channelManager) run(ctx context.Context) {
 			}
 
 			if err := c.processCmd(ctx, cmd); err != nil {
-				cmd.MarkAsFailed()
+				cmd.Nack(ctx)
 				c.logger.WithFields(cmd.LogFields()).Errorf("Failed to process command: %s", err)
+			} else {
+				cmd.Ack(ctx)
 			}
 
 			// Make sure the issue processor is running after a command is received.
@@ -267,10 +271,6 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		return fmt.Errorf("failed to save alert to database: %w", err)
 	}
 
-	if err := alert.Ack(ctx); err != nil {
-		return fmt.Errorf("failed to ack alert: %w", err)
-	}
-
 	return nil
 }
 
@@ -310,7 +310,7 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 	// Commands are attempted exactly once, so we ack regardless of any errors below.
 	// Errors are logged, but otherwise ignored.
 	defer func() {
-		go ackCommand(ctx, cmd, logger)
+		go ackCommand(ctx, cmd)
 	}()
 
 	issue, err := c.findIssueBySlackPost(ctx, cmd.SlackPostID, cmd.IncludeArchivedIssues)
@@ -346,10 +346,8 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 	return nil
 }
 
-func ackCommand(ctx context.Context, cmd *models.Command, logger common.Logger) {
-	if err := cmd.Ack(ctx); err != nil {
-		logger.Errorf("Failed to ack command: %s", err)
-	}
+func ackCommand(ctx context.Context, cmd *models.Command) {
+	cmd.Ack(ctx)
 }
 
 // processActiveIssues processes all active issues. It handles escalations, archiving and Slack updates (where needed).
@@ -360,7 +358,7 @@ func ackCommand(ctx context.Context, cmd *models.Command, logger common.Logger) 
 func (c *channelManager) processActiveIssues(ctx context.Context, minInterval time.Duration) (int, error) {
 	lock, err := c.obtainLock(ctx, c.channelID, 5*time.Minute, 2*minInterval)
 	if err != nil {
-		return 0, fmt.Errorf("failed to obtain lock for channel %s: %w", c.channelID, err)
+		return 0, fmt.Errorf("failed to obtain lock for channel %s after 2 minutes: %w", c.channelID, err)
 	}
 
 	defer c.releaseLock(lock) //nolint:contextcheck
@@ -731,7 +729,7 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 	// Obtain a lock for the *target channel*
 	targetChannelLock, err := c.obtainLock(ctx, targetChannel, 30*time.Second, time.Minute)
 	if err != nil {
-		return fmt.Errorf("failed to obtain lock for target channel %s after 5 minutes: %w", c.channelID, err)
+		return fmt.Errorf("failed to obtain lock for target channel %s after 1 minute: %w", targetChannel, err)
 	}
 
 	defer c.releaseLock(targetChannelLock) //nolint:contextcheck

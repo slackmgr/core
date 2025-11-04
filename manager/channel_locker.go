@@ -15,10 +15,18 @@ var ErrChannelLockUnavailable = errors.New("channel lock unavailable")
 // Use the RedisChannelLocker implementation for a production-ready solution, using Redis as the backing store.
 // Use the NoopChannelLocker for testing or when locking is not required (i.e in a single instance setup).
 type ChannelLocker interface {
+	// Obtain tries to obtain a lock for the given key (channel ID) with the specified TTL (time-to-live).
+	// It will retry obtaining the lock until the maxWait duration is reached.
+	// If the lock is successfully obtained, it returns a ChannelLock instance.
+	// If the lock cannot be obtained within the maxWait duration, it returns ErrChannelLockUnavailable.
 	Obtain(ctx context.Context, key string, ttl time.Duration, maxWait time.Duration) (ChannelLock, error)
 }
 
+// ChannelLock represents a single lock on a channel.
 type ChannelLock interface {
+	// Key returns the key associated with this lock.
 	Key() string
+
+	// Release releases the lock.
 	Release(ctx context.Context) error
 }

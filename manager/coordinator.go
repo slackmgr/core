@@ -10,7 +10,6 @@ import (
 	"github.com/eko/gocache/lib/v4/store"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
 	"github.com/peteraglen/slack-manager/manager/internal/models"
 	"github.com/peteraglen/slack-manager/manager/internal/slack"
 	"github.com/segmentio/ksuid"
@@ -101,7 +100,7 @@ func (c *coordinator) init(ctx context.Context) error {
 	return nil
 }
 
-func (c *coordinator) run(ctx context.Context, alertCh <-chan models.Message, commandCh <-chan models.Message, extenderCh chan<- models.Message) error {
+func (c *coordinator) run(ctx context.Context, alertCh <-chan models.InFlightMessage, commandCh <-chan models.InFlightMessage) error {
 	c.logger.Info("Channel coordinator started")
 	defer c.logger.Info("Channel coordinator exited")
 
@@ -131,13 +130,9 @@ messageLoop:
 			}
 
 			if err := c.addAlert(ctx, alert); err != nil {
-				msg.MarkAsFailed()
+				msg.Nack(ctx)
 				c.logger.WithFields(alert.LogFields()).Errorf("Failed to process alert %s: %s", alert.UniqueID(), err)
 				continue
-			}
-
-			if err := internal.TrySend(ctx, msg, extenderCh); err != nil {
-				return err
 			}
 		case msg, ok := <-commandCh:
 			if !ok {
@@ -151,13 +146,9 @@ messageLoop:
 			}
 
 			if err := c.addCommand(ctx, cmd); err != nil {
-				msg.MarkAsFailed()
+				msg.Nack(ctx)
 				c.logger.WithFields(cmd.LogFields()).Errorf("Failed to process %s command: %s", cmd.Action, err)
 				continue
-			}
-
-			if err := internal.TrySend(ctx, msg, extenderCh); err != nil {
-				return err
 			}
 		}
 	}
@@ -291,12 +282,9 @@ func (c *coordinator) runChannelManagerAsync(ctx context.Context, channelManager
 }
 
 func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.Command) error {
-	logger := c.logger.WithFields(cmd.LogFields())
-
 	// Commands are attempted exactly once, so we ack regardless of any errors below.
-	// Errors are logged, but otherwise ignored.
 	defer func() {
-		go ackCommand(ctx, cmd, logger)
+		go cmd.Ack(ctx)
 	}()
 
 	alert := common.NewAlert(common.AlertSeverity(cmd.ParamAsString("severity")))

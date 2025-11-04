@@ -172,19 +172,22 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 
 // processQueuedAlert processes a single alert from the raw alert input queue (rather than from an API request).
 // It is similar to processAlerts, but skips for example rate limiting.
-func (s *Server) processQueuedAlert(ctx context.Context, alert *common.Alert, logger common.Logger) error {
+// The function returns a processingError to indicate whether the error is retryable or not.
+func (s *Server) processQueuedAlert(ctx context.Context, alert *common.Alert) error {
 	started := time.Now()
 
+	// Attempt to set the Slack channel ID (if not already set).
+	// Any errors here are non-retryable, as they indicate invalid input.
 	if err := s.setSlackChannelID(nil, alert); err != nil {
-		logger.Errorf("Failed to set alert Slack channel ID: %s", err)
-		return err
+		return newNonRetryableProcessingError("failed to determine Slack channel ID: %w", err)
 	}
 
 	alert.Clean()
 
+	// Validate the alert body.
+	// Any errors here are non-retryable, as they indicate invalid input.
 	if err := alert.Validate(); err != nil {
-		logger.Errorf("Alert input validation failed: %s", err)
-		return nil
+		return newNonRetryableProcessingError("input validation failed: %w", err)
 	}
 
 	ignore, ignoreReason := ignoreAlert(alert)
@@ -194,24 +197,31 @@ func (s *Server) processQueuedAlert(ctx context.Context, alert *common.Alert, lo
 		return nil
 	}
 
+	// Find the channel info for the alert channel.
+	// Errors here are retryable, as they may indicate transient issues when communicating with Slack.
 	channelInfo, err := s.channelInfoSyncer.GetChannelInfo(ctx, alert.SlackChannelID)
 	if err != nil {
-		return fmt.Errorf("failed to fetch info for channel %s: %w", alert.SlackChannelID, err)
+		return newRetryableProcessingError("failed to fetch info for channel %s: %w", alert.SlackChannelID, err)
 	}
 
+	// Check that the channel is valid for posting alerts.
+	// Any errors here are non-retryable, as they indicate invalid input.
 	if err := s.validateChannelInfo(alert.SlackChannelID, channelInfo); err != nil {
-		logger.Errorf("Alert channel validation failed: %s", err)
-		return nil
+		return newNonRetryableProcessingError("alert channel validation failed: %w", err)
 	}
 
+	// Encrypt any webhook payloads.
+	// Errors here are non-retryable, as they indicate invalid input or invalid API configuration.
 	for _, w := range alert.Webhooks {
 		if err := internal.EncryptWebhookPayload(w, []byte(s.cfg.EncryptionKey)); err != nil {
-			return fmt.Errorf("failed to encrypt webhook payload: %w", err)
+			return newNonRetryableProcessingError("failed to encrypt webhook payload: %w", err)
 		}
 	}
 
+	// Queue the alert for processing.
+	// Errors here are retryable, as they may indicate transient queuing issues.
 	if err := s.queueAlert(ctx, alert); err != nil {
-		return err
+		return newRetryableProcessingError("failed to queue alert: %w", err)
 	}
 
 	s.logAlerts("Alert accepted", "", started, alert)

@@ -9,6 +9,7 @@ import (
 	"github.com/slack-go/slack/socketmode"
 )
 
+// SocketModeHandler handles Slack Socket Mode events and interactions.
 type SocketModeHandler struct {
 	Client                         *socketmode.Client
 	EventMap                       map[socketmode.EventType][]SocketModeHandlerFunc
@@ -20,9 +21,10 @@ type SocketModeHandler struct {
 	logger                         common.Logger
 }
 
-// Handler have access to the event and socketmode client
+// SocketModeHandlerFunc defines a function to handle socketmode events.
 type SocketModeHandlerFunc func(context.Context, *socketmode.Event, *socketmode.Client)
 
+// NewsSocketModeHandler creates a new SocketModeHandler.
 func NewsSocketModeHandler(client *socketmode.Client, logger common.Logger) *SocketModeHandler {
 	eventMap := make(map[socketmode.EventType][]SocketModeHandlerFunc)
 	interactionEventMap := make(map[slack.InteractionType][]SocketModeHandlerFunc)
@@ -41,44 +43,44 @@ func NewsSocketModeHandler(client *socketmode.Client, logger common.Logger) *Soc
 	}
 }
 
-// Register a middleware function to use to handle an Event (from socketmode)
+// Handle registers a middleware function to use to handle an socketmode event.
 func (r *SocketModeHandler) Handle(et socketmode.EventType, fs ...SocketModeHandlerFunc) {
 	r.EventMap[et] = append(r.EventMap[et], fs...)
 }
 
-// Register a middleware function to use to handle an Event (from socketmode)
+// HandleMultiple registers a middleware function to use to handle a list of socketmode events.
 func (r *SocketModeHandler) HandleMultiple(events []socketmode.EventType, fs ...SocketModeHandlerFunc) {
 	for _, et := range events {
 		r.EventMap[et] = append(r.EventMap[et], fs...)
 	}
 }
 
-// Register a middleware function to use to handle an Interaction
+// HandleInteraction registers a middleware function to use to handle an interaction type.
 func (r *SocketModeHandler) HandleInteraction(et slack.InteractionType, f SocketModeHandlerFunc) {
 	r.InteractionEventMap[et] = append(r.InteractionEventMap[et], f)
 }
 
-// Register a middleware function to use to handle an Interaction Block Action referenced by its ActionID
+// HandleInteractionBlockAction registers a middleware function to use to handle an interaction block action referenced by its ActionID.
 func (r *SocketModeHandler) HandleInteractionBlockAction(actionID string, f SocketModeHandlerFunc) {
 	r.InteractionBlockActionEventMap[actionID] = append(r.InteractionBlockActionEventMap[actionID], f)
 }
 
-// Register a middleware function to use to handle an EventAPI event
+// HandleEventsAPI registers a middleware function to use to handle an EventAPI event.
 func (r *SocketModeHandler) HandleEventsAPI(et string, f SocketModeHandlerFunc) {
 	r.EventAPIMap[et] = append(r.EventAPIMap[et], f)
 }
 
-// Register a middleware function to use to handle a SlashCommand
+// HandleSlashCommand registers a middleware function to use to handle a slash command.
 func (r *SocketModeHandler) HandleSlashCommand(command string, f SocketModeHandlerFunc) {
 	r.SlashCommandMap[command] = append(r.SlashCommandMap[command], f)
 }
 
-// Register a middleware function to use as a last resort
+// HandleDefault registers a middleware function to use as a last resort.
 func (r *SocketModeHandler) HandleDefault(f SocketModeHandlerFunc) {
 	r.Default = f
 }
 
-// RunSlackEventLoop receives the event via the socket
+// RunEventLoop receives the event via the socket.
 func (r *SocketModeHandler) RunEventLoop(ctx context.Context) error {
 	go r.runEventLoop(ctx)
 	return r.Client.RunContext(ctx)

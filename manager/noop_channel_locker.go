@@ -7,9 +7,10 @@ import (
 
 // NoopChannelLocker is a no-op implementation of the ChannelLocker interface.
 // It does not perform any locking and is used for testing or when locking is not required.
+// Locking is typically always required when running in a distributed environment, such as in Kubernetes.
 type NoopChannelLocker struct{}
 
-// ChannelLock is a no-op implementation of the ChannelLock interface.
+// NoopChannelLock is a no-op implementation of the ChannelLock interface.
 type NoopChannelLock struct {
 	key string
 }

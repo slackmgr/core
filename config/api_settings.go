@@ -37,7 +37,8 @@ type RoutingRule struct {
 	// This field is optional.
 	Description string `json:"description" yaml:"description"`
 
-	// AlertType is the case-insensitive type of alert that this rule matches.
+	// AlertType is the case-insensitive type of alert that this rule matches,
+	// It is user defined, and may have values such as 'compliance', 'security' or 'metrics'.
 	// This field is optional.
 	// If empty, the rule matches all alert types, but rules with a non-empty AlertType take precedence.
 	AlertType string `json:"alertType" yaml:"alertType"`
