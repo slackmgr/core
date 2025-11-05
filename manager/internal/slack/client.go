@@ -90,8 +90,8 @@ func (c *Client) Connect(ctx context.Context) error {
 }
 
 func (c *Client) RunSocketMode(ctx context.Context) error {
-	c.logger.Debug("common.RunSocketMode started")
-	defer c.logger.Debug("common.RunSocketMode exited")
+	c.logger.Info("Slack socker mode client started")
+	defer c.logger.Info("Slack socket mode client exited")
 
 	if c.issueFinder == nil {
 		return errors.New("issue finder must be set before running socket mode")

@@ -850,7 +850,7 @@ func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, 
 		return nil, fmt.Errorf("failed to obtain lock for channel %s after %d seconds: %w", c.channelID, int(maxWait.Seconds()), err)
 	}
 
-	c.logger.WithField("lock_key", channelID).Debug("Channel lock obtained")
+	c.logger.WithField("lock_key", lock.Key()).Debug("Channel lock obtained")
 
 	return lock, nil
 }
