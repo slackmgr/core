@@ -7,14 +7,11 @@ import (
 	"time"
 )
 
-var encryptionKeyRegex = regexp.MustCompile(`^[a-fA-F0-9]{32}$`)
+var encryptionKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9]{32}$`)
 
 // ManagerConfig holds configuration for the Slack Manager main application (not the API).
 // The configuration here are for basic app settings. They cannot be changed after startup.
 type ManagerConfig struct {
-	// WebhookTimeoutSeconds is the timeout in seconds for outgoing HTTP webhooks.
-	WebhookTimeoutSeconds int `json:"webhookTimeoutSeconds" yaml:"webhookTimeoutSeconds"`
-
 	// EncryptionKey is the key used to encrypt sensitive data. It must be the same in the API and Manager configs.
 	EncryptionKey string `json:"encryptionKey" yaml:"encryptionKey"`
 
@@ -36,19 +33,14 @@ type ManagerConfig struct {
 // NewDefaultManagerConfig returns a ManagerConfig with default values.
 func NewDefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
-		WebhookTimeoutSeconds: 2,
-		CacheKeyPrefix:        "slack-manager:",
-		Location:              time.UTC,
-		SlackClient:           NewDefaultSlackClientConfig(),
+		CacheKeyPrefix: "slack-manager:",
+		Location:       time.UTC,
+		SlackClient:    NewDefaultSlackClientConfig(),
 	}
 }
 
 // Validate validates the ManagerConfig and returns an error if any required fields are missing or invalid.
 func (c *ManagerConfig) Validate() error {
-	if c.WebhookTimeoutSeconds < 1 || time.Duration(c.WebhookTimeoutSeconds) > 30 {
-		return errors.New("webhook timeout must be between 1 and 30 seconds")
-	}
-
 	if !encryptionKeyRegex.MatchString(c.EncryptionKey) {
 		return errors.New("the encryption key must be a 32 character alphanumeric string")
 	}

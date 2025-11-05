@@ -40,7 +40,7 @@ func newChannelManager(channelID string, slackClient *slack.Client, db common.DB
 	logger = logger.WithField("channel_id", channelID)
 
 	if len(webhookHandlers) == 0 {
-		defaultHandler := NewHTTPWebhookHandler(logger, cfg)
+		defaultHandler := NewHTTPWebhookHandler(logger)
 		webhookHandlers = append(webhookHandlers, defaultHandler)
 	}
 

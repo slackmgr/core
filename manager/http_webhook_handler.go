@@ -9,17 +9,16 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
 )
 
 // HTTPWebhookHandler is an implementation of the WebhookHandler interface that sends webhooks via HTTP.
-// This is the default webhook handler, if no other webhook handlers are configured.
+// This is the default webhook handler when no other webhook handlers are configured.
 type HTTPWebhookHandler struct {
 	client *resty.Client
 }
 
-// NewHTTPWebhookHandler creates a new HTTPWebhookHandler with the given configuration.
-func NewHTTPWebhookHandler(logger common.Logger, cfg *config.ManagerConfig) *HTTPWebhookHandler {
+// NewHTTPWebhookHandler creates a new HTTPWebhookHandler.
+func NewHTTPWebhookHandler(logger common.Logger) *HTTPWebhookHandler {
 	restyLogger := newRestyLogger(logger)
 
 	client := resty.New().
@@ -28,11 +27,17 @@ func NewHTTPWebhookHandler(logger common.Logger, cfg *config.ManagerConfig) *HTT
 		SetRetryMaxWaitTime(time.Second).
 		AddRetryCondition(webhookRetryPolicy).
 		SetLogger(restyLogger).
-		SetTimeout(time.Duration(cfg.WebhookTimeoutSeconds) * time.Second)
+		SetTimeout(3 * time.Second)
 
 	return &HTTPWebhookHandler{
 		client: client,
 	}
+}
+
+// WithRequestTimeout sets the timeout for HTTP requests made by the webhook handler.
+// The default timeout is 3 seconds.
+func (h *HTTPWebhookHandler) WithRequestTimeout(timeout time.Duration) {
+	h.client.SetTimeout(timeout)
 }
 
 // ShouldHandleWebhook returns true if the target is an HTTP or HTTPS URL.

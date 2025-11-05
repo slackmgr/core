@@ -6,7 +6,7 @@ import (
 	common "github.com/peteraglen/slack-manager-common"
 )
 
-// WebhookHandler is an interface for handling alert webhooks (i.e. callbacks).
+// WebhookHandler is an interface for handling alert webhooks (i.e. issue callbacks).
 // The webhook may or may not be http based.
 // More than one handler can be registered with a Manager.
 // The first handler that returns true from ShouldHandleWebhook will be used to handle a given webhook.
