@@ -36,8 +36,9 @@ func NewHTTPWebhookHandler(logger common.Logger) *HTTPWebhookHandler {
 
 // WithRequestTimeout sets the timeout for HTTP requests made by the webhook handler.
 // The default timeout is 3 seconds.
-func (h *HTTPWebhookHandler) WithRequestTimeout(timeout time.Duration) {
+func (h *HTTPWebhookHandler) WithRequestTimeout(timeout time.Duration) *HTTPWebhookHandler {
 	h.client.SetTimeout(timeout)
+	return h
 }
 
 // ShouldHandleWebhook returns true if the target is an HTTP or HTTPS URL.

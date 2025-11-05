@@ -149,5 +149,7 @@ func (m *Manager) UpdateSettings(settings *config.ManagerSettings) error {
 
 	m.managerSettings.Settings = settings
 
+	m.logger.Infof("Manager settings updated")
+
 	return nil
 }
