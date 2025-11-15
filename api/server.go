@@ -31,7 +31,7 @@ type FifoQueueProducer interface {
 }
 
 type Server struct {
-	rawAlertConsumer  FifoQueueConsumer
+	rawAlertConsumers []FifoQueueConsumer
 	alertQueue        FifoQueueProducer
 	limitersByChannel map[string]*rate.Limiter
 	limitersLock      *sync.Mutex
@@ -72,13 +72,14 @@ func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, log
 
 // WithRawAlertConsumer defines an alternative alert consumer, which reads from a FIFO queue and processes the items similarly to the main rest API.
 // The consumer is started by Run(ctx), and the queue is consumed in a separate goroutine.
-// The server can receive alerts from both the main rest API and the raw alert consumer simultaneously.
+//
+// Multiple raw alert consumers can be added.
+//
+// The server can receive alerts from both the main rest API and the raw alert consumers simultaneously.
 //
 // The queue item body must be a single JSON-serialized common.Alert. Prometheus webhooks are not supported here.
-//
-// Validation errors are logged, but otherwise ignored (i.e. no retries on bad input).
 func (s *Server) WithRawAlertConsumer(consumer FifoQueueConsumer) *Server {
-	s.rawAlertConsumer = consumer
+	s.rawAlertConsumers = append(s.rawAlertConsumers, consumer)
 	return s
 }
 
@@ -180,9 +181,10 @@ func (s *Server) Run(ctx context.Context) error {
 
 	errg, ctx := errgroup.WithContext(ctx)
 
-	if s.rawAlertConsumer != nil {
+	// Start each alert consumer, if any.
+	for _, consumer := range s.rawAlertConsumers {
 		errg.Go(func() error {
-			return s.runRawAlertConsumer(ctx)
+			return s.runRawAlertConsumer(ctx, consumer)
 		})
 	}
 
@@ -231,7 +233,14 @@ func (s *Server) UpdateSettings(settings *config.APISettings) error {
 	return nil
 }
 
-func (s *Server) runRawAlertConsumer(ctx context.Context) error {
+// runRawAlertConsumer starts consuming alerts from the given FIFO queue consumer.
+// Each alert is expected to be a JSON-serialized common.Alert.
+//
+// Retryable processing errors result in the message being nacked, thus allowing re-processing later.
+// Non-retryable processing errors result in the message being acked, thus avoiding re-processing.
+//
+// This method blocks until the context is cancelled, i.e. the consumer.Receive() method exits.
+func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueConsumer) error {
 	s.logger.Info("Starting raw alert consumer")
 	defer s.logger.Info("Raw alert consumer exited")
 
@@ -240,7 +249,7 @@ func (s *Server) runRawAlertConsumer(ctx context.Context) error {
 	errg, ctx := errgroup.WithContext(ctx)
 
 	errg.Go(func() error {
-		return s.rawAlertConsumer.Receive(ctx, queueCh)
+		return consumer.Receive(ctx, queueCh)
 	})
 
 	errg.Go(func() error {
