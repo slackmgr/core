@@ -1,4 +1,4 @@
-package api //nolint:revive
+package restapi
 
 import "fmt"
 
