@@ -143,7 +143,7 @@ func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*common.Alert 
 		}
 
 		// Add some metadata to the alert, for debug purposes only
-		metadata := map[string]interface{}{
+		metadata := map[string]any{
 			"status":      promAlert.Status,
 			"labels":      promAlert.Labels,
 			"annotations": promAlert.Annotations,

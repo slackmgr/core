@@ -17,7 +17,7 @@ func ack(evt *socketmode.Event, clt *socketmode.Client) {
 	}
 }
 
-func ackWithPayload(evt *socketmode.Event, clt *socketmode.Client, payload interface{}) {
+func ackWithPayload(evt *socketmode.Event, clt *socketmode.Client, payload any) {
 	if evt.Request != nil {
 		clt.Ack(*evt.Request, payload)
 	}

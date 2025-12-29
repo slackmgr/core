@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -492,15 +493,15 @@ func (s *ManagerSettings) MapSlackPostReaction(reaction string) IssueReaction {
 	var r IssueReaction
 
 	switch {
-	case containsString(s.IssueReactions.TerminateEmojis, reaction):
+	case slices.Contains(s.IssueReactions.TerminateEmojis, reaction):
 		r = IssueReactionTerminate
-	case containsString(s.IssueReactions.ResolveEmojis, reaction):
+	case slices.Contains(s.IssueReactions.ResolveEmojis, reaction):
 		r = IssueReactionResolve
-	case containsString(s.IssueReactions.InvestigateEmojis, reaction):
+	case slices.Contains(s.IssueReactions.InvestigateEmojis, reaction):
 		r = IssueReactionInvestigate
-	case containsString(s.IssueReactions.MuteEmojis, reaction):
+	case slices.Contains(s.IssueReactions.MuteEmojis, reaction):
 		r = IssueReactionMute
-	case containsString(s.IssueReactions.ShowOptionButtonsEmojis, reaction):
+	case slices.Contains(s.IssueReactions.ShowOptionButtonsEmojis, reaction):
 		r = IssueReactionShowOptionButtons
 	default:
 		r = ""
@@ -509,14 +510,4 @@ func (s *ManagerSettings) MapSlackPostReaction(reaction string) IssueReaction {
 	s.issueReactionMap[reaction] = r
 
 	return r
-}
-
-func containsString(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-
-	return false
 }

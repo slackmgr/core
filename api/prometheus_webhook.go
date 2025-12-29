@@ -19,8 +19,8 @@ type PrometheusAlert struct {
 	Status       string            `json:"status,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	Annotations  map[string]string `json:"annotations,omitempty"`
-	StartsAt     time.Time         `json:"startsAt,omitempty"`
-	EndsAt       time.Time         `json:"endsAt,omitempty"`
+	StartsAt     time.Time         `json:"startsAt"`
+	EndsAt       time.Time         `json:"endsAt"`
 	GeneratorURL string            `json:"generatorURL,omitempty"` //nolint:tagliatelle
 	Fingerprint  string            `json:"fingerprint,omitempty"`
 }

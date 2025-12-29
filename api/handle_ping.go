@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -15,5 +16,5 @@ func (s *Server) ping(resp http.ResponseWriter, req *http.Request) {
 		s.logger.Errorf("Failed to write ping response: %s", err)
 	}
 
-	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusOK, time.Since(started))
+	s.metrics.Observe(httpRequestMetric, time.Since(started).Seconds(), req.URL.Path, req.Method, strconv.Itoa(http.StatusOK))
 }

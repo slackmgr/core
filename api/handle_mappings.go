@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -24,5 +25,5 @@ func (s *Server) handleMappings(resp http.ResponseWriter, req *http.Request) {
 		s.logger.Errorf("Failed to write API routing rules response: %s", err)
 	}
 
-	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusOK, time.Since(started))
+	s.metrics.Observe(httpRequestMetric, time.Since(started).Seconds(), req.URL.Path, req.Method, strconv.Itoa(http.StatusOK))
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -167,7 +168,7 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 
 	resp.WriteHeader(http.StatusNoContent)
 
-	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusNoContent, time.Since(started))
+	s.metrics.Observe(httpRequestMetric, time.Since(started).Seconds(), req.URL.Path, req.Method, strconv.Itoa(http.StatusNoContent))
 }
 
 // processQueuedAlert processes a single alert from the raw alert input queue (rather than from an API request).

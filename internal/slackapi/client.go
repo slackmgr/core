@@ -125,7 +125,7 @@ func (c *Client) BotUserID() string {
 func (c *Client) ChatPostMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
 	action := "chat.post"
 
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
+	c.metrics.Inc(slackRequestMetric, action)
 
 	f := func(ctx context.Context) (string, any, error) {
 		_, ts, _, err := c.api.SendMessageContext(ctx, channelID, options...)
@@ -140,7 +140,7 @@ func (c *Client) ChatPostMessage(ctx context.Context, channelID string, options 
 func (c *Client) ChatUpdateMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
 	action := "chat.update"
 
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
+	c.metrics.Inc(slackRequestMetric, action)
 
 	f := func(ctx context.Context) (string, any, error) {
 		_, ts, _, err := c.api.SendMessageContext(ctx, channelID, options...)
@@ -155,7 +155,7 @@ func (c *Client) ChatUpdateMessage(ctx context.Context, channelID string, option
 func (c *Client) ChatDeleteMessage(ctx context.Context, channelID string, ts string) error {
 	action := "chat.delete"
 
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
+	c.metrics.Inc(slackRequestMetric, action)
 
 	f := func(ctx context.Context) (any, any, error) {
 		_, _, _, err := c.api.SendMessageContext(ctx, channelID, slack.MsgOptionDelete(ts))
@@ -186,7 +186,7 @@ func (c *Client) SendResponse(ctx context.Context, channelID, responseURL, respo
 
 	action := "chat.responseURL"
 
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
+	c.metrics.Inc(slackRequestMetric, action)
 
 	options := []slack.MsgOption{slack.MsgOptionResponseURL(responseURL, responseType), slack.MsgOptionText(text, false)}
 
@@ -211,7 +211,7 @@ func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, op
 
 	action := "chat.postEphemeral"
 
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
+	c.metrics.Inc(slackRequestMetric, action)
 
 	f := func(ctx context.Context) (string, any, error) {
 		ts, err := c.api.PostEphemeralContext(ctx, channelID, userID, options...)
@@ -230,7 +230,7 @@ func (c *Client) OpenModal(ctx context.Context, triggerID string, request slack.
 
 	action := "views.open"
 
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
+	c.metrics.Inc(slackRequestMetric, action)
 
 	_, err := c.api.OpenViewContext(ctx, triggerID, request)
 
@@ -248,7 +248,7 @@ func (c *Client) MessageHasReplies(ctx context.Context, channelID, ts string) (b
 
 	action := "conversations.replies"
 
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
+	c.metrics.Inc(slackRequestMetric, action)
 
 	params := &slack.GetConversationRepliesParameters{
 		ChannelID: channelID,
@@ -280,12 +280,12 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 
 	action := "conversations.info"
 
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
+	c.metrics.Inc(slackRequestMetric, action)
 
 	cacheKey := "GetChannelInfo:" + channelID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
+		c.metrics.Inc(slackCacheHitMetric, action)
 
 		// If we cached a ChannelNotFoundError, return it as an error
 		if val == ChannelNotFoundError {
@@ -341,12 +341,12 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummary, error) {
 	action := "users.conversations"
 
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
+	c.metrics.Inc(slackRequestMetric, action)
 
 	cacheKey := "ListBotChannels"
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
+		c.metrics.Inc(slackCacheHitMetric, action)
 
 		channels := []*internal.ChannelSummary{}
 
@@ -407,12 +407,12 @@ func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 
 	action := "users.info"
 
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
+	c.metrics.Inc(slackRequestMetric, action)
 
 	cacheKey := "GetUserInfo:" + userID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
+		c.metrics.Inc(slackCacheHitMetric, action)
 
 		user := slack.User{}
 
@@ -450,12 +450,12 @@ func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 
 	action := "usergroups.users.list"
 
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
+	c.metrics.Inc(slackRequestMetric, action)
 
 	cacheKey := "ListUserGroupMembers:" + groupID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
+		c.metrics.Inc(slackCacheHitMetric, action)
 
 		var result map[string]struct{}
 
@@ -502,12 +502,12 @@ func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 
 	action := "conversations.members"
 
-	c.metrics.AddToCounter(slackRequestMetric, 1, action)
+	c.metrics.Inc(slackRequestMetric, action)
 
 	cacheKey := "GetUserIDsInChannel:" + channelID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.AddToCounter(slackCacheHitMetric, 1, action)
+		c.metrics.Inc(slackCacheHitMetric, action)
 
 		var result map[string]struct{}
 
@@ -597,7 +597,7 @@ func callAPI[V any, W any](ctx context.Context, logger commonlib.Logger, metrics
 	for {
 		val1, val2, err := f(ctx)
 
-		metrics.AddToCounter(slackAPICallMetric, 1, action)
+		metrics.Inc(slackAPICallMetric, action)
 
 		logger.
 			WithField("action", action).
@@ -621,7 +621,7 @@ func callAPI[V any, W any](ctx context.Context, logger commonlib.Logger, metrics
 			return result1, result2, err
 		}
 
-		metrics.AddToCounter(slackAPIErrorMetric, 1, action)
+		metrics.Inc(slackAPIErrorMetric, action)
 
 		if isNonRetryableError(err) {
 			return result1, result2, err
@@ -668,11 +668,7 @@ func waitForAPIError(ctx context.Context, started time.Time, logger commonlib.Lo
 }
 
 func waitForRateLimit(ctx context.Context, logger commonlib.Logger, err *slack.RateLimitedError, attempt int, action string, remainingWaitTime time.Duration) error {
-	wait := err.RetryAfter + 2*time.Second
-
-	if wait > remainingWaitTime {
-		wait = remainingWaitTime
-	}
+	wait := min(err.RetryAfter+2*time.Second, remainingWaitTime)
 
 	logger.Infof("Slack API rate limit exceeded when calling %s - waiting %v before trying again (attempt %d)", action, wait, attempt)
 
@@ -680,11 +676,7 @@ func waitForRateLimit(ctx context.Context, logger commonlib.Logger, err *slack.R
 }
 
 func waitForTransientError(ctx context.Context, logger commonlib.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
-	wait := time.Duration(attempt) * time.Second
-
-	if wait > remainingWaitTime {
-		wait = remainingWaitTime
-	}
+	wait := min(time.Duration(attempt)*time.Second, remainingWaitTime)
 
 	logger.Infof("Slack transient error %s when calling %s - waiting %v before trying again (attempt %d)", err, action, wait, attempt)
 
@@ -692,11 +684,7 @@ func waitForTransientError(ctx context.Context, logger commonlib.Logger, err err
 }
 
 func waitForFatalError(ctx context.Context, logger commonlib.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
-	wait := time.Duration(attempt) * time.Second * 2
-
-	if wait > remainingWaitTime {
-		wait = remainingWaitTime
-	}
+	wait := min(time.Duration(attempt)*time.Second*2, remainingWaitTime)
 
 	logger.Infof("Slack fatal error %s when calling %s - waiting %v before trying again (attempt %d)", err, action, wait, attempt)
 

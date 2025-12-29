@@ -13,7 +13,7 @@ func TestWebhokEncryption(t *testing.T) {
 	t.Parallel()
 
 	w := &common.Webhook{
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"foo":       "bar",
 			"val":       1,
 			"something": true,
@@ -34,5 +34,5 @@ func TestWebhokEncryption(t *testing.T) {
 	assert.Equal(t, "bar", payload["foo"])
 	assert.InDelta(t, float64(1), payload["val"], 0.0001)
 	assert.Equal(t, true, payload["something"])
-	assert.Equal(t, ([]interface{}{"a", "b"}), payload["else"])
+	assert.Equal(t, ([]any{"a", "b"}), payload["else"])
 }

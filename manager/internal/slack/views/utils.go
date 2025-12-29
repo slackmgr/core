@@ -6,7 +6,7 @@ import (
 	"io/fs"
 )
 
-func renderTemplate(fs fs.FS, file string, args interface{}) (bytes.Buffer, error) {
+func renderTemplate(fs fs.FS, file string, args any) (bytes.Buffer, error) {
 	var tpl bytes.Buffer
 
 	// read the block-kit definition as a go template
@@ -24,7 +24,7 @@ func renderTemplate(fs fs.FS, file string, args interface{}) (bytes.Buffer, erro
 	return tpl, nil
 }
 
-func renderTemplateFromPath(filename string, args interface{}) (bytes.Buffer, error) {
+func renderTemplateFromPath(filename string, args any) (bytes.Buffer, error) {
 	var tpl bytes.Buffer
 
 	t, err := template.ParseFiles(filename)

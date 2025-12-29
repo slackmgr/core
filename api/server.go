@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,10 @@ import (
 	"github.com/peteraglen/slack-manager/internal/slackapi"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
+)
+
+const (
+	httpRequestMetric = "http_server_request_duration_seconds"
 )
 
 type FifoQueueConsumer interface {
@@ -118,6 +123,11 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.channelInfoSyncer.Init(ctx); err != nil {
 		return fmt.Errorf("failed to initialize channel info manager: %w", err)
 	}
+
+	// Register prometheus histogram metric for HTTP request durations
+	metricsLabels := []string{"path", "method", "status"}
+	s.metrics.RegisterHistogram(httpRequestMetric, "The duration of incoming HTTP server requests in seconds",
+		[]float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}, metricsLabels...)
 
 	router := mux.NewRouter()
 
@@ -323,7 +333,7 @@ func (s *Server) writeErrorResponse(ctx context.Context, clientErr error, status
 		s.logger.Errorf("Failed to write error response: %s", err)
 	}
 
-	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, statusCode, time.Since(started))
+	s.metrics.Observe(httpRequestMetric, time.Since(started).Seconds(), req.URL.Path, req.Method, strconv.Itoa(statusCode))
 
 	if s.cfg.ErrorReportChannelID != "" {
 		alert := s.createClientErrorAlert(clientErr, statusCode, debugText, targetChannel)

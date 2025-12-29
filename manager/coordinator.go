@@ -90,8 +90,7 @@ func (c *coordinator) FindIssueBySlackPost(ctx context.Context, channelID string
 }
 
 func (c *coordinator) init(ctx context.Context) error {
-	err := c.refreshChannelManagers(ctx)
-	if err != nil {
+	if err := c.refreshChannelManagers(ctx); err != nil {
 		return fmt.Errorf("failed to start channel managers: %w", err)
 	}
 
@@ -264,6 +263,7 @@ func (c *coordinator) createChannelManager(ctx context.Context, channelID string
 	c.channelManagersWaitGroup.Add(1)
 
 	// Add the new channel manager to the map.
+	// There is no need to ever delete it, as channel managers live for the lifetime of the coordinator, i.e until the context is cancelled.
 	c.channelManagers[channelID] = channelManager
 
 	// Start the channel manager in a separate goroutine.

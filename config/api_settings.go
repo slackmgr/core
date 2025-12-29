@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	common "github.com/peteraglen/slack-manager-common"
@@ -315,13 +316,7 @@ func (s *APISettings) findRuleWithMatchAll(alertType string) (*RoutingRule, stri
 }
 
 func (r *RoutingRule) matchEquals(key string) bool {
-	for _, s := range r.Equals {
-		if key == s {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(r.Equals, key)
 }
 
 func (r *RoutingRule) matchPrefix(key string) bool {

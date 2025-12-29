@@ -94,7 +94,7 @@ func (a *Alert) SetDefaultValues(settings *config.ManagerSettings) {
 	}
 }
 
-func (a *Alert) LogFields() map[string]interface{} {
+func (a *Alert) LogFields() map[string]any {
 	if a == nil {
 		return nil
 	}

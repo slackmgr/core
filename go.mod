@@ -1,6 +1,6 @@
 module github.com/peteraglen/slack-manager
 
-go 1.22
+go 1.24
 
 require (
 	github.com/bsm/redislock v0.9.4
@@ -11,7 +11,7 @@ require (
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
 	github.com/patrickmn/go-cache v2.1.0+incompatible
-	github.com/peteraglen/slack-manager-common v0.0.27-rc.25
+	github.com/peteraglen/slack-manager-common v0.1.0
 	github.com/redis/go-redis/v9 v9.11.0
 	github.com/segmentio/ksuid v1.0.4
 	github.com/slack-go/slack v0.12.5

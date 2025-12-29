@@ -30,17 +30,17 @@ const (
 type Command struct {
 	// message
 
-	Timestamp               time.Time              `json:"timestamp,omitempty"`
-	SlackChannelID          string                 `json:"slackChannelId,omitempty"`
-	SlackPostID             string                 `json:"ts,omitempty"`
-	Reaction                string                 `json:"reaction,omitempty"`
-	UserID                  string                 `json:"userId,omitempty"`
-	UserRealName            string                 `json:"userRealName,omitempty"`
-	Action                  CommandAction          `json:"action,omitempty"`
-	Parameters              map[string]interface{} `json:"parameters,omitempty"`
-	WebhookParameters       *WebhookCommandParams  `json:"webhookParameters,omitempty"`
-	IncludeArchivedIssues   bool                   `json:"includeArchivedIssues"`
-	ExecuteWhenNoIssueFound bool                   `json:"executeWhenNoIssueFound"`
+	Timestamp               time.Time             `json:"timestamp"`
+	SlackChannelID          string                `json:"slackChannelId,omitempty"`
+	SlackPostID             string                `json:"ts,omitempty"`
+	Reaction                string                `json:"reaction,omitempty"`
+	UserID                  string                `json:"userId,omitempty"`
+	UserRealName            string                `json:"userRealName,omitempty"`
+	Action                  CommandAction         `json:"action,omitempty"`
+	Parameters              map[string]any        `json:"parameters,omitempty"`
+	WebhookParameters       *WebhookCommandParams `json:"webhookParameters,omitempty"`
+	IncludeArchivedIssues   bool                  `json:"includeArchivedIssues"`
+	ExecuteWhenNoIssueFound bool                  `json:"executeWhenNoIssueFound"`
 
 	ack  func(ctx context.Context)
 	nack func(ctx context.Context)
@@ -69,7 +69,7 @@ func NewCommandFromQueueItem(queueItem *commonlib.FifoQueueItem) (InFlightMessag
 	return &cmd, nil
 }
 
-func NewCommand(slackChannelID, ts, reaction, userID, userRealName string, action CommandAction, parameters map[string]interface{}) *Command {
+func NewCommand(slackChannelID, ts, reaction, userID, userRealName string, action CommandAction, parameters map[string]any) *Command {
 	return &Command{
 		Timestamp:      time.Now().UTC(),
 		SlackChannelID: slackChannelID,

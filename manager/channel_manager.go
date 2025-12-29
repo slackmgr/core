@@ -231,7 +231,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 
 	defer c.releaseLock(lock) //nolint:contextcheck
 
-	c.metrics.AddToCounter(alertsTotal, float64(1), c.channelID)
+	c.metrics.Inc(alertsTotal, c.channelID)
 
 	alert.SetDefaultValues(c.managerSettings.Settings)
 	alert.SlackChannelName = c.slackClient.GetChannelName(ctx, c.channelID)

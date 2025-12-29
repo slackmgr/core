@@ -418,7 +418,7 @@ func (c *InteractiveController) createIssueViewSubmission(ctx context.Context, e
 	// All is good - send normal ack and clear the modal view
 	ackWithPayload(evt, clt, slack.NewClearViewSubmissionResponse())
 
-	params := map[string]interface{}{
+	params := map[string]any{
 		"targetChannelId":    targetChannelID,
 		"severity":           severity,
 		"followUpEnabled":    followUpEnabled,
