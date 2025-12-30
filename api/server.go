@@ -29,6 +29,16 @@ type FifoQueueProducer interface {
 	Send(ctx context.Context, slackChannelID, dedupID, body string) error
 }
 
+// ChannelInfoProvider provides channel information for routing and validation.
+// This interface is implemented by channelInfoSyncer and can be mocked for testing.
+type ChannelInfoProvider interface {
+	GetChannelInfo(ctx context.Context, channelID string) (*channelInfo, error)
+	MapChannelNameToIDIfNeeded(channelIDOrName string) string
+	ManagedChannels() any
+	Init(ctx context.Context) error
+	Run(ctx context.Context) error
+}
+
 type Server struct {
 	rawAlertConsumer  FifoQueueConsumer
 	alertQueue        FifoQueueProducer
@@ -36,7 +46,7 @@ type Server struct {
 	limitersLock      *sync.Mutex
 	cacheStore        cachestore.StoreInterface
 	slackAPI          *slackapi.Client
-	channelInfoSyncer *channelInfoSyncer
+	channelInfoSyncer ChannelInfoProvider
 	logger            common.Logger
 	metrics           common.Metrics
 	apiSettings       *config.APISettings

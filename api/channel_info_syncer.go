@@ -119,7 +119,7 @@ func (c *channelInfoSyncer) GetChannelInfo(ctx context.Context, channel string) 
 	return info, err
 }
 
-func (c *channelInfoSyncer) ManagedChannels() []*internal.ChannelSummary {
+func (c *channelInfoSyncer) ManagedChannels() any {
 	return c.allManagedChannels
 }
 
