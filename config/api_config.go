@@ -8,6 +8,12 @@ import (
 // APIConfig holds configuration for the Slack Manager REST API.
 // The configuration here are for basic app settings. They cannot be changed after startup.
 type APIConfig struct {
+	// LogJSON indicates whether to log in JSON format.
+	LogJSON bool `json:"logJson" yaml:"logJson"`
+
+	// Verbose indicates whether to enable verbose logging.
+	Verbose bool `json:"verbose" yaml:"verbose"`
+
 	// RestPort is the port the REST API server listens on.
 	RestPort string `json:"restPort" yaml:"restPort"`
 
@@ -40,6 +46,8 @@ type RateLimitConfig struct {
 // NewDefaultAPIConfig returns an APIConfig with default values.
 func NewDefaultAPIConfig() *APIConfig {
 	return &APIConfig{
+		LogJSON:                true,
+		Verbose:                false,
 		RestPort:               "8080",
 		EncryptionKey:          "",
 		CacheKeyPrefix:         "slack-manager:",

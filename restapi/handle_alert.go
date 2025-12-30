@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/gorilla/mux"
+	"github.com/gin-gonic/gin"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/internal"
 )
@@ -29,42 +27,42 @@ type alertsInput struct {
 	Alerts []*common.Alert `json:"alerts"`
 }
 
-func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request) {
+func (s *Server) handleAlerts(c *gin.Context) {
 	started := time.Now()
 
-	if req.ContentLength <= 0 {
+	if c.Request.ContentLength <= 0 {
 		err := errors.New("missing POST body")
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
 
-	body, err := io.ReadAll(req.Body)
+	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		err = fmt.Errorf("failed to read POST body: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusInternalServerError, nil)
 		return
 	}
 
-	s.debugLogRequest(req, body)
+	s.debugLogRequest(c, body)
 
 	alerts, err := parseAlertInput(body)
 	if err != nil {
 		err = fmt.Errorf("failed to parse POST body: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
 
-	s.processAlerts(resp, req, alerts, started)
+	s.processAlerts(c, alerts, started)
 }
 
-func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, alerts []*common.Alert, started time.Time) {
+func (s *Server) processAlerts(c *gin.Context, alerts []*common.Alert, started time.Time) {
 	if len(alerts) == 0 {
-		resp.WriteHeader(http.StatusNoContent)
+		c.Status(http.StatusNoContent)
 		return
 	}
 
-	if err := s.setSlackChannelID(req, alerts...); err != nil {
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+	if err := s.setSlackChannelID(c, alerts...); err != nil {
+		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
 
@@ -76,7 +74,7 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 
 		if err := alert.Validate(); err != nil {
 			err = fmt.Errorf("input validation failed: %w", err)
-			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, getClientErrorDebugText(alert), getAlertChannelWithRouteKey(alert), resp, req, started)
+			s.writeErrorResponse(c, err, http.StatusBadRequest, alert)
 			return
 		}
 
@@ -99,22 +97,22 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 	}
 
 	if !atLeastOneAlert {
-		resp.WriteHeader(http.StatusNoContent)
+		c.Status(http.StatusNoContent)
 		return
 	}
 
 	alertLimitPerChannel := s.cfg.RateLimit.AllowedBurst
 
 	for channel, channelAlerts := range alertsByChannel {
-		channelInfo, err := s.channelInfoSyncer.GetChannelInfo(req.Context(), channel)
+		channelInfo, err := s.channelInfoSyncer.GetChannelInfo(c.Request.Context(), channel)
 		if err != nil {
 			err = fmt.Errorf("failed to fetch info for channel %s: %w", channel, err)
-			s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]), resp, req, started)
+			s.writeErrorResponse(c, err, http.StatusInternalServerError, channelAlerts[0])
 			return
 		}
 
 		if err := s.validateChannelInfo(channel, channelInfo); err != nil {
-			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]), resp, req, started)
+			s.writeErrorResponse(c, err, http.StatusBadRequest, channelAlerts[0])
 			return
 		}
 
@@ -129,9 +127,9 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 		failOnRateLimitError := channelAlerts[0].FailOnRateLimitError
 		alertCount := len(channelAlerts)
 
-		permitCount, err := s.waitForRateLimit(req.Context(), channel, alertCount, failOnRateLimitError)
+		permitCount, err := s.waitForRateLimit(c.Request.Context(), channel, alertCount, failOnRateLimitError)
 		if err != nil {
-			s.writeErrorResponse(req.Context(), err, http.StatusTooManyRequests, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]), resp, req, started)
+			s.writeErrorResponse(c, err, http.StatusTooManyRequests, channelAlerts[0])
 			return
 		}
 
@@ -152,13 +150,13 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 			for _, w := range alert.Webhooks {
 				if err := internal.EncryptWebhookPayload(w, []byte(s.cfg.EncryptionKey)); err != nil {
 					err = fmt.Errorf("failed to encrypt webhook payload: %w", err)
-					s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, getClientErrorDebugText(alert), getAlertChannelWithRouteKey(alert), resp, req, started)
+					s.writeErrorResponse(c, err, http.StatusInternalServerError, alert)
 					return
 				}
 			}
 
-			if err := s.queueAlert(req.Context(), alert); err != nil {
-				s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, getClientErrorDebugText(alert), getAlertChannelWithRouteKey(alert), resp, req, started)
+			if err := s.queueAlert(c.Request.Context(), alert); err != nil {
+				s.writeErrorResponse(c, err, http.StatusInternalServerError, alert)
 				return
 			}
 
@@ -166,9 +164,7 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 		}
 	}
 
-	resp.WriteHeader(http.StatusNoContent)
-
-	s.metrics.Observe(httpRequestMetric, time.Since(started).Seconds(), req.URL.Path, req.Method, strconv.Itoa(http.StatusNoContent))
+	c.Status(http.StatusNoContent)
 }
 
 // processQueuedAlert processes a single alert from the raw alert input queue (rather than from an API request).
@@ -230,44 +226,42 @@ func (s *Server) processQueuedAlert(ctx context.Context, alert *common.Alert) er
 	return nil
 }
 
-func (s *Server) handleAlertsTest(resp http.ResponseWriter, req *http.Request) {
-	started := time.Now()
-
-	if req.ContentLength <= 0 {
+func (s *Server) handleAlertsTest(c *gin.Context) {
+	if c.Request.ContentLength <= 0 {
 		err := errors.New("missing POST body")
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
 
-	body, err := io.ReadAll(req.Body)
+	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		err = fmt.Errorf("failed to read POST body: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusInternalServerError, nil)
 		return
 	}
 
 	alerts, err := parseAlertInput(body)
 	if err != nil {
 		err = fmt.Errorf("failed to parse POST body: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
 
-	if err := s.setSlackChannelID(req, alerts...); err != nil {
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+	if err := s.setSlackChannelID(c, alerts...); err != nil {
+		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
 
 	body, err = json.Marshal(alerts)
 	if err != nil {
 		err = fmt.Errorf("failed to marshal POST body: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusInternalServerError, nil)
 		return
 	}
 
 	s.logger.Infof("BODY: %s", string(body))
 
-	resp.WriteHeader(http.StatusNoContent)
+	c.Status(http.StatusNoContent)
 }
 
 func (s *Server) validateChannelInfo(channel string, channelInfo *channelInfo) error {
@@ -290,95 +284,54 @@ func (s *Server) validateChannelInfo(channel string, channelInfo *channelInfo) e
 	return nil
 }
 
-func (s *Server) createClientErrorAlert(err error, statusCode int, debugText map[string]string, targetChannel string) *common.Alert {
-	severity := common.AlertWarning
-
-	if statusCode >= 500 {
-		severity = common.AlertError
-	}
-
-	if targetChannel == "" {
-		targetChannel = NA
-	}
-
-	alert := common.NewAlert(severity)
-
-	alert.CorrelationID = fmt.Sprintf("__client_error_%s_%s", targetChannel, internal.Hash(err.Error()))
-	alert.Header = fmt.Sprintf(":status: Client error %d", statusCode)
-	alert.FallbackText = fmt.Sprintf("Client error %d", statusCode)
-	alert.SlackChannelID = s.cfg.ErrorReportChannelID
-	alert.IssueFollowUpEnabled = true
-	alert.AutoResolveSeconds = 3600
-	alert.ArchivingDelaySeconds = 24 * 3600
-
-	alert.Text = fmt.Sprintf("*Target*: `%s`\n*Error*: `%s`", targetChannel, err.Error())
-
-	for k, v := range debugText {
-		v = strings.ReplaceAll(v, "`", "")
-		v = strings.ReplaceAll(v, "*", "")
-		v = strings.ReplaceAll(v, "~", "")
-		v = strings.ReplaceAll(v, "_", "")
-		v = strings.ReplaceAll(v, ":status:", "")
-		v = strings.ReplaceAll(v, "<", "")
-		v = strings.ReplaceAll(v, ">", "")
-		v = strings.ReplaceAll(v, "\n", " ")
-		v = strings.TrimSpace(v)
-
-		if len(v) > 100 {
-			v = v[:97] + "..."
-		}
-
-		alert.Text += fmt.Sprintf("\n*%s*: `%s`", k, v)
-	}
-
-	return alert
-}
-
-func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) error {
+// setSlackChannelID sets the SlackChannelID field on each alert.
+//
+// The channel ID is determined in the following order:
+//  1. If the alert has a SlackChannelID in the body, use that.
+//  2. If the URL contains a channel ID parameter, use that.
+//  3. If the alert has a non-empty route key, use the mapping rules to find the channel ID.
+//  4. If no route key is present, use the fallback mapping if it exists.
+//
+// If no channel ID can be determined for at least one of the alerts, an error is returned.
+func (s *Server) setSlackChannelID(c *gin.Context, alerts ...*common.Alert) error {
 	if len(alerts) == 0 {
 		return nil
 	}
 
-	var channelIDFromURL string
-	var getChannelIDFromURL sync.Once
+	// Try to get the channel ID from the URL (if any).
+	channelIDFromURLParam := c.Param("slackChannelId")
 
 	for _, alert := range alerts {
-		// Try to get the channel ID from the URL (exactly once).
-		// Only relevant when the alert has no channel ID set in the body AND the http request is not nil.
-		if alert.SlackChannelID == "" && req != nil {
-			getChannelIDFromURL.Do(func() {
-				vars := mux.Vars(req)
-				if vars != nil {
-					if val, ok := vars["slackChannelId"]; ok {
-						channelIDFromURL = strings.TrimSpace(val)
-					}
-				}
-			})
-
-			// Channel found in the url -> set it in the alert body
-			if channelIDFromURL != "" {
-				alert.SlackChannelID = channelIDFromURL
-			}
+		// If the channel ID in the body is empty, use the channel ID from the URL (which may also be empty).
+		// If both are empty, the route key will be used to find a mapping below.
+		if alert.SlackChannelID == "" {
+			alert.SlackChannelID = channelIDFromURLParam
 		}
 
 		// The channel ID may actually be a channel name. If so, attempt to map the name to a channel ID.
-		// This does nothing if the channel ID in the body is empty.
-		alert.SlackChannelID = s.channelInfoSyncer.MapChannelNameToIDIfNeeded(alert.SlackChannelID)
+		if alert.SlackChannelID != "" {
+			alert.SlackChannelID = s.channelInfoSyncer.MapChannelNameToIDIfNeeded(alert.SlackChannelID)
+		}
 
-		// Channel ID found in the alert body -> move on (no need to process the route key)
+		// Channel ID found in the alert body or in the URL -> move on (no need to process the route key).
 		if alert.SlackChannelID != "" {
 			continue
 		}
 
-		// Find an alert mapping rule matching the route key and alert type (if any)
+		// Find an alert mapping rule matching the route key and alert type (if any).
+		// If the route key is empty, the fallback mapping will be used, if it exists.
 		if channel, ok := s.apiSettings.Match(alert.RouteKey, alert.Type, s.logger); ok {
 			alert.SlackChannelID = channel
-		} else {
-			if alert.RouteKey == "" {
-				return errors.New("alert has no route key, and no fallback mapping exists")
-			}
-			return fmt.Errorf("no mapping exists for route key %s and alert type %s", alert.RouteKey, alert.Type)
+			continue
 		}
+
+		// The route key is empty and no fallback mapping exists -> return an error.
+		if alert.RouteKey == "" {
+			return errors.New("alert has no route key, and no fallback mapping exists")
+		}
+
+		// No mapping found for the route key and alert type -> return an error.
+		return fmt.Errorf("no mapping exists for route key %s and alert type %s", alert.RouteKey, alert.Type)
 	}
 
 	return nil
@@ -394,18 +347,6 @@ func (s *Server) logAlerts(text, reason string, started time.Time, alerts ...*co
 		}
 
 		entry.Info(text)
-	}
-}
-
-func getClientErrorDebugText(alert *common.Alert) map[string]string {
-	if alert == nil {
-		return nil
-	}
-
-	return map[string]string{
-		"CorrelationId": alert.CorrelationID,
-		"Header":        alert.Header,
-		"Body":          alert.Text,
 	}
 }
 
@@ -490,20 +431,4 @@ func parseAlertInput(body []byte) ([]*common.Alert, error) {
 
 	// Nothing in the alerts array -> assume the input is a single alert, with all fields at the root level.
 	return []*common.Alert{&input.Alert}, nil
-}
-
-func getAlertChannelWithRouteKey(alert *common.Alert) string {
-	var result string
-
-	if alert.SlackChannelID != "" {
-		result = alert.SlackChannelID
-	} else {
-		result = NA
-	}
-
-	if alert.RouteKey != "" {
-		result += fmt.Sprintf(" [%s]", alert.RouteKey)
-	}
-
-	return result
 }

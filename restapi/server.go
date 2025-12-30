@@ -13,11 +13,12 @@ import (
 
 	cachestore "github.com/eko/gocache/lib/v4/store"
 	gocache_store "github.com/eko/gocache/store/go_cache/v4"
-	"github.com/gorilla/handlers"
-	"github.com/gorilla/mux"
+	"github.com/gin-contrib/timeout"
+	"github.com/gin-gonic/gin"
 	gocache "github.com/patrickmn/go-cache"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
+	"github.com/peteraglen/slack-manager/internal"
 	"github.com/peteraglen/slack-manager/internal/slackapi"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
@@ -47,6 +48,7 @@ type Server struct {
 	metrics           common.Metrics
 	apiSettings       *config.APISettings
 	cfg               *config.APIConfig
+	defaultPretty     bool
 }
 
 func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.APIConfig, settings *config.APISettings) *Server {
@@ -129,63 +131,95 @@ func (s *Server) Run(ctx context.Context) error {
 	s.metrics.RegisterHistogram(httpRequestMetric, "The duration of incoming HTTP server requests in seconds",
 		[]float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}, metricsLabels...)
 
-	router := mux.NewRouter()
+	// Set release mode to mute a few annoying startup logs.
+	// The actual runtime mode is set below, depending on config.
+	gin.SetMode(gin.ReleaseMode)
+
+	// Create a blank Gin engine, without any middleware.
+	engine := gin.New()
+
+	// Add recovery middleware to recover from any panics and write a 500 if there was one.
+	engine.Use(gin.Recovery())
+
+	// Add global metrics middleware.
+	engine.Use(s.metricsMiddleware())
+
+	// Add logging middleware. Custom JSON if configured, otherwise the default stdout logger.
+	if s.cfg.LogJSON {
+		engine.Use(s.jsonLogMiddleware()) // Custom JSON logger
+
+		gin.DebugPrintFunc = func(format string, args ...any) {
+			s.logger.Debugf("gin: "+format, args...)
+		}
+
+		gin.DebugPrintRouteFunc = func(httpMethod, absolutePath, handlerName string, nuHandlers int) {
+			s.logger.Debugf("gin: %s %s --> %s (%d handlers)", httpMethod, absolutePath, handlerName, nuHandlers)
+		}
+	} else {
+		engine.Use(gin.Logger()) // Default logger
+	}
+
+	// Set runtime mode and default pretty printing based on verbose config.
+	if s.cfg.Verbose {
+		gin.SetMode(gin.DebugMode)
+		s.defaultPretty = true
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+		s.defaultPretty = false
+	}
 
 	// We support both /alert and /alerts endpoints for backwards compatibility.
 	// Input is either a single alert (common.Alert), or an array of alerts.
-	router.HandleFunc("/alert", s.handleAlerts).Methods("POST")
-	router.HandleFunc("/alert/{slackChannelId}", s.handleAlerts).Methods("POST")
-	router.HandleFunc("/alerts", s.handleAlerts).Methods("POST")
-	router.HandleFunc("/alerts/{slackChannelId}", s.handleAlerts).Methods("POST")
+	engine.POST("/alert", s.handleAlerts)
+	engine.POST("/alert/:slackChannelId", s.handleAlerts)
+	engine.POST("/alerts", s.handleAlerts)
+	engine.POST("/alerts/:slackChannelId", s.handleAlerts)
 
 	// Webhooks from Prometheus alert manager.
 	// The alert format is defined in PrometheusWebhook.
-	router.HandleFunc("/prometheus-alert", s.handlePrometheusWebhook).Methods("POST")
-	router.HandleFunc("/prometheus-alert/{slackChannelId}", s.handlePrometheusWebhook).Methods("POST")
+	engine.POST("/prometheus-alert", s.handlePrometheusWebhook)
+	engine.POST("/prometheus-alert/:slackChannelId", s.handlePrometheusWebhook)
 
 	// Test endpoint for alerts, which writes the input body as an info log message.
-	router.HandleFunc("/alerts-test", s.handleAlertsTest).Methods("POST")
-	router.HandleFunc("/alerts-test/{slackChannelId}", s.handleAlertsTest).Methods("POST")
+	engine.POST("/alerts-test", s.handleAlertsTest)
+	engine.POST("/alerts-test/:slackChannelId", s.handleAlertsTest)
 
 	// Route mappings
-	router.HandleFunc("/mappings", s.handleMappings).Methods("GET")
+	engine.GET("/mappings", s.handleMappings)
 
 	// List channels managed by Slack Manager
-	router.HandleFunc("/channels", s.handleChannels).Methods("GET")
+	engine.GET("/channels", s.handleChannels)
 
 	// Ping
-	router.HandleFunc("/ping", s.ping).Methods("GET")
+	engine.GET("/ping", s.ping)
 
-	readHeaderTimeout := 2 * time.Second
-	requestTimeout := s.getRequestTimeout()
+	readHeaderTimeout := 5 * time.Second
+	handlerTimeout := s.getHandlerTimeout()
 	timeoutWiggleRoom := time.Second
+	readTimeout := readHeaderTimeout + handlerTimeout + timeoutWiggleRoom
+	writeTimeout := handlerTimeout + timeoutWiggleRoom
 
-	var handler http.Handler
-
-	if loggingHandler := s.logger.HttpLoggingHandler(); loggingHandler != nil {
-		handler = handlers.LoggingHandler(loggingHandler, router)
-	} else {
-		handler = router
-	}
-
-	timeoutHandler := http.TimeoutHandler(handler, requestTimeout, "Handler timeout")
-	listenAddr := ":" + s.cfg.RestPort
+	// Apply timeout middleware globally
+	engine.Use(timeout.New(
+		timeout.WithTimeout(handlerTimeout),
+		timeout.WithResponse(timeoutResponse),
+	))
 
 	srv := &http.Server{
-		Handler:           timeoutHandler,
-		Addr:              listenAddr,
+		Addr:              ":" + s.cfg.RestPort,
+		Handler:           engine,
 		ReadHeaderTimeout: readHeaderTimeout,
-		ReadTimeout:       readHeaderTimeout + requestTimeout + timeoutWiggleRoom,
-		WriteTimeout:      requestTimeout + timeoutWiggleRoom,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
 		IdleTimeout:       60 * time.Second,
 	}
 
 	s.logger.
-		WithField("write_timeout", fmt.Sprintf("%v", srv.WriteTimeout)).
-		WithField("read_timeout", fmt.Sprintf("%v", srv.ReadTimeout)).
 		WithField("read_header_timeout", fmt.Sprintf("%v", srv.ReadHeaderTimeout)).
+		WithField("read_timeout", fmt.Sprintf("%v", srv.ReadTimeout)).
+		WithField("handler_timeout", fmt.Sprintf("%v", handlerTimeout)).
+		WithField("write_timeout", fmt.Sprintf("%v", srv.WriteTimeout)).
 		WithField("idle_timeout", fmt.Sprintf("%v", srv.IdleTimeout)).
-		WithField("request_timeout", fmt.Sprintf("%v", requestTimeout)).
 		WithField("port", s.cfg.RestPort).
 		Info("Starting API listener")
 
@@ -313,7 +347,7 @@ func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueCons
 	return errg.Wait()
 }
 
-func (s *Server) writeErrorResponse(ctx context.Context, clientErr error, statusCode int, debugText map[string]string, targetChannel string, resp http.ResponseWriter, req *http.Request, started time.Time) {
+func (s *Server) writeErrorResponse(c *gin.Context, clientErr error, statusCode int, alert *common.Alert) {
 	errText := clientErr.Error()
 
 	if len(errText) > 1 {
@@ -326,22 +360,69 @@ func (s *Server) writeErrorResponse(ctx context.Context, clientErr error, status
 		s.logger.Errorf("Request failed: %s", errText)
 	}
 
-	resp.Header().Add("Content-Type", "text/plain")
-	resp.WriteHeader(statusCode)
+	c.Header("Content-Type", "text/plain")
+	c.Status(statusCode)
 
-	if _, err := resp.Write([]byte(errText)); err != nil {
+	if _, err := c.Writer.Write([]byte(errText)); err != nil {
 		s.logger.Errorf("Failed to write error response: %s", err)
 	}
 
-	s.metrics.Observe(httpRequestMetric, time.Since(started).Seconds(), req.URL.Path, req.Method, strconv.Itoa(statusCode))
-
 	if s.cfg.ErrorReportChannelID != "" {
-		alert := s.createClientErrorAlert(clientErr, statusCode, debugText, targetChannel)
+		targetChannel := debugGetAlertChannelOrRouteKey(c, alert)
+		debugFields := debugGetAlertFields(alert)
 
-		if err := s.queueAlert(ctx, alert); err != nil {
+		alert := s.createClientErrorAlert(clientErr, statusCode, debugFields, targetChannel)
+
+		if err := s.queueAlert(c.Request.Context(), alert); err != nil {
 			s.logger.Errorf("Failed to queue client error alert: %s", err)
 		}
 	}
+}
+
+// createClientErrorAlert creates an alert for reporting client errors to the configured Slack error report channel.
+// This is an optional debug feature, used by Slack Manager admins to track client errors that may indicate misconfiguration or integration issues.
+func (s *Server) createClientErrorAlert(err error, statusCode int, debugFields map[string]string, targetChannel string) *common.Alert {
+	severity := common.AlertWarning
+
+	if statusCode >= 500 {
+		severity = common.AlertError
+	}
+
+	if targetChannel == "" {
+		targetChannel = NA
+	}
+
+	alert := common.NewAlert(severity)
+
+	alert.CorrelationID = fmt.Sprintf("__client_error_%s_%s", targetChannel, internal.Hash(err.Error()))
+	alert.Header = fmt.Sprintf(":status: Client error %d", statusCode)
+	alert.FallbackText = fmt.Sprintf("Client error %d", statusCode)
+	alert.SlackChannelID = s.cfg.ErrorReportChannelID
+	alert.IssueFollowUpEnabled = true
+	alert.AutoResolveSeconds = 3600
+	alert.ArchivingDelaySeconds = 24 * 3600
+
+	alert.Text = fmt.Sprintf("*Target*: `%s`\n*Error*: `%s`", targetChannel, err.Error())
+
+	for k, v := range debugFields {
+		v = strings.ReplaceAll(v, "`", "")
+		v = strings.ReplaceAll(v, "*", "")
+		v = strings.ReplaceAll(v, "~", "")
+		v = strings.ReplaceAll(v, "_", "")
+		v = strings.ReplaceAll(v, ":status:", "")
+		v = strings.ReplaceAll(v, "<", "")
+		v = strings.ReplaceAll(v, ">", "")
+		v = strings.ReplaceAll(v, "\n", " ")
+		v = strings.TrimSpace(v)
+
+		if len(v) > 100 {
+			v = v[:97] + "..."
+		}
+
+		alert.Text += fmt.Sprintf("\n*%s*: `%s`", k, v)
+	}
+
+	return alert
 }
 
 // queueAlert serializes the alert and sends it to the alert queue.
@@ -413,19 +494,131 @@ func (s *Server) getRateLimiter(channel string) *rate.Limiter {
 	return limiter
 }
 
-func (s *Server) debugLogRequest(req *http.Request, body []byte) {
-	s.logger.WithField("body", string(body)).Debugf("%s %s", req.Method, req.URL.Path)
+func (s *Server) debugLogRequest(c *gin.Context, body []byte) {
+	s.logger.WithField("body", string(body)).Debugf("%s %s", c.Request.Method, c.Request.URL.Path)
 }
 
-func (s *Server) getRequestTimeout() time.Duration {
-	apiRateLimitMaxTimeSeconds := s.cfg.RateLimit.MaxWaitPerAttemptSeconds * s.cfg.RateLimit.MaxAttempts
+// getHandlerTimeout calculates the timeout duration for request handlers based on rate limit settings.
+// It ensures that the timeout is sufficient to handle the maximum wait time due to rate limiting, plus a small buffer.
+// The timeout is never less than 30 seconds.
+func (s *Server) getHandlerTimeout() time.Duration {
+	apiRateLimitMaxTimeSeconds := (s.cfg.RateLimit.MaxWaitPerAttemptSeconds * s.cfg.RateLimit.MaxAttempts) + 3
 
 	timeoutSeconds := max(
 		apiRateLimitMaxTimeSeconds,
-		s.cfg.SlackClient.MaxRateLimitErrorWaitTimeSeconds,
-		s.cfg.SlackClient.MaxTransientErrorWaitTimeSeconds,
-		s.cfg.SlackClient.MaxFatalErrorWaitTimeSeconds,
+		30,
 	)
 
-	return time.Duration(timeoutSeconds+1) * time.Second
+	return time.Duration(timeoutSeconds) * time.Second
+}
+
+// jsonLogMiddleware is a Gin middleware that logs HTTP requests in JSON format.
+// It captures details such as client IP, request duration, method, path, and status code.
+// Responses with status codes 500 and above are logged as errors, all others as info.
+func (s *Server) jsonLogMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		s.logger.Debug("LOG MIDDLEWARE")
+
+		start := time.Now()
+
+		// Process the request
+		c.Next()
+
+		duration := time.Since(start)
+
+		path := c.Request.URL.Path
+		raw := c.Request.URL.RawQuery
+
+		if raw != "" {
+			path = path + "?" + raw
+		}
+
+		msg := c.Errors.String()
+
+		if msg == "" {
+			msg = "Request"
+		}
+
+		status := c.Writer.Status()
+
+		logger := s.logger.
+			WithField("client_ip", c.ClientIP()).
+			WithField("duration", duration).
+			WithField("method", c.Request.Method).
+			WithField("path", path).
+			WithField("status", status)
+
+		if status >= 500 {
+			logger.Error(msg)
+		} else {
+			logger.Info(msg)
+		}
+	}
+}
+
+func (s *Server) metricsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		s.logger.Debug("METRICS MIDDLEWARE")
+
+		start := time.Now()
+
+		c.Next() // process request
+
+		method := c.Request.Method
+		path := c.FullPath() // uses route patterns like "/users/:id"
+
+		// Ensure that the path is never empty (happens with 404s)
+		if path == "" {
+			path = "unmatched"
+		}
+
+		s.metrics.Observe(httpRequestMetric, time.Since(start).Seconds(), path, method, strconv.Itoa(c.Writer.Status()))
+	}
+}
+
+// timeoutResponse is called when a request times out. It sends a 503 Service Unavailable response with a "timeout" message.
+func timeoutResponse(c *gin.Context) {
+	c.String(http.StatusServiceUnavailable, "timeout")
+}
+
+func debugGetAlertChannelOrRouteKey(c *gin.Context, alert *common.Alert) string {
+	if alert.SlackChannelID != "" {
+		return fmt.Sprintf("%s (channel ID from alert body)", alert.SlackChannelID)
+	}
+
+	channelIDFromParam := c.Param("slackChannelId")
+
+	if channelIDFromParam != "" {
+		return fmt.Sprintf("%s (channel ID from URL param)", channelIDFromParam)
+	}
+
+	if alert.RouteKey != "" {
+		return fmt.Sprintf("%s (route key)", alert.RouteKey)
+	}
+
+	return "[no channel ID or route key found]"
+}
+
+func debugGetAlertFields(alert *common.Alert) map[string]string {
+	if alert == nil {
+		return nil
+	}
+
+	header := alert.Header
+
+	if len(header) > 200 {
+		header = header[:200] + "..."
+	}
+
+	body := alert.Text
+
+	if len(body) > 1000 {
+		body = body[:1000] + "..."
+	}
+
+	return map[string]string{
+		"CorrelationId": alert.CorrelationID,
+		"Header":        header,
+		"Body":          body,
+	}
 }
