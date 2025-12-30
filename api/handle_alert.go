@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/mux"
+	"github.com/gin-gonic/gin"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/internal"
 )
@@ -27,42 +27,46 @@ type alertsInput struct {
 	Alerts []*common.Alert `json:"alerts"`
 }
 
-func (s *Server) handleAlerts(resp http.ResponseWriter, req *http.Request) {
-	started := time.Now()
-
-	if req.ContentLength <= 0 {
+func (s *Server) handleAlerts(c *gin.Context) {
+	if c.Request.ContentLength <= 0 {
 		err := errors.New("missing POST body")
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusBadRequest, nil, "")
 		return
 	}
 
-	body, err := io.ReadAll(req.Body)
+	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		err = fmt.Errorf("failed to read POST body: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusInternalServerError, nil, "")
 		return
 	}
 
-	s.debugLogRequest(req, body)
+	s.debugLogRequest(c.Request, body)
 
 	alerts, err := parseAlertInput(body)
 	if err != nil {
 		err = fmt.Errorf("failed to parse POST body: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusBadRequest, nil, "")
 		return
 	}
 
-	s.processAlerts(resp, req, alerts, started)
+	s.processAlerts(c, alerts)
 }
 
-func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, alerts []*common.Alert, started time.Time) {
+func (s *Server) processAlerts(c *gin.Context, alerts []*common.Alert) {
+	// Track start time for logging alert processing duration
+	logStarted := time.Now()
+
 	if len(alerts) == 0 {
-		resp.WriteHeader(http.StatusNoContent)
+		c.Status(http.StatusNoContent)
 		return
 	}
 
-	if err := s.setSlackChannelID(req, alerts...); err != nil {
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+	// Extract channel ID from URL path parameter (Gin uses :param syntax)
+	channelIDFromURL := strings.TrimSpace(c.Param("slackChannelId"))
+
+	if err := s.setSlackChannelID(channelIDFromURL, alerts...); err != nil {
+		s.writeErrorResponse(c, err, http.StatusBadRequest, nil, "")
 		return
 	}
 
@@ -74,14 +78,14 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 
 		if err := alert.Validate(); err != nil {
 			err = fmt.Errorf("input validation failed: %w", err)
-			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, getClientErrorDebugText(alert), getAlertChannelWithRouteKey(alert), resp, req, started)
+			s.writeErrorResponse(c, err, http.StatusBadRequest, getClientErrorDebugText(alert), getAlertChannelWithRouteKey(alert))
 			return
 		}
 
 		ignore, ignoreReason := ignoreAlert(alert)
 
 		if ignore {
-			s.logAlerts("Alert ignored", ignoreReason, started, alert)
+			s.logAlerts("Alert ignored", ignoreReason, logStarted, alert)
 			continue
 		}
 
@@ -97,22 +101,22 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 	}
 
 	if !atLeastOneAlert {
-		resp.WriteHeader(http.StatusNoContent)
+		c.Status(http.StatusNoContent)
 		return
 	}
 
 	alertLimitPerChannel := s.cfg.RateLimit.AllowedBurst
 
 	for channel, channelAlerts := range alertsByChannel {
-		channelInfo, err := s.channelInfoSyncer.GetChannelInfo(req.Context(), channel)
+		channelInfo, err := s.channelInfoSyncer.GetChannelInfo(c.Request.Context(), channel)
 		if err != nil {
 			err = fmt.Errorf("failed to fetch info for channel %s: %w", channel, err)
-			s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]), resp, req, started)
+			s.writeErrorResponse(c, err, http.StatusInternalServerError, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]))
 			return
 		}
 
 		if err := s.validateChannelInfo(channel, channelInfo); err != nil {
-			s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]), resp, req, started)
+			s.writeErrorResponse(c, err, http.StatusBadRequest, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]))
 			return
 		}
 
@@ -121,15 +125,15 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 		if len(skippedAlerts) > 0 {
 			channelAlerts = keptAlerts
 
-			s.logAlerts("Alert dropped", "Too many alerts in request", started, skippedAlerts...)
+			s.logAlerts("Alert dropped", "Too many alerts in request", logStarted, skippedAlerts...)
 		}
 
 		failOnRateLimitError := channelAlerts[0].FailOnRateLimitError
 		alertCount := len(channelAlerts)
 
-		permitCount, err := s.waitForRateLimit(req.Context(), channel, alertCount, failOnRateLimitError)
+		permitCount, err := s.waitForRateLimit(c.Request.Context(), channel, alertCount, failOnRateLimitError)
 		if err != nil {
-			s.writeErrorResponse(req.Context(), err, http.StatusTooManyRequests, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]), resp, req, started)
+			s.writeErrorResponse(c, err, http.StatusTooManyRequests, getClientErrorDebugText(channelAlerts[0]), getAlertChannelWithRouteKey(channelAlerts[0]))
 			return
 		}
 
@@ -141,7 +145,7 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 			rateLimitAlert := createRateLimitAlert(channel, overflow, firstVictim)
 			keptAlerts = append(keptAlerts, rateLimitAlert)
 
-			s.logAlerts("Alert dropped", "Rate limiting", started, skippedAlerts...)
+			s.logAlerts("Alert dropped", "Rate limiting", logStarted, skippedAlerts...)
 
 			channelAlerts = keptAlerts
 		}
@@ -150,31 +154,29 @@ func (s *Server) processAlerts(resp http.ResponseWriter, req *http.Request, aler
 			for _, w := range alert.Webhooks {
 				if err := internal.EncryptWebhookPayload(w, []byte(s.cfg.EncryptionKey)); err != nil {
 					err = fmt.Errorf("failed to encrypt webhook payload: %w", err)
-					s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, getClientErrorDebugText(alert), getAlertChannelWithRouteKey(alert), resp, req, started)
+					s.writeErrorResponse(c, err, http.StatusInternalServerError, getClientErrorDebugText(alert), getAlertChannelWithRouteKey(alert))
 					return
 				}
 			}
 
-			if err := s.queueAlert(req.Context(), alert); err != nil {
-				s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, getClientErrorDebugText(alert), getAlertChannelWithRouteKey(alert), resp, req, started)
+			if err := s.queueAlert(c.Request.Context(), alert); err != nil {
+				s.writeErrorResponse(c, err, http.StatusInternalServerError, getClientErrorDebugText(alert), getAlertChannelWithRouteKey(alert))
 				return
 			}
 
-			s.logAlerts("Alert accepted", "", started, alert)
+			s.logAlerts("Alert accepted", "", logStarted, alert)
 		}
 	}
 
-	resp.WriteHeader(http.StatusNoContent)
-
-	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusNoContent, time.Since(started))
+	c.Status(http.StatusNoContent)
 }
 
 // processQueuedAlert processes a single alert from the raw alert input queue (rather than from an API request).
 // It is similar to processAlerts, but skips for example rate limiting.
 func (s *Server) processQueuedAlert(ctx context.Context, alert *common.Alert, logger common.Logger) error {
-	started := time.Now()
+	logStarted := time.Now()
 
-	if err := s.setSlackChannelID(nil, alert); err != nil {
+	if err := s.setSlackChannelID("", alert); err != nil {
 		logger.Errorf("Failed to set alert Slack channel ID: %s", err)
 		return err
 	}
@@ -189,7 +191,7 @@ func (s *Server) processQueuedAlert(ctx context.Context, alert *common.Alert, lo
 	ignore, ignoreReason := ignoreAlert(alert)
 
 	if ignore {
-		s.logAlerts("Alert ignored", ignoreReason, started, alert)
+		s.logAlerts("Alert ignored", ignoreReason, logStarted, alert)
 		return nil
 	}
 
@@ -213,49 +215,50 @@ func (s *Server) processQueuedAlert(ctx context.Context, alert *common.Alert, lo
 		return err
 	}
 
-	s.logAlerts("Alert accepted", "", started, alert)
+	s.logAlerts("Alert accepted", "", logStarted, alert)
 
 	return nil
 }
 
-func (s *Server) handleAlertsTest(resp http.ResponseWriter, req *http.Request) {
-	started := time.Now()
-
-	if req.ContentLength <= 0 {
+func (s *Server) handleAlertsTest(c *gin.Context) {
+	if c.Request.ContentLength <= 0 {
 		err := errors.New("missing POST body")
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusBadRequest, nil, "")
 		return
 	}
 
-	body, err := io.ReadAll(req.Body)
+	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		err = fmt.Errorf("failed to read POST body: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusInternalServerError, nil, "")
 		return
 	}
 
 	alerts, err := parseAlertInput(body)
 	if err != nil {
 		err = fmt.Errorf("failed to parse POST body: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusBadRequest, nil, "")
 		return
 	}
 
-	if err := s.setSlackChannelID(req, alerts...); err != nil {
-		s.writeErrorResponse(req.Context(), err, http.StatusBadRequest, nil, "", resp, req, started)
+	// Extract channel ID from URL path parameter
+	channelIDFromURL := strings.TrimSpace(c.Param("slackChannelId"))
+
+	if err := s.setSlackChannelID(channelIDFromURL, alerts...); err != nil {
+		s.writeErrorResponse(c, err, http.StatusBadRequest, nil, "")
 		return
 	}
 
 	body, err = json.Marshal(alerts)
 	if err != nil {
 		err = fmt.Errorf("failed to marshal POST body: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusInternalServerError, nil, "")
 		return
 	}
 
 	s.logger.Infof("BODY: %s", string(body))
 
-	resp.WriteHeader(http.StatusNoContent)
+	c.Status(http.StatusNoContent)
 }
 
 func (s *Server) validateChannelInfo(channel string, channelInfo *channelInfo) error {
@@ -322,31 +325,25 @@ func (s *Server) createClientErrorAlert(err error, statusCode int, debugText map
 	return alert
 }
 
-func (s *Server) setSlackChannelID(req *http.Request, alerts ...*common.Alert) error {
+// setSlackChannelID sets the Slack channel ID for each alert.
+// channelIDFromURL is the channel ID extracted from the URL path parameter (if any).
+func (s *Server) setSlackChannelID(channelIDFromURL string, alerts ...*common.Alert) error {
 	if len(alerts) == 0 {
 		return nil
 	}
 
-	var channelIDFromURL string
 	var getChannelIDFromURL sync.Once
 
 	for _, alert := range alerts {
 		// Try to get the channel ID from the URL (exactly once).
-		// Only relevant when the alert has no channel ID set in the body AND the http request is not nil.
-		if alert.SlackChannelID == "" && req != nil {
+		// Only relevant when the alert has no channel ID set in the body.
+		if alert.SlackChannelID == "" && channelIDFromURL != "" {
 			getChannelIDFromURL.Do(func() {
-				vars := mux.Vars(req)
-				if vars != nil {
-					if val, ok := vars["slackChannelId"]; ok {
-						channelIDFromURL = strings.TrimSpace(val)
-					}
-				}
+				// Channel ID already extracted from URL and passed as parameter
 			})
 
 			// Channel found in the url -> set it in the alert body
-			if channelIDFromURL != "" {
-				alert.SlackChannelID = channelIDFromURL
-			}
+			alert.SlackChannelID = channelIDFromURL
 		}
 
 		// The channel ID may actually be a channel name. If so, attempt to map the name to a channel ID.

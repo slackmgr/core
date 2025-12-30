@@ -12,8 +12,7 @@ import (
 
 	cachestore "github.com/eko/gocache/lib/v4/store"
 	gocache_store "github.com/eko/gocache/store/go_cache/v4"
-	"github.com/gorilla/handlers"
-	"github.com/gorilla/mux"
+	"github.com/gin-gonic/gin"
 	gocache "github.com/patrickmn/go-cache"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
@@ -118,50 +117,55 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize channel info manager: %w", err)
 	}
 
-	router := mux.NewRouter()
+	// Set Gin to release mode for production
+	gin.SetMode(gin.ReleaseMode)
+
+	router := gin.New()
+
+	// Add recovery middleware to handle panics
+	router.Use(gin.Recovery())
+
+	// Add metrics middleware
+	router.Use(s.metricsMiddleware())
+
+	// Add custom logging middleware if logger supports it
+	if loggingHandler := s.logger.HttpLoggingHandler(); loggingHandler != nil {
+		router.Use(s.loggingMiddleware())
+	}
 
 	// We support both /alert and /alerts endpoints for backwards compatibility.
 	// Input is either a single alert (common.Alert), or an array of alerts.
-	router.HandleFunc("/alert", s.handleAlerts).Methods("POST")
-	router.HandleFunc("/alert/{slackChannelId}", s.handleAlerts).Methods("POST")
-	router.HandleFunc("/alerts", s.handleAlerts).Methods("POST")
-	router.HandleFunc("/alerts/{slackChannelId}", s.handleAlerts).Methods("POST")
+	router.POST("/alert", s.handleAlerts)
+	router.POST("/alert/:slackChannelId", s.handleAlerts)
+	router.POST("/alerts", s.handleAlerts)
+	router.POST("/alerts/:slackChannelId", s.handleAlerts)
 
 	// Webhooks from Prometheus alert manager.
 	// The alert format is defined in PrometheusWebhook.
-	router.HandleFunc("/prometheus-alert", s.handlePrometheusWebhook).Methods("POST")
-	router.HandleFunc("/prometheus-alert/{slackChannelId}", s.handlePrometheusWebhook).Methods("POST")
+	router.POST("/prometheus-alert", s.handlePrometheusWebhook)
+	router.POST("/prometheus-alert/:slackChannelId", s.handlePrometheusWebhook)
 
 	// Test endpoint for alerts, which writes the input body as an info log message.
-	router.HandleFunc("/alerts-test", s.handleAlertsTest).Methods("POST")
-	router.HandleFunc("/alerts-test/{slackChannelId}", s.handleAlertsTest).Methods("POST")
+	router.POST("/alerts-test", s.handleAlertsTest)
+	router.POST("/alerts-test/:slackChannelId", s.handleAlertsTest)
 
 	// Route mappings
-	router.HandleFunc("/mappings", s.handleMappings).Methods("GET")
+	router.GET("/mappings", s.handleMappings)
 
 	// List channels managed by Slack Manager
-	router.HandleFunc("/channels", s.handleChannels).Methods("GET")
+	router.GET("/channels", s.handleChannels)
 
 	// Ping
-	router.HandleFunc("/ping", s.ping).Methods("GET")
+	router.GET("/ping", s.ping)
 
 	readHeaderTimeout := 2 * time.Second
 	requestTimeout := s.getRequestTimeout()
 	timeoutWiggleRoom := time.Second
 
-	var handler http.Handler
-
-	if loggingHandler := s.logger.HttpLoggingHandler(); loggingHandler != nil {
-		handler = handlers.LoggingHandler(loggingHandler, router)
-	} else {
-		handler = router
-	}
-
-	timeoutHandler := http.TimeoutHandler(handler, requestTimeout, "Handler timeout")
 	listenAddr := ":" + s.cfg.RestPort
 
 	srv := &http.Server{
-		Handler:           timeoutHandler,
+		Handler:           router,
 		Addr:              listenAddr,
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readHeaderTimeout + requestTimeout + timeoutWiggleRoom,
@@ -213,6 +217,35 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// metricsMiddleware creates a Gin middleware for HTTP request metrics
+func (s *Server) metricsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+
+		c.Next()
+
+		s.metrics.AddHTTPRequestMetric(c.Request.URL.Path, c.Request.Method, c.Writer.Status(), time.Since(start))
+	}
+}
+
+// loggingMiddleware creates a Gin middleware for HTTP request logging
+func (s *Server) loggingMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+
+		c.Next()
+
+		s.logger.
+			WithField("method", c.Request.Method).
+			WithField("path", path).
+			WithField("status", c.Writer.Status()).
+			WithField("latency", time.Since(start).String()).
+			WithField("client_ip", c.ClientIP()).
+			Debug("HTTP request")
+	}
 }
 
 func (s *Server) runRawAlertConsumer(ctx context.Context) error {
@@ -277,7 +310,9 @@ func (s *Server) UpdateSettings(settings *config.APISettings) error {
 	return nil
 }
 
-func (s *Server) writeErrorResponse(ctx context.Context, clientErr error, statusCode int, debugText map[string]string, targetChannel string, resp http.ResponseWriter, req *http.Request, started time.Time) {
+// writeErrorResponse writes an error response using Gin context
+// Note: Metrics are handled by metricsMiddleware, no need to add them here
+func (s *Server) writeErrorResponse(c *gin.Context, clientErr error, statusCode int, debugText map[string]string, targetChannel string) {
 	errText := clientErr.Error()
 
 	if len(errText) > 1 {
@@ -290,19 +325,13 @@ func (s *Server) writeErrorResponse(ctx context.Context, clientErr error, status
 		s.logger.Errorf("Request failed: %s", errText)
 	}
 
-	resp.Header().Add("Content-Type", "text/plain")
-	resp.WriteHeader(statusCode)
-
-	if _, err := resp.Write([]byte(errText)); err != nil {
-		s.logger.Errorf("Failed to write error response: %s", err)
-	}
-
-	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, statusCode, time.Since(started))
+	// Use plain text response for backward compatibility
+	c.String(statusCode, errText)
 
 	if s.cfg.ErrorReportChannelID != "" {
 		alert := s.createClientErrorAlert(clientErr, statusCode, debugText, targetChannel)
 
-		if err := s.queueAlert(ctx, alert); err != nil {
+		if err := s.queueAlert(c.Request.Context(), alert); err != nil {
 			s.logger.Errorf("Failed to queue client error alert: %s", err)
 		}
 	}

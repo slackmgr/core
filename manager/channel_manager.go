@@ -242,7 +242,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	alert.SetDefaultValues(c.managerSettings.Settings)
 	alert.SlackChannelName = c.slackClient.GetChannelName(ctx, c.channelID)
 
-	if err := alert.Alert.Validate(); err != nil {
+	if err := alert.Validate(); err != nil {
 		return fmt.Errorf("alert is invalid: %w", err)
 	}
 
@@ -252,7 +252,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		logger.Errorf("Failed to clean alert escalations: %s", err)
 	}
 
-	if issue, ok := c.issueCollection.Find(alert.Alert.CorrelationID); ok {
+	if issue, ok := c.issueCollection.Find(alert.CorrelationID); ok {
 		if err := c.addAlertToExistingIssue(ctx, issue, alert); err != nil {
 			return fmt.Errorf("failed to add alert to existing issue: %w", err)
 		}

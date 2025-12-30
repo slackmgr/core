@@ -4,25 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
-func (s *Server) handleMappings(resp http.ResponseWriter, req *http.Request) {
-	started := time.Now()
-
+func (s *Server) handleMappings(c *gin.Context) {
 	data, err := json.MarshalIndent(s.apiSettings.RoutingRules, "", "  ")
 	if err != nil {
 		err = fmt.Errorf("failed to json marshal API routing rules: %w", err)
-		s.writeErrorResponse(req.Context(), err, http.StatusInternalServerError, nil, "", resp, req, started)
+		s.writeErrorResponse(c, err, http.StatusInternalServerError, nil, "")
 		return
 	}
 
-	resp.Header().Add("Content-Type", "application/json")
-	resp.WriteHeader(http.StatusOK)
-
-	if _, err = resp.Write(data); err != nil {
-		s.logger.Errorf("Failed to write API routing rules response: %s", err)
-	}
-
-	s.metrics.AddHTTPRequestMetric(req.URL.Path, req.Method, http.StatusOK, time.Since(started))
+	c.Data(http.StatusOK, "application/json", data)
 }

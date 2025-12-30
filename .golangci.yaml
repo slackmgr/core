@@ -1,4 +1,6 @@
 # https://golangci-lint.run/usage/configuration/
+version: "2"
+
 run:
   tests: true
   timeout: 1m
@@ -12,7 +14,6 @@ linters:
     - mnd # An analyzer to detect magic numbers
     - cyclop # Calculates the cyclomatic complexity of functions
     - gocyclo # Calculate cyclomatic complexities of functions in Go source code
-    - execinquery # Deprecated
     - exhaustruct # Finds structures with uninitialized fields
     - wrapcheck # Check that errors are wrapped correctly
     - funlen # Reports functions that are too long
@@ -20,7 +21,6 @@ linters:
     - dupl # Tool for code clone detection
     - gocognit # Computes and checks the cognitive complexity of functions
     - godot # Check if comments end in a period
-    - gomnd # An analyzer to detect magic numbers
     - gomodguard # Allow and block list linter for direct Go module dependencies. This is different from depguard where there are different block types for example version constraints and module recommendations.
     - interfacebloat # A linter that checks the number of methods inside an interface.
     - maintidx # maintidx measures the maintainability index of each function.
