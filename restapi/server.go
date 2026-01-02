@@ -523,8 +523,6 @@ func (s *Server) getHandlerTimeout() time.Duration {
 // Responses with status codes 500 and above are logged as errors, all others as info.
 func (s *Server) jsonLogMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		s.logger.Debug("LOG MIDDLEWARE")
-
 		start := time.Now()
 
 		// Process the request
@@ -562,10 +560,9 @@ func (s *Server) jsonLogMiddleware() gin.HandlerFunc {
 	}
 }
 
+// metricsMiddleware is a Gin middleware that records HTTP request durations and status codes for Prometheus metrics.
 func (s *Server) metricsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		s.logger.Debug("METRICS MIDDLEWARE")
-
 		start := time.Now()
 
 		c.Next() // process request
@@ -582,6 +579,8 @@ func (s *Server) metricsMiddleware() gin.HandlerFunc {
 	}
 }
 
+// recoveryMiddleware is a Gin middleware that recovers from any panics and writes a 500 if there was one.
+// Partially adapted from the Gin framework recovery middleware.
 func (s *Server) recoveryMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
@@ -618,7 +617,6 @@ func (s *Server) recoveryMiddleware() gin.HandlerFunc {
 			}
 		}()
 
-		// Continue down the chain
 		c.Next()
 	}
 }
@@ -672,7 +670,7 @@ func debugGetAlertFields(alert *common.Alert) map[string]string {
 
 // stack returns a nicely formatted stack frame, skipping skip frames.
 // Borrowed from the gin framework recovery.go file.
-func stack(skip int) []byte {
+func stack(skip int) string {
 	buf := new(bytes.Buffer) // the returned data
 	// As we loop, we open files and read them. These variables record the currently
 	// loaded file.
@@ -695,7 +693,7 @@ func stack(skip int) []byte {
 		}
 		fmt.Fprintf(buf, "\t%s: %s\n", function(pc), source(lines, line))
 	}
-	return buf.Bytes()
+	return buf.String()
 }
 
 // source returns a space-trimmed slice of the n'th line.
