@@ -1,11 +1,15 @@
 package restapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -138,9 +142,6 @@ func (s *Server) Run(ctx context.Context) error {
 	// Create a blank Gin engine, without any middleware.
 	engine := gin.New()
 
-	// Add recovery middleware to recover from any panics and write a 500 if there was one.
-	engine.Use(gin.Recovery())
-
 	// Add global metrics middleware.
 	engine.Use(s.metricsMiddleware())
 
@@ -158,6 +159,11 @@ func (s *Server) Run(ctx context.Context) error {
 	} else {
 		engine.Use(gin.Logger()) // Default logger
 	}
+
+	// Add recovery middleware to recover from any panics and write a 500 if there was one.
+	// We add this *after* the metrcics and logging middleware, so that calls that trigger a panic are still logged and measured.
+	// We just need to make sure that the metrics and logging middleware don't themselves panic...
+	engine.Use(s.recoveryMiddleware())
 
 	// Set runtime mode and default pretty printing based on verbose config.
 	if s.cfg.Verbose {
@@ -576,6 +582,47 @@ func (s *Server) metricsMiddleware() gin.HandlerFunc {
 	}
 }
 
+func (s *Server) recoveryMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				// Check for a broken connection, as it is not really a
+				// condition that warrants a panic stack trace.
+				var brokenPipe bool
+
+				if ne, ok := rec.(*net.OpError); ok {
+					var se *os.SyscallError
+					if errors.As(ne, &se) {
+						seStr := strings.ToLower(se.Error())
+						if strings.Contains(seStr, "broken pipe") || strings.Contains(seStr, "connection reset by peer") {
+							brokenPipe = true
+						}
+					}
+				}
+
+				const stackSkip = 3
+
+				if brokenPipe {
+					s.logger.WithField("error", rec).Error("Connection error")
+				} else {
+					s.logger.WithField("error", rec).WithField("stack", stack(stackSkip)).Error("Panic recovered")
+				}
+
+				if brokenPipe {
+					// If the connection is dead, we can't write a status to it.
+					c.Abort()
+				} else {
+					// If panic occurred but connection is still alive, return HTTP 500
+					c.AbortWithStatus(http.StatusInternalServerError)
+				}
+			}
+		}()
+
+		// Continue down the chain
+		c.Next()
+	}
+}
+
 // timeoutResponse is called when a request times out. It sends a 503 Service Unavailable response with a "timeout" message.
 func timeoutResponse(c *gin.Context) {
 	c.String(http.StatusServiceUnavailable, "timeout")
@@ -621,4 +668,68 @@ func debugGetAlertFields(alert *common.Alert) map[string]string {
 		"Header":        header,
 		"Body":          body,
 	}
+}
+
+// stack returns a nicely formatted stack frame, skipping skip frames.
+// Borrowed from the gin framework recovery.go file.
+func stack(skip int) []byte {
+	buf := new(bytes.Buffer) // the returned data
+	// As we loop, we open files and read them. These variables record the currently
+	// loaded file.
+	var lines [][]byte
+	var lastFile string
+	for i := skip; ; i++ { // Skip the expected number of frames
+		pc, file, line, ok := runtime.Caller(i)
+		if !ok {
+			break
+		}
+		// Print this much at least.  If we can't find the source, it won't show.
+		fmt.Fprintf(buf, "%s:%d (0x%x)\n", file, line, pc)
+		if file != lastFile {
+			data, err := os.ReadFile(file)
+			if err != nil {
+				continue
+			}
+			lines = bytes.Split(data, []byte{'\n'})
+			lastFile = file
+		}
+		fmt.Fprintf(buf, "\t%s: %s\n", function(pc), source(lines, line))
+	}
+	return buf.Bytes()
+}
+
+// source returns a space-trimmed slice of the n'th line.
+// Borrowed from the gin framework recovery.go file.
+func source(lines [][]byte, n int) []byte {
+	n-- // in stack trace, lines are 1-indexed but our array is 0-indexed
+	if n < 0 || n >= len(lines) {
+		return []byte("n/a")
+	}
+	return bytes.TrimSpace(lines[n])
+}
+
+// function returns, if possible, the name of the function containing the PC.
+// Borrowed from the gin framework recovery.go file.
+func function(pc uintptr) string {
+	fn := runtime.FuncForPC(pc)
+	if fn == nil {
+		return "n/a"
+	}
+	name := fn.Name()
+	// The name includes the path name to the package, which is unnecessary
+	// since the file name is already included.  Plus, it has center dots.
+	// That is, we see
+	//	runtime/debug.*T·ptrmethod
+	// and want
+	//	*T.ptrmethod
+	// Also the package path might contain dot (e.g. code.google.com/...),
+	// so first eliminate the path prefix
+	if lastSlash := strings.LastIndexByte(name, '/'); lastSlash >= 0 {
+		name = name[lastSlash+1:]
+	}
+	if period := strings.IndexByte(name, '.'); period >= 0 {
+		name = name[period+1:]
+	}
+	name = strings.ReplaceAll(name, "·", ".")
+	return name
 }
