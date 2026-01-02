@@ -688,7 +688,7 @@ func stack(skip int) string {
 		// Print this much at least.  If we can't find the source, it won't show.
 		fmt.Fprintf(buf, "%s:%d (0x%x)\n", file, line, pc)
 		if file != lastFile {
-			data, err := os.ReadFile(file)
+			data, err := os.ReadFile(file) // #nosec G304 -- file path comes from runtime.Caller(), not user input
 			if err != nil {
 				continue
 			}

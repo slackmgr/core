@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	common "github.com/peteraglen/slack-manager-common"
 )
@@ -24,6 +25,7 @@ type APISettings struct {
 	RoutingRules []*RoutingRule `json:"routingRules" yaml:"routingRules"`
 
 	ruleMatchCache map[string]string
+	cacheLock      sync.RWMutex
 	initialized    bool
 }
 
@@ -131,7 +133,7 @@ func (s *APISettings) InitAndValidate(logger common.Logger) error {
 			}
 
 			r.MatchesRegex[j] = s
-			r.regex[j] = regex
+			r.regex = append(r.regex, regex)
 		}
 
 		if !r.MatchAll && allItemsAreEmpty(r.Equals) && allItemsAreEmpty(r.HasPrefix) && allItemsAreEmpty(r.MatchesRegex) {
@@ -178,6 +180,19 @@ func (s *APISettings) Match(routeKey, alertType string, logger common.Logger) (s
 	alertType = strings.ToLower(alertType)
 	cacheKey := routeKey + ":" + alertType
 
+	// Check cache with read lock
+	s.cacheLock.RLock()
+	if channel, ok := s.ruleMatchCache[cacheKey]; ok {
+		s.cacheLock.RUnlock()
+		return channel, channel != ""
+	}
+	s.cacheLock.RUnlock()
+
+	// Acquire write lock and double-check cache
+	s.cacheLock.Lock()
+	defer s.cacheLock.Unlock()
+
+	// Double-check in case another goroutine added it while we waited for the lock
 	if channel, ok := s.ruleMatchCache[cacheKey]; ok {
 		return channel, channel != ""
 	}
