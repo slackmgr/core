@@ -604,7 +604,11 @@ func (s *Server) recoveryMiddleware() gin.HandlerFunc {
 				if brokenPipe {
 					s.logger.WithField("error", rec).Error("Connection error")
 				} else {
-					s.logger.WithField("error", rec).WithField("stack", stack(stackSkip)).Error("Panic recovered")
+					if s.cfg.LogJSON {
+						s.logger.WithField("error", rec).WithField("stack", stack(stackSkip)).Error("Panic recovered")
+					} else {
+						s.logger.Errorf("Panic recovered:\n%s\n%s", rec, stack(stackSkip))
+					}
 				}
 
 				if brokenPipe {
