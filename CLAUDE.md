@@ -107,12 +107,11 @@ You are an expert Go Backend Engineer. Your goal is to produce performant, maint
 
 #### 1. REST API (Gin)
 - Use **Middleware** for cross-cutting concerns (Auth, Recovery, Logging).
-- Use **ShouldBindJSON** for request validation.
 - Implement a global error handling strategy.
 - Keep handlers thin; delegate business logic to the `service` layer.
 
 #### 2. Logging
-- All logging via injected Logger instances implementing the `common.Logger` interface (from `slack-manager-common` package).
+- All logging via injected Logger instance implementing the `common.Logger` interface (from `slack-manager-common` package).
 - Use **Structured Logging** (JSON).
 - Never use `fmt.Printf` or standard `log`.
 - Include context when applicable: `logger.WithField("user_id", id).Info("action")`.
@@ -126,29 +125,29 @@ You are an expert Go Backend Engineer. Your goal is to produce performant, maint
 ### Quality Checklists
 
 #### Testing & TDD Checklist
-- Every new function has a corresponding test in a `_test.go` file
-- Tests use `t.Parallel()` where appropriate
-- External dependencies are mocked via interfaces
-- Test suite covers "Happy Path" AND "Edge Cases" (nil pointers, empty strings, timeouts)
-- `go test -race ./...` passes
-- `gosec` scan passes with no issues
-- `golangci-lint` passes with no issues
+- Every new function has a corresponding test in a `_test.go` file.
+- Tests use `t.Parallel()` where appropriate.
+- External dependencies are mocked via interfaces.
+- Test suite covers "Happy Path" AND "Edge Cases" (nil pointers, empty strings, timeouts).
+- `go test -race ./...` passes.
+- `gosec` scan passes with no issues.
+- `golangci-lint` passes with no issues.
 
 #### Gin API Checklist
-- Status codes are semantic (e.g., `201 Created` for POST, `400 Bad Request` for validation errors)
-- All inputs validated using `binding:"required"` or custom validators
-- API returns a consistent JSON error structure
-- Graceful Shutdown is implemented for the HTTP server
+- Status codes are semantic (e.g., `201 Created` for POST, `400 Bad Request` for validation errors).
+- All inputs validated using `binding:"required"` or custom validators.
+- API returns a consistent JSON error structure.
+- Graceful Shutdown is implemented for the HTTP server.
 
 #### Logging Checklist
-- Logger is passed via context or dependency injection
-- Logs use the correct level (`Debug` for noise, `Warn` for retries, `Error` for failures)
-- Sensitive fields (passwords, PII) are masked or excluded from logs
+- Logger is passed via context or dependency injection.
+- Logs use the correct level (`Debug` for noise, `Warn` for retries, `Error` for failures).
+- Sensitive fields (passwords, PII) are masked or excluded from logs.
 
 #### Makefile Checklist
 - `make init`: Runs `go mod tidy`
 - `make test`: Runs all tests with coverage reports, as well as `gosec`, `go fmt`, and `go vet`
-- `make lint`: Runs `golangci-lint`
+- `make lint`: Runs `golangci-lint`, using the config file in the repo root.
 
 ### Idiomatic Go Rules
 
