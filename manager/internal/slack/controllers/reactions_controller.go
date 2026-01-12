@@ -57,7 +57,8 @@ func (c *ReactionsController) reactionAdded(ctx context.Context, evt *socketmode
 	apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 	if !ok {
 		// This should never happen
-		panic("Failed to cast EventsAPIEvent")
+		c.logger.Error("Failed to cast EventsAPIEvent")
+		return
 	}
 
 	reactionAddedEvent, ok := apiEvent.InnerEvent.Data.(*slackevents.ReactionAddedEvent)
@@ -91,7 +92,8 @@ func (c *ReactionsController) reactionRemoved(ctx context.Context, evt *socketmo
 	apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 	if !ok {
 		// This should never happen
-		panic("Failed to cast EventsAPIEvent")
+		c.logger.Error("Failed to cast EventsAPIEvent")
+		return
 	}
 
 	reactionRemovedEvent, ok := apiEvent.InnerEvent.Data.(*slackevents.ReactionRemovedEvent)

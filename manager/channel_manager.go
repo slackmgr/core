@@ -303,15 +303,16 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 		return fmt.Errorf("failed to obtain lock for channel %s after 30 seconds: %w", c.channelID, err)
 	}
 
-	defer c.releaseLock(lock) //nolint:contextcheck
-
-	logger := c.logger.WithFields(cmd.LogFields())
-
-	// Commands are attempted exactly once, so we ack regardless of any errors below.
+	// The command is acked after processing, regardless of any errors. Commands are attempted exactly once.
 	// Errors are logged, but otherwise ignored.
 	defer func() {
 		go ackCommand(ctx, cmd)
 	}()
+
+	// The lock is released after the command is fully processed.
+	defer c.releaseLock(lock) //nolint:contextcheck
+
+	logger := c.logger.WithFields(cmd.LogFields())
 
 	issue, err := c.findIssueBySlackPost(ctx, cmd.SlackPostID, cmd.IncludeArchivedIssues)
 	if err != nil {
@@ -856,10 +857,10 @@ func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, 
 }
 
 // releaseLock releases the lock for the specified channel.
-// We can't use the regular context here, since it's vital that the lock is released even if the context is cancelled.
 func (c *channelManager) releaseLock(lock ChannelLock) {
 	key := lock.Key()
 
+	// We can't use the regular context here, since it's vital that the lock is released even if the context is cancelled.
 	if err := lock.Release(context.Background()); err != nil {
 		c.logger.WithField("lock_key", key).Errorf("Failed to release lock: %s", err)
 	} else {

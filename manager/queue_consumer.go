@@ -27,12 +27,12 @@ func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.In
 		for _item := range queueCh {
 			item := _item
 
-			logger = logger.WithField("message_id", item.MessageID).WithField("channel_id", item.SlackChannelID)
-			logger.Debug("Message received")
+			itemLogger := logger.WithField("message_id", item.MessageID).WithField("channel_id", item.SlackChannelID)
+			itemLogger.Debug("Message received")
 
 			message, err := msgConstructor(item)
 			if err != nil {
-				logger.Errorf("Failed to unmarshal message: %s", err)
+				itemLogger.Errorf("Failed to unmarshal message: %s", err)
 				continue
 			}
 

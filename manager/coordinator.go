@@ -16,18 +16,23 @@ import (
 )
 
 type coordinator struct {
-	channelManagers          map[string]*channelManager
+	// channelManagers holds the active channel managers, keyed by Slack channel ID.
+	// No locking is required, since all access happen via the synchronous coordinator run loop.
+	channelManagers map[string]*channelManager
+
+	// channelManagersWaitGroup is used to wait for all channel managers to exit when the coordinator is shutting down.
 	channelManagersWaitGroup *sync.WaitGroup
-	db                       common.DB
-	alertQueue               FifoQueue
-	slack                    *slack.Client
-	cacheStore               store.StoreInterface
-	locker                   ChannelLocker
-	logger                   common.Logger
-	metrics                  common.Metrics
-	webhookHandlers          []WebhookHandler
-	cfg                      *config.ManagerConfig
-	managerSettings          *models.ManagerSettingsWrapper
+
+	db              common.DB
+	alertQueue      FifoQueue
+	slack           *slack.Client
+	cacheStore      store.StoreInterface
+	locker          ChannelLocker
+	logger          common.Logger
+	metrics         common.Metrics
+	webhookHandlers []WebhookHandler
+	cfg             *config.ManagerConfig
+	managerSettings *models.ManagerSettingsWrapper
 }
 
 func newCoordinator(db common.DB, alertQueue FifoQueue, slack *slack.Client, cacheStore store.StoreInterface,
@@ -152,6 +157,7 @@ messageLoop:
 		}
 	}
 
+	// When we get here, the context has been cancelled.
 	// Wait for all channel managers to shut down in an orderly fashion.
 	c.channelManagersWaitGroup.Wait()
 
@@ -284,7 +290,7 @@ func (c *coordinator) runChannelManagerAsync(ctx context.Context, channelManager
 func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.Command) error {
 	// Commands are attempted exactly once, so we ack regardless of any errors below.
 	defer func() {
-		go cmd.Ack(ctx)
+		go ackCommand(ctx, cmd)
 	}()
 
 	alert := common.NewAlert(common.AlertSeverity(cmd.ParamAsString("severity")))

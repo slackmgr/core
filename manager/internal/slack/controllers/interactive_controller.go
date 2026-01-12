@@ -71,10 +71,14 @@ func NewInteractiveController(eventhandler *handler.SocketModeHandler, client ha
 
 // globalShortcutHandler handles all incoming interaction messages of type 'shortcut'
 func (c *InteractiveController) globalShortcutHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
-	interaction, logger := getInteractionAndLoggerFromEvent(evt, c.logger)
-
 	// No need to customize the ack in this context, so we send it immediately
 	ack(evt, clt)
+
+	interaction, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
+	if err != nil {
+		c.logger.Errorf("Failed to get interaction from event: %s", err)
+		return
+	}
 
 	switch interaction.CallbackID {
 	case CreateIssueAction:
@@ -86,10 +90,14 @@ func (c *InteractiveController) globalShortcutHandler(ctx context.Context, evt *
 
 // messageActionHandler handles all incoming interaction messages of type 'message_action'
 func (c *InteractiveController) messageActionHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
-	interaction, logger := getInteractionAndLoggerFromEvent(evt, c.logger)
-
 	// No need to customize the ack in this context, so we send it immediately
 	ack(evt, clt)
+
+	interaction, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
+	if err != nil {
+		c.logger.Errorf("Failed to get interaction from event: %s", err)
+		return
+	}
 
 	switch interaction.CallbackID {
 	case MoveIssueAction:
@@ -103,7 +111,12 @@ func (c *InteractiveController) messageActionHandler(ctx context.Context, evt *s
 
 // viewSubmissionHandler handles all incoming interaction messages of type 'view_submission'
 func (c *InteractiveController) viewSubmissionHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
-	interaction, logger := getInteractionAndLoggerFromEvent(evt, c.logger)
+	interaction, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
+	if err != nil {
+		ack(evt, clt)
+		c.logger.Errorf("Failed to get interaction from event: %s", err)
+		return
+	}
 
 	// We can't ack just yet, the ack response may need to be customized with an error message
 
@@ -122,10 +135,14 @@ func (c *InteractiveController) viewSubmissionHandler(ctx context.Context, evt *
 
 // blockActionsHandler handles all incoming interaction messages of type 'block_actions'
 func (c *InteractiveController) blockActionsHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
-	interaction, logger := getInteractionAndLoggerFromEvent(evt, c.logger)
-
 	// No need to customize the ack in this context, so we send it immediately
 	ack(evt, clt)
+
+	interaction, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
+	if err != nil {
+		c.logger.Errorf("Failed to get interaction from event: %s", err)
+		return
+	}
 
 	if len(interaction.ActionCallback.BlockActions) == 0 {
 		logger.Error("Block actions callback without any actions")
@@ -151,9 +168,13 @@ func (c *InteractiveController) blockActionsHandler(ctx context.Context, evt *so
 
 // defaultInteractiveHandler handles all incoming interaction messages not matched by any of the explicit handlers
 func (c *InteractiveController) defaultInteractiveHandler(_ context.Context, evt *socketmode.Event, clt *socketmode.Client) {
-	_, logger := getInteractionAndLoggerFromEvent(evt, c.logger)
-
 	ack(evt, clt)
+
+	_, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
+	if err != nil {
+		c.logger.Errorf("Failed to get interaction from event: %s", err)
+		return
+	}
 
 	logger.Error("Unhandled interactive event")
 }
@@ -732,11 +753,10 @@ func getViewStateCheckboxSelectedValues(view slack.View) map[string][]string {
 }
 
 // getInteractionAndLoggerFromEvent casts the event data to interaction callback, and creates a log entry with suitable fields
-func getInteractionAndLoggerFromEvent(evt *socketmode.Event, logger common.Logger) (slack.InteractionCallback, common.Logger) { //nolint:ireturn
+func getInteractionAndLoggerFromEvent(evt *socketmode.Event, logger common.Logger) (slack.InteractionCallback, common.Logger, error) { //nolint:ireturn
 	interaction, ok := evt.Data.(slack.InteractionCallback)
 	if !ok {
-		// This should never happen
-		panic("Failed to cast event data to interaction callback")
+		return slack.InteractionCallback{}, logger, fmt.Errorf("failed to cast InteractionCallback")
 	}
 
 	logger = logger.
@@ -749,7 +769,7 @@ func getInteractionAndLoggerFromEvent(evt *socketmode.Event, logger common.Logge
 
 	logger.Debug("Interactive event")
 
-	return interaction, logger
+	return interaction, logger, nil
 }
 
 // parsePrivateModalMetadata parses the private metadata object from a modal view

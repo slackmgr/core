@@ -69,7 +69,7 @@ func (d *dbCacheMiddleware) SaveIssues(ctx context.Context, issues ...common.Iss
 		// Marshal the issue body to JSON and cache it internally.
 		body, err := issueModel.MarshalJSONAndCache()
 		if err != nil {
-			panic(fmt.Errorf("failed to marshal issue body: %w", err))
+			return fmt.Errorf("failed to marshal issue body: %w", err)
 		}
 
 		cacheKey := issue.UniqueID()
@@ -130,7 +130,7 @@ func (d *dbCacheMiddleware) MoveIssue(ctx context.Context, issue common.Issue, s
 	// Marshal the issue body to JSON and cache it internally.
 	body, err := issueModel.MarshalJSONAndCache()
 	if err != nil {
-		panic(fmt.Errorf("failed to marshal issue body: %w", err))
+		return fmt.Errorf("failed to marshal issue body: %w", err)
 	}
 
 	cacheKey := issue.UniqueID()
