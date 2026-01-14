@@ -30,7 +30,9 @@ type alertsInput struct {
 func (s *Server) handleAlerts(c *gin.Context) {
 	started := time.Now()
 
-	if c.Request.ContentLength <= 0 {
+	// ContentLength == 0 means explicitly empty body.
+	// ContentLength == -1 means chunked encoding (unknown length), which is valid.
+	if c.Request.ContentLength == 0 {
 		err := errors.New("missing POST body")
 		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
@@ -164,7 +166,7 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*common.Alert, started t
 		}
 	}
 
-	c.Status(http.StatusNoContent)
+	c.Status(http.StatusAccepted)
 }
 
 // processQueuedAlert processes a single alert from the raw alert input queue (rather than from an API request).
@@ -227,7 +229,9 @@ func (s *Server) processQueuedAlert(ctx context.Context, alert *common.Alert) er
 }
 
 func (s *Server) handleAlertsTest(c *gin.Context) {
-	if c.Request.ContentLength <= 0 {
+	// ContentLength == 0 means explicitly empty body.
+	// ContentLength == -1 means chunked encoding (unknown length), which is valid.
+	if c.Request.ContentLength == 0 {
 		err := errors.New("missing POST body")
 		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
@@ -298,8 +302,12 @@ func (s *Server) setSlackChannelID(c *gin.Context, alerts ...*common.Alert) erro
 		return nil
 	}
 
+	channelIDFromURLParam := ""
+
 	// Try to get the channel ID from the URL (if any).
-	channelIDFromURLParam := c.Param("slackChannelId")
+	if c != nil {
+		channelIDFromURLParam = c.Param("slackChannelId")
+	}
 
 	for _, alert := range alerts {
 		// If the channel ID in the body is empty, use the channel ID from the URL (which may also be empty).

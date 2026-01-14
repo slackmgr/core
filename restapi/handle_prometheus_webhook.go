@@ -20,7 +20,9 @@ const True = "true"
 func (s *Server) handlePrometheusWebhook(c *gin.Context) {
 	started := time.Now()
 
-	if c.Request.ContentLength <= 0 {
+	// ContentLength == 0 means explicitly empty body.
+	// ContentLength == -1 means chunked encoding (unknown length), which is valid.
+	if c.Request.ContentLength == 0 {
 		err := errors.New("missing POST body")
 		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return

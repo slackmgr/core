@@ -459,9 +459,8 @@ func (s *Server) waitForRateLimit(ctx context.Context, channel string, count int
 		timeout := time.Duration(s.cfg.RateLimit.MaxWaitPerAttemptSeconds) * time.Second
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 
-		defer cancel()
-
 		err := limiter.WaitN(ctx, count)
+		cancel()
 
 		if err == nil {
 			return count, nil

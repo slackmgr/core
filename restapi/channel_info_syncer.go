@@ -2,7 +2,9 @@ package restapi
 
 import (
 	"context"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	common "github.com/peteraglen/slack-manager-common"
@@ -12,15 +14,20 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
+// managedChannelsData holds the managed channels data for atomic swapping.
+type managedChannelsData struct {
+	list   []*internal.ChannelSummary
+	byName map[string]*internal.ChannelSummary
+}
+
 type channelInfoSyncer struct {
-	slackClient           *slackapi.Client
-	channelsLastSeen      map[string]time.Time
-	detectedChannels      chan string
-	channelInfoCache      map[string]*channelInfo
-	allManagedChannels    []*internal.ChannelSummary
-	allManagedChannelsMap map[string]*internal.ChannelSummary
-	cacheLock             *sync.RWMutex
-	logger                common.Logger
+	slackClient      *slackapi.Client
+	channelsLastSeen map[string]time.Time
+	detectedChannels chan string
+	channelInfoCache map[string]*channelInfo
+	managedChannels  atomic.Pointer[managedChannelsData]
+	cacheLock        *sync.RWMutex
+	logger           common.Logger
 }
 
 type channelInfo struct {
@@ -46,7 +53,10 @@ func (c *channelInfoSyncer) Init(ctx context.Context) error {
 		return err
 	}
 
-	c.logger.Infof("Found %d channels managed by Slack Manager", len(c.allManagedChannels))
+	data := c.managedChannels.Load()
+	if data != nil {
+		c.logger.Infof("Found %d channels managed by Slack Manager", len(data.list))
+	}
 
 	return nil
 }
@@ -95,10 +105,16 @@ func (c *channelInfoSyncer) MapChannelNameToIDIfNeeded(channelName string) strin
 		return ""
 	}
 
-	if channel, found := c.allManagedChannelsMap[channelName]; found {
-		return channel.ID
+	// Try to find a mapping from name to ID
+	data := c.managedChannels.Load()
+
+	if data != nil {
+		if channel, found := data.byName[strings.ToLower(channelName)]; found {
+			return channel.ID
+		}
 	}
 
+	// Default to returning the original value, which is probably a channel ID, if no mapping found
 	return channelName
 }
 
@@ -118,7 +134,11 @@ func (c *channelInfoSyncer) GetChannelInfo(ctx context.Context, channel string) 
 }
 
 func (c *channelInfoSyncer) ManagedChannels() []*internal.ChannelSummary {
-	return c.allManagedChannels
+	data := c.managedChannels.Load()
+	if data == nil {
+		return nil
+	}
+	return data.list
 }
 
 func (c *channelInfoSyncer) getCachedInfo(channel string) (*channelInfo, bool) {
@@ -136,9 +156,7 @@ func (c *channelInfoSyncer) refreshData(ctx context.Context) error {
 	sem := semaphore.NewWeighted(3)
 	errg, ctx := errgroup.WithContext(ctx)
 
-	for _channel := range c.channelsLastSeen {
-		channel := _channel
-
+	for channel := range c.channelsLastSeen {
 		errg.Go(func() error {
 			if err := sem.Acquire(ctx, 1); err != nil {
 				return err
@@ -208,20 +226,22 @@ func (c *channelInfoSyncer) pruneInactiveChannels() {
 }
 
 func (c *channelInfoSyncer) refreshAllManagedChannelsMap(ctx context.Context) error {
-	allManagedChannels, err := c.slackClient.ListBotChannels(ctx)
+	list, err := c.slackClient.ListBotChannels(ctx)
 	if err != nil {
 		return err
 	}
 
-	allManagedChannelsMap := make(map[string]*internal.ChannelSummary)
+	byName := make(map[string]*internal.ChannelSummary)
 
-	for _, channel := range allManagedChannels {
-		allManagedChannelsMap[channel.ID] = channel
-		allManagedChannelsMap[channel.Name] = channel
+	// Build lookup map by lower-cased channel name
+	for _, channel := range list {
+		byName[strings.ToLower(channel.Name)] = channel
 	}
 
-	c.allManagedChannels = allManagedChannels
-	c.allManagedChannelsMap = allManagedChannelsMap
+	c.managedChannels.Store(&managedChannelsData{
+		list:   list,
+		byName: byName,
+	})
 
 	return nil
 }
