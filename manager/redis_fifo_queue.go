@@ -393,7 +393,7 @@ func (q *RedisFifoQueue) readOneMessageFromStream(ctx context.Context, streamKey
 		Consumer: q.consumerName,
 		Streams:  []string{streamKey, ">"},
 		Count:    1, // Only read one message to maintain strict ordering.
-		Block:    0, // Don't block - we're iterating through streams.
+		Block:    -1, // Negative value means don't block (Block >= 0 would send BLOCK to Redis)
 	}
 
 	results, err := q.client.XReadGroup(ctx, args).Result()
