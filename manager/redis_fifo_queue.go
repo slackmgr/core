@@ -318,6 +318,13 @@ func (q *RedisFifoQueue) readMessagesWithLocking(ctx context.Context, knownStrea
 	messagesRead := false
 
 	for streamKey := range knownStreams {
+		// Check for context cancellation at the start of each iteration.
+		select {
+		case <-ctx.Done():
+			return messagesRead, ctx.Err()
+		default:
+		}
+
 		channelID := q.channelIDFromStreamKey(streamKey)
 		logger := q.logger.WithField("stream_key", streamKey).WithField("channel_id", channelID)
 
@@ -329,6 +336,9 @@ func (q *RedisFifoQueue) readMessagesWithLocking(ctx context.Context, knownStrea
 				// Another consumer is processing this stream, skip it.
 				logger.Debug("Stream locked by another consumer, skipping")
 				continue
+			}
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return messagesRead, ctx.Err()
 			}
 			// Unexpected error obtaining lock.
 			logger.Errorf("Failed to obtain lock: %v", err)

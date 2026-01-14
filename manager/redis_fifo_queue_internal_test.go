@@ -1124,6 +1124,36 @@ func TestRedisFifoQueue_ReadMessagesWithLocking_LockUnavailable(t *testing.T) {
 	mockLocker.AssertExpectations(t)
 }
 
+func TestRedisFifoQueue_ReadMessagesWithLocking_ContextCancelled(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	streamKey := "slack-manager:queue:test-queue:stream:C12345"
+
+	// Create a cancelled context.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	knownStreams := map[string]bool{streamKey: true}
+	sinkCh := make(chan *common.FifoQueueItem, 10)
+
+	// Should return immediately with context.Canceled error.
+	messagesRead, err := queue.readMessagesWithLocking(ctx, knownStreams, sinkCh)
+
+	require.Error(t, err)
+	assert.Equal(t, context.Canceled, err)
+	assert.False(t, messagesRead)
+	// Locker should NOT be called since context was already cancelled.
+	mockLocker.AssertNotCalled(t, "Obtain")
+}
+
 func TestRedisFifoQueue_ReadMessagesWithLocking_LockError(t *testing.T) {
 	t.Parallel()
 
