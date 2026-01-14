@@ -95,7 +95,7 @@ func (s *Server) WithRawAlertConsumer(consumer FifoQueueConsumer) *Server {
 }
 
 // Run starts the HTTP server and handles incoming requests. It also initializes the Slack API client and the channel info syncer.
-// If a raw alert consumer is set, it will start a dedicated consumer for that queue.
+// If raw alert consumers are set, it will start dedicated consumers for those queues.
 //
 // This method blocks until the context is cancelled, or a server error occurs.
 func (s *Server) Run(ctx context.Context) error {
@@ -457,9 +457,9 @@ func (s *Server) waitForRateLimit(ctx context.Context, channel string, count int
 
 	for {
 		timeout := time.Duration(s.cfg.RateLimit.MaxWaitPerAttemptSeconds) * time.Second
-		ctx, cancel := context.WithTimeout(ctx, timeout)
+		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 
-		err := limiter.WaitN(ctx, count)
+		err := limiter.WaitN(timeoutCtx, count)
 		cancel()
 
 		if err == nil {
