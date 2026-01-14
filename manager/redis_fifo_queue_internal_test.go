@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -196,6 +197,18 @@ func (m *mockRedisClient) ZRem(ctx context.Context, key string, members ...any) 
 		cmd.SetVal(result)
 	}
 	if err := args.Error(1); err != nil {
+		cmd.SetErr(err)
+	}
+	return cmd
+}
+
+func (m *mockRedisClient) XAutoClaim(ctx context.Context, a *redis.XAutoClaimArgs) *redis.XAutoClaimCmd {
+	args := m.Called(ctx, a)
+	cmd := redis.NewXAutoClaimCmd(ctx)
+	if result, ok := args.Get(0).([]redis.XMessage); ok {
+		cmd.SetVal(result, args.String(1))
+	}
+	if err := args.Error(2); err != nil {
 		cmd.SetErr(err)
 	}
 	return cmd
@@ -755,4 +768,982 @@ func TestRedisFifoQueue_StreamActivityKey(t *testing.T) {
 
 	key := queue.streamActivityKey()
 	assert.Equal(t, "test-prefix:test-queue:stream-activity", key)
+}
+
+func TestRedisFifoQueueOptionFunctions_AllOptions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("WithConsumerGroup", func(t *testing.T) {
+		t.Parallel()
+		opts := newRedisFifoQueueOptions()
+		WithConsumerGroup("custom-group")(opts)
+		assert.Equal(t, "custom-group", opts.consumerGroup)
+	})
+
+	t.Run("WithPollInterval", func(t *testing.T) {
+		t.Parallel()
+		opts := newRedisFifoQueueOptions()
+		WithPollInterval(10 * time.Second)(opts)
+		assert.Equal(t, 10*time.Second, opts.pollInterval)
+	})
+
+	t.Run("WithMaxStreamLength", func(t *testing.T) {
+		t.Parallel()
+		opts := newRedisFifoQueueOptions()
+		WithMaxStreamLength(50000)(opts)
+		assert.Equal(t, int64(50000), opts.maxStreamLength)
+	})
+
+	t.Run("WithStreamRefreshInterval", func(t *testing.T) {
+		t.Parallel()
+		opts := newRedisFifoQueueOptions()
+		WithStreamRefreshInterval(60 * time.Second)(opts)
+		assert.Equal(t, 60*time.Second, opts.streamRefreshInterval)
+	})
+
+	t.Run("WithClaimMinIdleTime", func(t *testing.T) {
+		t.Parallel()
+		opts := newRedisFifoQueueOptions()
+		WithClaimMinIdleTime(60 * time.Second)(opts)
+		assert.Equal(t, 60*time.Second, opts.claimMinIdleTime)
+	})
+}
+
+func TestRedisFifoQueue_Send_NotInitialized(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	// Don't call Init()
+
+	err := queue.Send(context.Background(), "C12345", "dedup-1", `{"test": "body"}`)
+
+	require.Error(t, err)
+	assert.Equal(t, "redis FIFO queue not initialized", err.Error())
+}
+
+func TestRedisFifoQueue_Send_EmptyChannelID(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	err = queue.Send(context.Background(), "", "dedup-1", `{"test": "body"}`)
+
+	require.Error(t, err)
+	assert.Equal(t, "slackChannelID cannot be empty", err.Error())
+}
+
+func TestRedisFifoQueue_Send_EmptyBody(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	err = queue.Send(context.Background(), "C12345", "dedup-1", "")
+
+	require.Error(t, err)
+	assert.Equal(t, "body cannot be empty", err.Error())
+}
+
+func TestRedisFifoQueue_Send_XAddError(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	mockClient.On("XAdd", mock.Anything, mock.Anything).Return("", errors.New("redis connection error"))
+
+	err = queue.Send(context.Background(), "C12345", "dedup-1", `{"test": "body"}`)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to add message to Redis stream")
+	assert.Contains(t, err.Error(), "redis connection error")
+}
+
+func TestRedisFifoQueue_Receive_NotInitialized(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	// Don't call Init()
+
+	sinkCh := make(chan *common.FifoQueueItem, 10)
+	err := queue.Receive(context.Background(), sinkCh)
+
+	require.Error(t, err)
+	assert.Equal(t, "redis FIFO queue not initialized", err.Error())
+}
+
+func TestRedisFifoQueue_ChannelIDFromStreamKey(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger,
+		WithKeyPrefix("slack-manager:queue"),
+	)
+
+	channelID := queue.channelIDFromStreamKey("slack-manager:queue:test-queue:stream:C12345")
+	assert.Equal(t, "C12345", channelID)
+}
+
+func TestRedisFifoQueue_StreamsIndexKey(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger,
+		WithKeyPrefix("test-prefix"),
+	)
+
+	key := queue.streamsIndexKey()
+	assert.Equal(t, "test-prefix:test-queue:streams", key)
+}
+
+func TestRedisFifoQueue_StreamKey(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger,
+		WithKeyPrefix("test-prefix"),
+	)
+
+	key := queue.streamKey("C12345")
+	assert.Equal(t, "test-prefix:test-queue:stream:C12345", key)
+}
+
+func TestRedisFifoQueue_ReleaseLock_NilLock(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+
+	// Should not panic when lock is nil.
+	queue.releaseLock(context.Background(), nil)
+}
+
+func TestRedisFifoQueue_ReleaseLock_Error(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	mockLock := &mockChannelLock{key: "test-lock"}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+
+	mockLock.On("Release", mock.Anything).Return(errors.New("release error"))
+
+	// Should not panic, just log the error.
+	queue.releaseLock(context.Background(), mockLock)
+
+	mockLock.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_RefreshStreams_Success(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger,
+		WithStreamInactivityTimeout(0), // Disable cleanup for this test.
+	)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	streamKey := "slack-manager:queue:test-queue:stream:C12345"
+
+	mockClient.On("SMembers", mock.Anything, "slack-manager:queue:test-queue:streams").
+		Return([]string{streamKey}, nil)
+	mockClient.On("XGroupCreateMkStream", mock.Anything, streamKey, "slack-manager", "0").
+		Return("OK", nil)
+
+	knownStreams := make(map[string]bool)
+	err = queue.refreshStreams(context.Background(), knownStreams)
+
+	require.NoError(t, err)
+	assert.True(t, knownStreams[streamKey])
+	mockClient.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_RefreshStreams_BusyGroupError(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger,
+		WithStreamInactivityTimeout(0),
+	)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	streamKey := "slack-manager:queue:test-queue:stream:C12345"
+
+	mockClient.On("SMembers", mock.Anything, "slack-manager:queue:test-queue:streams").
+		Return([]string{streamKey}, nil)
+	mockClient.On("XGroupCreateMkStream", mock.Anything, streamKey, "slack-manager", "0").
+		Return("", errors.New("BUSYGROUP Consumer Group name already exists"))
+
+	knownStreams := make(map[string]bool)
+	err = queue.refreshStreams(context.Background(), knownStreams)
+
+	require.NoError(t, err)
+	assert.True(t, knownStreams[streamKey]) // Should still be added despite BUSYGROUP.
+	mockClient.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_RefreshStreams_SMembersError(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger,
+		WithStreamInactivityTimeout(0),
+	)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	mockClient.On("SMembers", mock.Anything, "slack-manager:queue:test-queue:streams").
+		Return([]string{}, errors.New("redis connection error"))
+
+	knownStreams := make(map[string]bool)
+	err = queue.refreshStreams(context.Background(), knownStreams)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get streams from index")
+}
+
+func TestRedisFifoQueue_RefreshStreams_SkipsKnownStreams(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger,
+		WithStreamInactivityTimeout(0),
+	)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	streamKey := "slack-manager:queue:test-queue:stream:C12345"
+
+	mockClient.On("SMembers", mock.Anything, "slack-manager:queue:test-queue:streams").
+		Return([]string{streamKey}, nil)
+
+	// Pre-populate the known streams.
+	knownStreams := map[string]bool{streamKey: true}
+	err = queue.refreshStreams(context.Background(), knownStreams)
+
+	require.NoError(t, err)
+	// XGroupCreateMkStream should NOT be called since stream is already known.
+	mockClient.AssertNotCalled(t, "XGroupCreateMkStream")
+}
+
+func TestRedisFifoQueue_ReadMessagesWithLocking_EmptyStreams(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	knownStreams := make(map[string]bool)
+	sinkCh := make(chan *common.FifoQueueItem, 10)
+
+	messagesRead, err := queue.readMessagesWithLocking(context.Background(), knownStreams, sinkCh)
+
+	require.NoError(t, err)
+	assert.False(t, messagesRead)
+}
+
+func TestRedisFifoQueue_ReadMessagesWithLocking_LockUnavailable(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	streamKey := "slack-manager:queue:test-queue:stream:C12345"
+
+	mockLocker.On("Obtain", mock.Anything, "slack-manager:queue:test-queue:lock:C12345", mock.Anything, mock.Anything).
+		Return(nil, ErrChannelLockUnavailable)
+
+	knownStreams := map[string]bool{streamKey: true}
+	sinkCh := make(chan *common.FifoQueueItem, 10)
+
+	messagesRead, err := queue.readMessagesWithLocking(context.Background(), knownStreams, sinkCh)
+
+	require.NoError(t, err)
+	assert.False(t, messagesRead)
+	mockLocker.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_ReadMessagesWithLocking_LockError(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	streamKey := "slack-manager:queue:test-queue:stream:C12345"
+
+	mockLocker.On("Obtain", mock.Anything, "slack-manager:queue:test-queue:lock:C12345", mock.Anything, mock.Anything).
+		Return(nil, errors.New("redis connection error"))
+
+	knownStreams := map[string]bool{streamKey: true}
+	sinkCh := make(chan *common.FifoQueueItem, 10)
+
+	messagesRead, err := queue.readMessagesWithLocking(context.Background(), knownStreams, sinkCh)
+
+	require.NoError(t, err)
+	assert.False(t, messagesRead)
+	mockLocker.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_TryClaimPendingMessage_NoPending(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	mockClient.On("XAutoClaim", mock.Anything, mock.Anything).
+		Return([]redis.XMessage{}, "0-0", nil)
+
+	claimed, err := queue.tryClaimPendingMessage(context.Background(), "test-stream")
+
+	require.NoError(t, err)
+	assert.Nil(t, claimed)
+	mockClient.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_TryClaimPendingMessage_NoGroupError(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	mockClient.On("XAutoClaim", mock.Anything, mock.Anything).
+		Return([]redis.XMessage{}, "", errors.New("NOGROUP No such key 'test-stream' or consumer group"))
+
+	claimed, err := queue.tryClaimPendingMessage(context.Background(), "test-stream")
+
+	require.NoError(t, err) // NOGROUP is not an error.
+	assert.Nil(t, claimed)
+	mockClient.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_TryClaimPendingMessage_OtherError(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	mockClient.On("XAutoClaim", mock.Anything, mock.Anything).
+		Return([]redis.XMessage{}, "", errors.New("redis connection error"))
+
+	claimed, err := queue.tryClaimPendingMessage(context.Background(), "test-stream")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to auto-claim pending message")
+	assert.Nil(t, claimed)
+	mockClient.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_TryClaimPendingMessage_Success(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	pendingMsg := redis.XMessage{
+		ID: "1234567890-0",
+		Values: map[string]any{
+			"body":       `{"test": "pending"}`,
+			"channel_id": "C12345",
+		},
+	}
+
+	mockClient.On("XAutoClaim", mock.Anything, mock.Anything).
+		Return([]redis.XMessage{pendingMsg}, "0-0", nil)
+
+	claimed, err := queue.tryClaimPendingMessage(context.Background(), "test-stream")
+
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
+	assert.Equal(t, "1234567890-0", claimed.ID)
+	mockClient.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_ReadOneMessageFromStream_NoMessages(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	mockLock := &mockChannelLock{key: "test-lock"}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	// No pending messages.
+	mockClient.On("XAutoClaim", mock.Anything, mock.Anything).
+		Return([]redis.XMessage{}, "0-0", nil)
+
+	// No new messages (redis.Nil).
+	mockClient.On("XReadGroup", mock.Anything, mock.Anything).
+		Return([]redis.XStream{}, redis.Nil)
+
+	sinkCh := make(chan *common.FifoQueueItem, 10)
+	read, err := queue.readOneMessageFromStream(context.Background(), "test-stream", "C12345", mockLock, sinkCh)
+
+	require.NoError(t, err)
+	assert.False(t, read)
+	mockClient.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_ReadOneMessageFromStream_XReadGroupError(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	mockLock := &mockChannelLock{key: "test-lock"}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	// No pending messages.
+	mockClient.On("XAutoClaim", mock.Anything, mock.Anything).
+		Return([]redis.XMessage{}, "0-0", nil)
+
+	// XReadGroup error.
+	mockClient.On("XReadGroup", mock.Anything, mock.Anything).
+		Return([]redis.XStream{}, errors.New("redis connection error"))
+
+	sinkCh := make(chan *common.FifoQueueItem, 10)
+	read, err := queue.readOneMessageFromStream(context.Background(), "test-stream", "C12345", mockLock, sinkCh)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read from stream")
+	assert.False(t, read)
+	mockClient.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_ReadOneMessageFromStream_ClaimsPending(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	mockLock := &mockChannelLock{key: "test-lock"}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	pendingMsg := redis.XMessage{
+		ID: "1234567890-0",
+		Values: map[string]any{
+			"body":       `{"test": "pending"}`,
+			"channel_id": "C12345",
+		},
+	}
+
+	mockClient.On("XAutoClaim", mock.Anything, mock.Anything).
+		Return([]redis.XMessage{pendingMsg}, "0-0", nil)
+
+	sinkCh := make(chan *common.FifoQueueItem, 10)
+	read, err := queue.readOneMessageFromStream(context.Background(), "test-stream", "C12345", mockLock, sinkCh)
+
+	require.NoError(t, err)
+	assert.True(t, read)
+	require.Len(t, sinkCh, 1)
+
+	item := <-sinkCh
+	assert.Equal(t, "1234567890-0", item.MessageID)
+	mockClient.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_ReadOneMessageFromStream_ReadsNew(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	mockLock := &mockChannelLock{key: "test-lock"}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	// No pending messages.
+	mockClient.On("XAutoClaim", mock.Anything, mock.Anything).
+		Return([]redis.XMessage{}, "0-0", nil)
+
+	// New message available.
+	newMsg := redis.XMessage{
+		ID: "1234567890-0",
+		Values: map[string]any{
+			"body":       `{"test": "new"}`,
+			"channel_id": "C12345",
+		},
+	}
+	mockClient.On("XReadGroup", mock.Anything, mock.Anything).
+		Return([]redis.XStream{{Stream: "test-stream", Messages: []redis.XMessage{newMsg}}}, nil)
+
+	sinkCh := make(chan *common.FifoQueueItem, 10)
+	read, err := queue.readOneMessageFromStream(context.Background(), "test-stream", "C12345", mockLock, sinkCh)
+
+	require.NoError(t, err)
+	assert.True(t, read)
+	require.Len(t, sinkCh, 1)
+
+	item := <-sinkCh
+	assert.Equal(t, "1234567890-0", item.MessageID)
+	mockClient.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_CleanupStaleStreams_ZRangeByScoreError(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	mockClient.On("ZRangeByScore", mock.Anything, "slack-manager:queue:test-queue:stream-activity", mock.Anything).
+		Return([]string{}, errors.New("redis connection error"))
+
+	cleanedUp, err := queue.cleanupStaleStreams(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to find stale streams")
+	assert.Nil(t, cleanedUp)
+}
+
+func TestRedisFifoQueue_CleanupStaleStreams_DelError(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	staleStreamKey := "slack-manager:queue:test-queue:stream:C12345"
+
+	mockClient.On("ZRangeByScore", mock.Anything, "slack-manager:queue:test-queue:stream-activity", mock.Anything).
+		Return([]string{staleStreamKey}, nil)
+	mockClient.On("Del", mock.Anything, []string{staleStreamKey}).
+		Return(int64(0), errors.New("redis connection error"))
+
+	cleanedUp, err := queue.cleanupStaleStreams(context.Background())
+
+	require.NoError(t, err) // Del error is logged but not returned.
+	assert.Empty(t, cleanedUp)
+	mockClient.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_Init_AlreadyInitialized(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+
+	// First init.
+	result1, err := queue.Init()
+	require.NoError(t, err)
+	assert.Equal(t, queue, result1)
+
+	consumerName := queue.consumerName
+
+	// Second init should return early.
+	result2, err := queue.Init()
+	require.NoError(t, err)
+	assert.Equal(t, queue, result2)
+	assert.Equal(t, consumerName, queue.consumerName) // Consumer name should not change.
+}
+
+func TestRedisFifoQueue_ReadMessagesWithLocking_Success(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	mockLock := &mockChannelLock{key: "test-lock"}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	streamKey := "slack-manager:queue:test-queue:stream:C12345"
+
+	mockLocker.On("Obtain", mock.Anything, "slack-manager:queue:test-queue:lock:C12345", mock.Anything, mock.Anything).
+		Return(mockLock, nil)
+
+	// No pending messages.
+	mockClient.On("XAutoClaim", mock.Anything, mock.Anything).
+		Return([]redis.XMessage{}, "0-0", nil)
+
+	// New message available.
+	newMsg := redis.XMessage{
+		ID: "1234567890-0",
+		Values: map[string]any{
+			"body":       `{"test": "new"}`,
+			"channel_id": "C12345",
+		},
+	}
+	mockClient.On("XReadGroup", mock.Anything, mock.Anything).
+		Return([]redis.XStream{{Stream: streamKey, Messages: []redis.XMessage{newMsg}}}, nil)
+
+	knownStreams := map[string]bool{streamKey: true}
+	sinkCh := make(chan *common.FifoQueueItem, 10)
+
+	messagesRead, err := queue.readMessagesWithLocking(context.Background(), knownStreams, sinkCh)
+
+	require.NoError(t, err)
+	assert.True(t, messagesRead)
+	require.Len(t, sinkCh, 1)
+
+	item := <-sinkCh
+	assert.Equal(t, "1234567890-0", item.MessageID)
+	mockLocker.AssertExpectations(t)
+	mockClient.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_ReadMessagesWithLocking_NoMessageReleasesLock(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	mockLock := &mockChannelLock{key: "test-lock"}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	streamKey := "slack-manager:queue:test-queue:stream:C12345"
+
+	mockLocker.On("Obtain", mock.Anything, "slack-manager:queue:test-queue:lock:C12345", mock.Anything, mock.Anything).
+		Return(mockLock, nil)
+
+	// No pending messages.
+	mockClient.On("XAutoClaim", mock.Anything, mock.Anything).
+		Return([]redis.XMessage{}, "0-0", nil)
+
+	// No new messages (redis.Nil).
+	mockClient.On("XReadGroup", mock.Anything, mock.Anything).
+		Return([]redis.XStream{}, redis.Nil)
+
+	// Lock should be released since no message was read.
+	mockLock.On("Release", mock.Anything).Return(nil)
+
+	knownStreams := map[string]bool{streamKey: true}
+	sinkCh := make(chan *common.FifoQueueItem, 10)
+
+	messagesRead, err := queue.readMessagesWithLocking(context.Background(), knownStreams, sinkCh)
+
+	require.NoError(t, err)
+	assert.False(t, messagesRead)
+	assert.Empty(t, sinkCh)
+	mockLocker.AssertExpectations(t)
+	mockClient.AssertExpectations(t)
+	mockLock.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_ReadMessagesWithLocking_ErrorReleasesLock(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	mockLock := &mockChannelLock{key: "test-lock"}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	streamKey := "slack-manager:queue:test-queue:stream:C12345"
+
+	mockLocker.On("Obtain", mock.Anything, "slack-manager:queue:test-queue:lock:C12345", mock.Anything, mock.Anything).
+		Return(mockLock, nil)
+
+	// Claim error.
+	mockClient.On("XAutoClaim", mock.Anything, mock.Anything).
+		Return([]redis.XMessage{}, "", errors.New("redis error"))
+
+	// Lock should be released on error.
+	mockLock.On("Release", mock.Anything).Return(nil)
+
+	knownStreams := map[string]bool{streamKey: true}
+	sinkCh := make(chan *common.FifoQueueItem, 10)
+
+	messagesRead, err := queue.readMessagesWithLocking(context.Background(), knownStreams, sinkCh)
+
+	require.Error(t, err)
+	assert.False(t, messagesRead)
+	mockLocker.AssertExpectations(t)
+	mockClient.AssertExpectations(t)
+	mockLock.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_RefreshStreams_XGroupCreateError(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger,
+		WithStreamInactivityTimeout(0),
+	)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	streamKey := "slack-manager:queue:test-queue:stream:C12345"
+
+	mockClient.On("SMembers", mock.Anything, "slack-manager:queue:test-queue:streams").
+		Return([]string{streamKey}, nil)
+	mockClient.On("XGroupCreateMkStream", mock.Anything, streamKey, "slack-manager", "0").
+		Return("", errors.New("WRONGTYPE Operation against a key holding the wrong kind of value"))
+
+	knownStreams := make(map[string]bool)
+	err = queue.refreshStreams(context.Background(), knownStreams)
+
+	require.NoError(t, err) // Error is logged but stream is skipped.
+	assert.False(t, knownStreams[streamKey])
+	mockClient.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_ProcessMessageWithLock_ContextCancelled(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	mockLock := &mockChannelLock{key: "test-lock"}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	msg := redis.XMessage{
+		ID: "1234567890-0",
+		Values: map[string]any{
+			"channel_id": "C12345",
+			"body":       `{"test": "body"}`,
+		},
+	}
+
+	// Lock should be released when context is cancelled.
+	mockLock.On("Release", mock.Anything).Return(nil)
+
+	// Create a cancelled context.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Use an unbuffered channel that will block (context is already cancelled).
+	sinkCh := make(chan *common.FifoQueueItem)
+
+	err = queue.processMessageWithLock(ctx, "slack-manager:queue:test-queue:stream:C12345", "C12345", msg, mockLock, sinkCh)
+
+	require.Error(t, err)
+	assert.Equal(t, context.Canceled, err)
+	mockLock.AssertExpectations(t)
+}
+
+func TestRedisFifoQueue_ProcessMessageWithLock_UsesChannelIDFromMessage(t *testing.T) {
+	t.Parallel()
+
+	mockClient := &mockRedisClient{}
+	mockLocker := &mockChannelLocker{}
+	mockLock := &mockChannelLock{key: "test-lock"}
+	logger := &mockLogger{}
+
+	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
+	_, err := queue.Init()
+	require.NoError(t, err)
+
+	// Message has a different channel_id than what was passed.
+	msg := redis.XMessage{
+		ID: "1234567890-0",
+		Values: map[string]any{
+			"channel_id": "C99999", // Different channel ID.
+			"body":       `{"test": "body"}`,
+		},
+	}
+
+	sinkCh := make(chan *common.FifoQueueItem, 10)
+	ctx := context.Background()
+
+	err = queue.processMessageWithLock(ctx, "slack-manager:queue:test-queue:stream:C12345", "C12345", msg, mockLock, sinkCh)
+	require.NoError(t, err)
+
+	require.Len(t, sinkCh, 1)
+
+	item := <-sinkCh
+	// Should use channel_id from message, not from parameter.
+	assert.Equal(t, "C99999", item.SlackChannelID)
+}
+
+func TestRedisFifoQueueOptions_Validate_AllErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		modify      func(*RedisFifoQueueOptions)
+		expectError string
+	}{
+		{
+			name: "empty consumer group",
+			modify: func(o *RedisFifoQueueOptions) {
+				o.consumerGroup = ""
+			},
+			expectError: "consumer group cannot be empty",
+		},
+		{
+			name: "poll interval too short",
+			modify: func(o *RedisFifoQueueOptions) {
+				o.pollInterval = 500 * time.Millisecond
+			},
+			expectError: "poll interval must be between 1 second and 1 minute",
+		},
+		{
+			name: "poll interval too long",
+			modify: func(o *RedisFifoQueueOptions) {
+				o.pollInterval = 2 * time.Minute
+			},
+			expectError: "poll interval must be between 1 second and 1 minute",
+		},
+		{
+			name: "max stream length too short",
+			modify: func(o *RedisFifoQueueOptions) {
+				o.maxStreamLength = 50
+			},
+			expectError: "max stream length must be at least 100",
+		},
+		{
+			name: "stream refresh interval too short",
+			modify: func(o *RedisFifoQueueOptions) {
+				o.streamRefreshInterval = 2 * time.Second
+			},
+			expectError: "stream refresh interval must be between 5 seconds and 5 minutes",
+		},
+		{
+			name: "stream refresh interval too long",
+			modify: func(o *RedisFifoQueueOptions) {
+				o.streamRefreshInterval = 10 * time.Minute
+			},
+			expectError: "stream refresh interval must be between 5 seconds and 5 minutes",
+		},
+		{
+			name: "claim min idle time too short",
+			modify: func(o *RedisFifoQueueOptions) {
+				o.claimMinIdleTime = 5 * time.Second
+			},
+			expectError: "claim min idle time must be between 10 seconds and 10 minutes",
+		},
+		{
+			name: "claim min idle time too long",
+			modify: func(o *RedisFifoQueueOptions) {
+				o.claimMinIdleTime = 15 * time.Minute
+			},
+			expectError: "claim min idle time must be between 10 seconds and 10 minutes",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := newRedisFifoQueueOptions()
+			tt.modify(opts)
+
+			err := opts.validate()
+
+			require.Error(t, err)
+			assert.Equal(t, tt.expectError, err.Error())
+		})
+	}
 }
