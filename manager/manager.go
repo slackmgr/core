@@ -100,6 +100,10 @@ func (m *Manager) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize channel settings: %w", err)
 	}
 
+	if m.alertQueue.Name() == m.commandQueue.Name() {
+		return errors.New("alert queue and command queue must have different names")
+	}
+
 	m.slackClient = slack.New(m.commandQueue, m.cacheStore, m.logger, m.metrics, m.cfg, m.managerSettings)
 
 	if err := m.slackClient.Connect(ctx); err != nil {
