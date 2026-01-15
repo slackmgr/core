@@ -15,7 +15,9 @@ var (
 	slackMentionEveryoneRegex = regexp.MustCompile(`(?i)<[@!]everyone>`)
 )
 
-// Issue represents one or more alerts with the same correlation ID (in the same Slack channel)
+// Issue represents one or more alerts with the same correlation ID (in the same Slack channel).
+// Issues are created when the first alert with a given correlation ID is received, and updated when new alerts arrive with the same correlation ID.
+// Issues can be resolved, archived, and have a connected Slack post.
 type Issue struct {
 	ID                        string          `json:"id"`
 	CorrelationID             string          `json:"correlationId"`

@@ -11,6 +11,8 @@ import (
 	"github.com/peteraglen/slack-manager/internal"
 )
 
+// Alert represents an alert message to be sent to a Slack channel.
+// It extends the commonlib.Alert struct with additional fields needed in this package.
 type Alert struct {
 	commonlib.Alert
 
@@ -22,6 +24,8 @@ type Alert struct {
 	nack func(ctx context.Context)
 }
 
+// NewAlertFromQueueItem creates a new Alert instance from a FifoQueueItem.
+// It unmarshals the JSON body of the queue item into an Alert struct.
 func NewAlertFromQueueItem(queueItem *commonlib.FifoQueueItem) (InFlightMessage, error) { //nolint:ireturn
 	if len(queueItem.Body) == 0 {
 		return nil, errors.New("alert body is empty")
@@ -62,6 +66,7 @@ func (a *Alert) Nack(ctx context.Context) {
 	a.nack = nil
 }
 
+// SetDefaultValues sets default values for the Alert fields based on the provided ManagerSettings.
 func (a *Alert) SetDefaultValues(settings *config.ManagerSettings) {
 	if a == nil {
 		return
@@ -94,6 +99,7 @@ func (a *Alert) SetDefaultValues(settings *config.ManagerSettings) {
 	}
 }
 
+// LogFields returns a map of key-value pairs representing the Alert's important fields for logging purposes.
 func (a *Alert) LogFields() map[string]any {
 	if a == nil {
 		return nil
