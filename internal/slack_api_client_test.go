@@ -2,7 +2,6 @@ package internal_test
 
 import (
 	"context"
-	"io"
 	"testing"
 	"time"
 
@@ -26,7 +25,6 @@ func (m *mockLogger) Error(msg string)                               {}
 func (m *mockLogger) Errorf(format string, args ...any)              {}
 func (m *mockLogger) WithField(key string, value any) common.Logger  { return m }
 func (m *mockLogger) WithFields(fields map[string]any) common.Logger { return m }
-func (m *mockLogger) HttpLoggingHandler() io.Writer                  { return io.Discard }
 
 type mockMetrics struct {
 	counters map[string]int

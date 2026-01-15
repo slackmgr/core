@@ -11,7 +11,7 @@ require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-resty/resty/v2 v2.17.1
 	github.com/patrickmn/go-cache v2.1.0+incompatible
-	github.com/peteraglen/slack-manager-common v0.1.0
+	github.com/peteraglen/slack-manager-common v0.1.2
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/segmentio/ksuid v1.0.4
 	github.com/slack-go/slack v0.17.3

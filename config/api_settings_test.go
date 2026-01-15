@@ -1,7 +1,6 @@
 package config_test
 
 import (
-	"io"
 	"testing"
 
 	common "github.com/peteraglen/slack-manager-common"
@@ -21,7 +20,6 @@ func (m *mockLogger) Error(_ string)                            {}
 func (m *mockLogger) Errorf(_ string, _ ...any)                 {}
 func (m *mockLogger) WithField(_ string, _ any) common.Logger   { return m } //nolint:ireturn
 func (m *mockLogger) WithFields(_ map[string]any) common.Logger { return m } //nolint:ireturn
-func (m *mockLogger) HttpLoggingHandler() io.Writer             { return io.Discard }
 
 func TestAPISettings_InitAndValidate(t *testing.T) {
 	t.Parallel()

@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"errors"
-	"io"
 	"testing"
 	"time"
 
@@ -34,10 +33,6 @@ func (m *mockLogger) WithField(_ string, _ any) common.Logger {
 //nolint:ireturn // mock implementation returns interface
 func (m *mockLogger) WithFields(_ map[string]any) common.Logger {
 	return m
-}
-
-func (m *mockLogger) HttpLoggingHandler() io.Writer {
-	return nil
 }
 
 // mockRedisClient is a mock implementation of redis.UniversalClient for testing.

@@ -28,8 +28,6 @@ const (
 )
 
 type Command struct {
-	// message
-
 	Timestamp               time.Time             `json:"timestamp"`
 	SlackChannelID          string                `json:"slackChannelId,omitempty"`
 	SlackPostID             string                `json:"ts,omitempty"`

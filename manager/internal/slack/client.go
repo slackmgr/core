@@ -29,6 +29,14 @@ const (
 	SlackErrCantDelete      = "cant_delete_message"
 )
 
+type postUpdateMethod string
+
+const (
+	postUpdateMethodNew           = postUpdateMethod("NEW")
+	postUpdateMethodUpdate        = postUpdateMethod("UPDATE")
+	postUpdateMethodUpdateDeleted = postUpdateMethod("UPDATE_DELETED")
+)
+
 type Client struct {
 	api             *internal.SlackAPIClient
 	commandHandler  handler.FifoQueueProducer
@@ -309,7 +317,7 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string,
 	if hardDelete {
 		deleteOrUpdateErr = c.api.ChatDeleteMessage(ctx, issue.LastAlert.SlackChannelID, issue.SlackPostID)
 	} else {
-		options := c.getMessageOptionsBlocks(issue, models.ActionNone, UpdateMethodUpdateDeleted)
+		options := c.getMessageOptionsBlocks(issue, models.ActionNone, postUpdateMethodUpdateDeleted)
 		_, err := c.api.ChatUpdateMessage(ctx, issue.LastAlert.SlackChannelID, options...)
 		deleteOrUpdateErr = err
 	}
@@ -433,7 +441,7 @@ func (c *Client) createOrUpdate(ctx context.Context, issue *models.Issue, reason
 }
 
 func (c *Client) create(ctx context.Context, issue *models.Issue, reason string, action models.SlackAction) error {
-	options := c.getMessageOptionsBlocks(issue, action, UpdateMethodPost)
+	options := c.getMessageOptionsBlocks(issue, action, postUpdateMethodNew)
 
 	logger := c.logger.WithFields(issue.LogFields()).WithField("post_update_reason", reason)
 
@@ -481,7 +489,7 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 }
 
 func (c *Client) update(ctx context.Context, issue *models.Issue, reason string, action models.SlackAction) error {
-	options := c.getMessageOptionsBlocks(issue, action, UpdateMethodUpdate)
+	options := c.getMessageOptionsBlocks(issue, action, postUpdateMethodUpdate)
 
 	logger := c.logger.WithFields(issue.LogFields()).WithField("post_update_reason", reason)
 
@@ -536,7 +544,7 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, reason string,
 	return nil
 }
 
-func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.SlackAction, method UpdateMethod) []slack.MsgOption {
+func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.SlackAction, method postUpdateMethod) []slack.MsgOption {
 	blocks := []slack.Block{}
 	statusEmoji := c.getStatusEmoji(issue, action, method)
 
@@ -577,7 +585,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 
-	if method != UpdateMethodUpdateDeleted {
+	if method != postUpdateMethodUpdateDeleted {
 		webhookButtons := getWebhookButtons(issue)
 
 		if len(webhookButtons) > 0 {
@@ -619,19 +627,19 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 	}
 
 	// Issue is manually resolved by user
-	if method != UpdateMethodUpdateDeleted && issue.IsInfoOrResolved() && issue.IsEmojiResolved {
+	if method != postUpdateMethodUpdateDeleted && issue.IsInfoOrResolved() && issue.IsEmojiResolved {
 		text := newMrkdwnTextBlock(fmt.Sprintf(":raising_hand: The issue was resolved by *%s* at %s", issue.ResolvedByUser, issue.ResolveTime.In(c.cfg.Location).Format("2006-01-02 15:04:05")))
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 
 	// Issue is not resolved AND being investigated by user
-	if method != UpdateMethodUpdateDeleted && !issue.IsInfoOrResolved() && issue.IsEmojiInvestigated {
+	if method != postUpdateMethodUpdateDeleted && !issue.IsInfoOrResolved() && issue.IsEmojiInvestigated {
 		text := newMrkdwnTextBlock(fmt.Sprintf(":cop: The issue is investigated by *%s* since %s", issue.InvestigatedByUser, issue.InvestigatedSince.In(c.cfg.Location).Format("2006-01-02 15:04:05")))
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 
 	// Issue is not resolved AND muted by user
-	if method != UpdateMethodUpdateDeleted && !issue.IsInfoOrResolved() && issue.IsEmojiMuted {
+	if method != postUpdateMethodUpdateDeleted && !issue.IsInfoOrResolved() && issue.IsEmojiMuted {
 		text := newMrkdwnTextBlock(fmt.Sprintf(":mask: The issue was muted by *%s* at %s", issue.MutedByUser, issue.MutedSince.In(c.cfg.Location).Format("2006-01-02 15:04:05")))
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
@@ -648,7 +656,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 
 	options = append(options, slack.MsgOptionPostMessageParameters(params))
 
-	if method == UpdateMethodUpdate || method == UpdateMethodUpdateDeleted {
+	if method == postUpdateMethodUpdate || method == postUpdateMethodUpdateDeleted {
 		options = append(options, slack.MsgOptionUpdate(issue.SlackPostID))
 	} else {
 		options = append(options, slack.MsgOptionPost())
@@ -714,7 +722,7 @@ func getIssueOptionButtons(issue *models.Issue) []slack.BlockElement {
 	return buttons
 }
 
-func (c *Client) getStatusEmoji(issue *models.Issue, action models.SlackAction, method UpdateMethod) string {
+func (c *Client) getStatusEmoji(issue *models.Issue, action models.SlackAction, method postUpdateMethod) string {
 	if action == models.ActionResolve {
 		if issue.IsResolvedAsInconclusive() {
 			return c.managerSettings.Settings.IssueStatus.InconclusiveEmoji
@@ -724,17 +732,17 @@ func (c *Client) getStatusEmoji(issue *models.Issue, action models.SlackAction, 
 
 	switch issue.LastAlert.Severity {
 	case common.AlertPanic:
-		if issue.IsEmojiMuted || method == UpdateMethodUpdateDeleted {
+		if issue.IsEmojiMuted || method == postUpdateMethodUpdateDeleted {
 			return c.managerSettings.Settings.IssueStatus.MutePanicEmoji
 		}
 		return c.managerSettings.Settings.IssueStatus.PanicEmoji
 	case common.AlertError:
-		if issue.IsEmojiMuted || method == UpdateMethodUpdateDeleted {
+		if issue.IsEmojiMuted || method == postUpdateMethodUpdateDeleted {
 			return c.managerSettings.Settings.IssueStatus.MuteErrorEmoji
 		}
 		return c.managerSettings.Settings.IssueStatus.ErrorEmoji
 	case common.AlertWarning:
-		if issue.IsEmojiMuted || method == UpdateMethodUpdateDeleted {
+		if issue.IsEmojiMuted || method == postUpdateMethodUpdateDeleted {
 			return c.managerSettings.Settings.IssueStatus.MuteWarningEmoji
 		}
 		return c.managerSettings.Settings.IssueStatus.WarningEmoji
@@ -770,7 +778,7 @@ func newerSlackPostWithLowerPriorityExists(currentIssue *models.Issue, allIssues
 	return false
 }
 
-func getTextBlocks(alertText, statusEmoji string, method UpdateMethod) []slack.Block {
+func getTextBlocks(alertText, statusEmoji string, method postUpdateMethod) []slack.Block {
 	endsWithCodeBlock := strings.HasSuffix(alertText, "```")
 
 	blocks := []slack.Block{}
@@ -785,8 +793,8 @@ func getTextBlocks(alertText, statusEmoji string, method UpdateMethod) []slack.B
 	}
 
 	for {
-		if len(alertText) <= 2800 || method == UpdateMethodUpdateDeleted {
-			if method == UpdateMethodUpdateDeleted {
+		if len(alertText) <= 2800 || method == postUpdateMethodUpdateDeleted {
+			if method == postUpdateMethodUpdateDeleted {
 				alertText = strikethrough(alertText)
 			}
 
@@ -804,14 +812,14 @@ func getTextBlocks(alertText, statusEmoji string, method UpdateMethod) []slack.B
 			alertText = "```" + alertText
 		}
 
-		if method == UpdateMethodUpdateDeleted {
+		if method == postUpdateMethodUpdateDeleted {
 			part = strikethrough(part)
 		}
 
 		text := newMrkdwnTextBlock(setStatusEmoji(part, statusEmoji))
 		blocks = append(blocks, slack.NewSectionBlock(text, nil, nil))
 
-		if method == UpdateMethodUpdateDeleted {
+		if method == postUpdateMethodUpdateDeleted {
 			break
 		}
 	}

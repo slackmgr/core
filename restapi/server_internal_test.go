@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -39,7 +38,6 @@ func (m *mockLogger) Error(msg string)                               {}
 func (m *mockLogger) Errorf(format string, args ...any)              {}
 func (m *mockLogger) WithField(key string, value any) common.Logger  { return m }
 func (m *mockLogger) WithFields(fields map[string]any) common.Logger { return m }
-func (m *mockLogger) HttpLoggingHandler() io.Writer                  { return io.Discard }
 
 type mockFifoQueueProducer struct {
 	mock.Mock
