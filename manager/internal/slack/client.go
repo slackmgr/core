@@ -98,7 +98,7 @@ func (c *Client) Connect(ctx context.Context) error {
 }
 
 func (c *Client) RunSocketMode(ctx context.Context) error {
-	c.logger.Info("Slack socker mode client started")
+	c.logger.Info("Slack socket mode client started")
 	defer c.logger.Info("Slack socket mode client exited")
 
 	if c.issueFinder == nil {
@@ -106,7 +106,7 @@ func (c *Client) RunSocketMode(ctx context.Context) error {
 	}
 
 	socketModeClient := c.api.NewSocketModeClient()
-	handler := handler.NewsSocketModeHandler(socketModeClient, c.logger)
+	handler := handler.NewSocketModeHandler(socketModeClient, c.logger)
 
 	// Internal slack client events
 	controllers.NewInternalEventsController(handler, c.logger)

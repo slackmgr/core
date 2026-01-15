@@ -24,8 +24,8 @@ type SocketModeHandler struct {
 // SocketModeHandlerFunc defines a function to handle socketmode events.
 type SocketModeHandlerFunc func(context.Context, *socketmode.Event, *socketmode.Client)
 
-// NewsSocketModeHandler creates a new SocketModeHandler.
-func NewsSocketModeHandler(client *socketmode.Client, logger common.Logger) *SocketModeHandler {
+// NewSocketModeHandler creates a new SocketModeHandler.
+func NewSocketModeHandler(client *socketmode.Client, logger common.Logger) *SocketModeHandler {
 	eventMap := make(map[socketmode.EventType][]SocketModeHandlerFunc)
 	interactionEventMap := make(map[slack.InteractionType][]SocketModeHandlerFunc)
 	interactionBlockActionEventMap := make(map[string][]SocketModeHandlerFunc)

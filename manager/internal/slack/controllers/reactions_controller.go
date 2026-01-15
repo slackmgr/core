@@ -128,7 +128,7 @@ func (c *ReactionsController) sendReactionAddedCommand(ctx context.Context, evt 
 	userInfo, err := c.getUserInfo(ctx, evt.Item.Channel, evt.User, requireChannelAdmin, logger)
 	if err != nil {
 		if !errors.Is(err, errUnmanagedChannel) && !errors.Is(err, errUserIsNotChannelAdmin) {
-			logger.Errorf("Failed to get user info: %w", err)
+			logger.Errorf("Failed to get user info: %s", err)
 		}
 		return
 	}
@@ -145,7 +145,7 @@ func (c *ReactionsController) sendReactionAddedCommand(ctx context.Context, evt 
 	}
 
 	if err := sendCommand(ctx, c.commandHandler, cmd); err != nil {
-		logger.Errorf("Failed to send command '%s': %w", action, err)
+		logger.Errorf("Failed to send command '%s': %s", action, err)
 	}
 }
 
@@ -156,7 +156,7 @@ func (c *ReactionsController) sendReactionRemovedCommand(ctx context.Context, ev
 	userInfo, err := c.getUserInfo(ctx, evt.Item.Channel, evt.User, requireChannelAdmin, logger)
 	if err != nil {
 		if !errors.Is(err, errUnmanagedChannel) && !errors.Is(err, errUserIsNotChannelAdmin) {
-			logger.Errorf("Failed to get user info: %w", err)
+			logger.Errorf("Failed to get user info: %s", err)
 		}
 		return
 	}
@@ -168,7 +168,7 @@ func (c *ReactionsController) sendReactionRemovedCommand(ctx context.Context, ev
 	cmd := models.NewCommand(evt.Item.Channel, evt.Item.Timestamp, evt.Reaction, userInfo.ID, userInfo.RealName, action, nil)
 
 	if err := sendCommand(ctx, c.commandHandler, cmd); err != nil {
-		logger.Errorf("Failed to send command '%s': %w", action, err)
+		logger.Errorf("Failed to send command '%s': %s", action, err)
 	}
 }
 

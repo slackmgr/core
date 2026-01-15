@@ -300,7 +300,7 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 	// All is good - send normal ack and clear the modal view
 	ackWithPayload(evt, clt, slack.NewClearViewSubmissionResponse())
 
-	// Fetch infor about the user
+	// Fetch info about the user
 	userInfo, err := c.client.GetUserInfo(ctx, interaction.User.ID)
 	if err != nil {
 		logger.Errorf("Failed to get user info: %s", err)
@@ -369,7 +369,7 @@ func (c *InteractiveController) createIssueViewSubmission(ctx context.Context, e
 		return
 	}
 
-	// Fetch infor about the user
+	// Fetch info about the user
 	userInfo, err := c.client.GetUserInfo(ctx, interaction.User.ID)
 	if err != nil {
 		logger.Errorf("Failed to get user info: %s", err)
