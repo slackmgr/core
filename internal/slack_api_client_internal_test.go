@@ -1,4 +1,4 @@
-package slackapi
+package internal
 
 import (
 	"errors"

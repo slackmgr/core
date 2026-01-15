@@ -15,7 +15,6 @@ import (
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
-	"github.com/peteraglen/slack-manager/internal/slackapi"
 	"github.com/slack-go/slack"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -1179,7 +1178,7 @@ func TestChannelInfoSyncer_GetChannelInfo(t *testing.T) {
 
 		slackClient := &mockSlackClient{}
 		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{}, nil)
-		slackClient.On("GetChannelInfo", mock.Anything, "C999").Return(nil, errors.New(slackapi.ChannelNotFoundError))
+		slackClient.On("GetChannelInfo", mock.Anything, "C999").Return(nil, errors.New(internal.SlackChannelNotFoundError))
 
 		syncer := newTestChannelInfoSyncer(slackClient)
 		_ = syncer.Init(context.Background())

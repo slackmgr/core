@@ -2,29 +2,15 @@ package internal_test
 
 import (
 	"context"
-	"io"
 	"testing"
 	"time"
 
 	gocache_store "github.com/eko/gocache/store/go_cache/v4"
 	gocache "github.com/patrickmn/go-cache"
-	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/internal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-type mockLogger struct{}
-
-func (m *mockLogger) Debug(msg string)                               {}
-func (m *mockLogger) Debugf(format string, args ...any)              {}
-func (m *mockLogger) Info(msg string)                                {}
-func (m *mockLogger) Infof(format string, args ...any)               {}
-func (m *mockLogger) Error(msg string)                               {}
-func (m *mockLogger) Errorf(format string, args ...any)              {}
-func (m *mockLogger) WithField(key string, value any) common.Logger  { return m }
-func (m *mockLogger) WithFields(fields map[string]any) common.Logger { return m }
-func (m *mockLogger) HttpLoggingHandler() io.Writer                  { return io.Discard }
 
 func newTestCache(keyPrefix string) *internal.Cache {
 	gocacheClient := gocache.New(5*time.Minute, time.Minute)

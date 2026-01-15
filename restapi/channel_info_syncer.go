@@ -9,7 +9,6 @@ import (
 
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/internal"
-	"github.com/peteraglen/slack-manager/internal/slackapi"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -188,7 +187,7 @@ func (c *channelInfoSyncer) refreshChannelInfo(ctx context.Context, channel stri
 
 	slackChannel, err := c.slackClient.GetChannelInfo(ctx, channel)
 	if err != nil {
-		if err.Error() == slackapi.ChannelNotFoundError {
+		if err.Error() == internal.SlackChannelNotFoundError {
 			channelFound = false
 		} else {
 			return nil, err

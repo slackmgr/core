@@ -1,4 +1,4 @@
-package slackapi
+package internal
 
 import (
 	"context"
@@ -13,19 +13,24 @@ import (
 	cachestore "github.com/eko/gocache/lib/v4/store"
 	commonlib "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 )
 
 const (
-	slackRequestMetric   = "slack_request"
-	slackCacheHitMetric  = "slack_cache_hit"
-	slackAPICallMetric   = "slack_api_call"
-	slackAPIErrorMetric  = "slack_api_error"
-	ChannelNotFoundError = "channel_not_found"
-	ThreadNotFoundError  = "thread_not_found"
-	NoSuchSubTeamError   = "no_such_subteam"
+	// SlackChannelNotFoundError is the error string returned by the Slack API when a channel is not found.
+	SlackChannelNotFoundError = "channel_not_found"
+
+	// SlackThreadNotFoundError is the error string returned by the Slack API when a thread is not found.
+	SlackThreadNotFoundError = "thread_not_found"
+
+	// SlackNoSuchSubTeamError is the error string returned by the Slack API when a user group (sub team) is not found.
+	SlackNoSuchSubTeamError = "no_such_subteam"
+
+	slackRequestMetric  = "slack_request"
+	slackCacheHitMetric = "slack_cache_hit"
+	slackAPICallMetric  = "slack_api_call"
+	slackAPIErrorMetric = "slack_api_error"
 )
 
 // ErrNotConnected is returned when an API method is called before Connect().
@@ -33,23 +38,23 @@ var ErrNotConnected = errors.New("client not connected: Connect() must be called
 
 type retryable interface{ Retryable() bool }
 
-type Client struct {
+type SlackAPIClient struct {
 	api       *slack.Client
 	logger    commonlib.Logger
-	cache     *internal.Cache
+	cache     *Cache
 	metrics   commonlib.Metrics
 	cfg       *config.SlackClientConfig
 	connected bool
 	botUserID string
 }
 
-func New(cacheStore cachestore.StoreInterface, cacheKeyPrefix string, logger commonlib.Logger, metrics commonlib.Metrics, cfg *config.SlackClientConfig) *Client {
+func NewSlackAPIClient(cacheStore cachestore.StoreInterface, cacheKeyPrefix string, logger commonlib.Logger, metrics commonlib.Metrics, cfg *config.SlackClientConfig) *SlackAPIClient {
 	cfg.SetDefaults()
 
 	cacheKeyPrefix += "slack-api-client:"
-	cache := internal.NewCache(cacheStore, cacheKeyPrefix, logger)
+	cache := NewCache(cacheStore, cacheKeyPrefix, logger)
 
-	return &Client{
+	return &SlackAPIClient{
 		logger:  logger,
 		cache:   cache,
 		metrics: metrics,
@@ -57,7 +62,7 @@ func New(cacheStore cachestore.StoreInterface, cacheKeyPrefix string, logger com
 	}
 }
 
-func (c *Client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
+func (c *SlackAPIClient) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
 	if c.connected {
 		return nil, errors.New("connect can only be run once")
 	}
@@ -113,26 +118,26 @@ func (c *Client) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
 	return response, nil
 }
 
-func (c *Client) API() *slack.Client {
+func (c *SlackAPIClient) API() *slack.Client {
 	return c.api
 }
 
-func (c *Client) NewSocketModeClient() *socketmode.Client {
+func (c *SlackAPIClient) NewSocketModeClient() *socketmode.Client {
 	return socketmode.New(c.api, socketmode.OptionDebug(c.cfg.DebugLogging), socketmode.OptionLog(&slackApilogger{logger: c.logger}))
 }
 
-func (c *Client) checkConnected() error {
+func (c *SlackAPIClient) checkConnected() error {
 	if !c.connected {
 		return ErrNotConnected
 	}
 	return nil
 }
 
-func (c *Client) BotUserID() string {
+func (c *SlackAPIClient) BotUserID() string {
 	return c.botUserID
 }
 
-func (c *Client) ChatPostMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
+func (c *SlackAPIClient) ChatPostMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
 	if err := c.checkConnected(); err != nil {
 		return "", err
 	}
@@ -151,7 +156,7 @@ func (c *Client) ChatPostMessage(ctx context.Context, channelID string, options 
 	return ts, err
 }
 
-func (c *Client) ChatUpdateMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
+func (c *SlackAPIClient) ChatUpdateMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
 	if err := c.checkConnected(); err != nil {
 		return "", err
 	}
@@ -170,7 +175,7 @@ func (c *Client) ChatUpdateMessage(ctx context.Context, channelID string, option
 	return ts, err
 }
 
-func (c *Client) ChatDeleteMessage(ctx context.Context, channelID string, ts string) error {
+func (c *SlackAPIClient) ChatDeleteMessage(ctx context.Context, channelID string, ts string) error {
 	if err := c.checkConnected(); err != nil {
 		return err
 	}
@@ -189,7 +194,7 @@ func (c *Client) ChatDeleteMessage(ctx context.Context, channelID string, ts str
 	return err
 }
 
-func (c *Client) SendResponse(ctx context.Context, channelID, responseURL, responseType, text string) error {
+func (c *SlackAPIClient) SendResponse(ctx context.Context, channelID, responseURL, responseType, text string) error {
 	if err := c.checkConnected(); err != nil {
 		return err
 	}
@@ -226,7 +231,7 @@ func (c *Client) SendResponse(ctx context.Context, channelID, responseURL, respo
 	return err
 }
 
-func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error) {
+func (c *SlackAPIClient) PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error) {
 	if err := c.checkConnected(); err != nil {
 		return "", err
 	}
@@ -253,7 +258,7 @@ func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, op
 	return ts, err
 }
 
-func (c *Client) OpenModal(ctx context.Context, triggerID string, request slack.ModalViewRequest) error {
+func (c *SlackAPIClient) OpenModal(ctx context.Context, triggerID string, request slack.ModalViewRequest) error {
 	if err := c.checkConnected(); err != nil {
 		return err
 	}
@@ -271,7 +276,7 @@ func (c *Client) OpenModal(ctx context.Context, triggerID string, request slack.
 	return err
 }
 
-func (c *Client) MessageHasReplies(ctx context.Context, channelID, ts string) (bool, error) {
+func (c *SlackAPIClient) MessageHasReplies(ctx context.Context, channelID, ts string) (bool, error) {
 	if err := c.checkConnected(); err != nil {
 		return false, err
 	}
@@ -300,9 +305,9 @@ func (c *Client) MessageHasReplies(ctx context.Context, channelID, ts string) (b
 		return msgs, nil, err
 	}
 
-	msgs, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f, ChannelNotFoundError, ThreadNotFoundError)
+	msgs, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f, SlackChannelNotFoundError, SlackThreadNotFoundError)
 	if err != nil {
-		if err.Error() == ChannelNotFoundError || err.Error() == ThreadNotFoundError {
+		if err.Error() == SlackChannelNotFoundError || err.Error() == SlackThreadNotFoundError {
 			return false, nil
 		}
 		return false, err
@@ -311,7 +316,7 @@ func (c *Client) MessageHasReplies(ctx context.Context, channelID, ts string) (b
 	return len(msgs) > 1, nil
 }
 
-func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error) {
+func (c *SlackAPIClient) GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error) {
 	if err := c.checkConnected(); err != nil {
 		return nil, err
 	}
@@ -330,8 +335,8 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 		c.metrics.Inc(slackCacheHitMetric, action)
 
 		// If we cached a ChannelNotFoundError, return it as an error
-		if val == ChannelNotFoundError {
-			return nil, errors.New(ChannelNotFoundError)
+		if val == SlackChannelNotFoundError {
+			return nil, errors.New(SlackChannelNotFoundError)
 		}
 
 		info := slack.Channel{}
@@ -352,11 +357,11 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 		return val, nil, err
 	}
 
-	channel, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f, ChannelNotFoundError)
+	channel, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f, SlackChannelNotFoundError)
 	unknownChannel := false
 
 	if err != nil {
-		if err.Error() == ChannelNotFoundError {
+		if err.Error() == SlackChannelNotFoundError {
 			unknownChannel = true
 		} else {
 			return nil, err
@@ -365,7 +370,7 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 
 	// No channel found, cache the error to avoid repeated API calls, and then return the error
 	if unknownChannel {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, ChannelNotFoundError, 10*time.Second, 10*time.Second)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, SlackChannelNotFoundError, 10*time.Second, 10*time.Second)
 		return nil, err
 	}
 
@@ -380,7 +385,7 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 	return channel, nil
 }
 
-func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummary, error) {
+func (c *SlackAPIClient) ListBotChannels(ctx context.Context) ([]*ChannelSummary, error) {
 	if err := c.checkConnected(); err != nil {
 		return nil, err
 	}
@@ -394,7 +399,7 @@ func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummar
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
 		c.metrics.Inc(slackCacheHitMetric, action)
 
-		channels := []*internal.ChannelSummary{}
+		channels := []*ChannelSummary{}
 
 		if err := json.Unmarshal([]byte(val), &channels); err != nil {
 			c.logger.Errorf("failed to json unmarshal channel list: %s", err)
@@ -413,7 +418,7 @@ func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummar
 		return c.api.GetConversationsForUserContext(ctx, params)
 	}
 
-	channels := []*internal.ChannelSummary{}
+	channels := []*ChannelSummary{}
 
 	for {
 		chs, nextCursor, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f)
@@ -422,7 +427,7 @@ func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummar
 		}
 
 		for _, ch := range chs {
-			channels = append(channels, internal.NewChannelSummary(ch))
+			channels = append(channels, NewChannelSummary(ch))
 		}
 
 		if nextCursor == "" {
@@ -432,7 +437,7 @@ func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummar
 		params.Cursor = nextCursor
 	}
 
-	slices.SortFunc(channels, func(a, b *internal.ChannelSummary) int {
+	slices.SortFunc(channels, func(a, b *ChannelSummary) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 
@@ -446,7 +451,7 @@ func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummar
 	return channels, nil
 }
 
-func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, error) {
+func (c *SlackAPIClient) GetUserInfo(ctx context.Context, userID string) (*slack.User, error) {
 	if err := c.checkConnected(); err != nil {
 		return nil, err
 	}
@@ -493,7 +498,7 @@ func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 	return user, nil
 }
 
-func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[string]struct{}, error) {
+func (c *SlackAPIClient) ListUserGroupMembers(ctx context.Context, groupID string) (map[string]struct{}, error) {
 	if err := c.checkConnected(); err != nil {
 		return nil, err
 	}
@@ -527,9 +532,9 @@ func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 		return val, nil, err
 	}
 
-	userIDs, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f, NoSuchSubTeamError)
+	userIDs, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f, SlackNoSuchSubTeamError)
 	if err != nil {
-		if err.Error() == NoSuchSubTeamError {
+		if err.Error() == SlackNoSuchSubTeamError {
 			return result, nil
 		}
 		return nil, err
@@ -549,7 +554,7 @@ func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 	return result, nil
 }
 
-func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map[string]struct{}, error) {
+func (c *SlackAPIClient) GetUserIDsInChannel(ctx context.Context, channelID string) (map[string]struct{}, error) {
 	if err := c.checkConnected(); err != nil {
 		return nil, err
 	}
@@ -588,9 +593,9 @@ func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 	}
 
 	for {
-		users, nextCursor, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f, ChannelNotFoundError)
+		users, nextCursor, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f, SlackChannelNotFoundError)
 		if err != nil {
-			if err.Error() == ChannelNotFoundError {
+			if err.Error() == SlackChannelNotFoundError {
 				return result, nil
 			}
 			return nil, err
@@ -619,7 +624,7 @@ func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 	return result, nil
 }
 
-func (c *Client) BotIsInChannel(ctx context.Context, channelID string) (bool, error) {
+func (c *SlackAPIClient) BotIsInChannel(ctx context.Context, channelID string) (bool, error) {
 	if err := c.checkConnected(); err != nil {
 		return false, err
 	}
@@ -675,7 +680,7 @@ func callAPI[V any, W any](ctx context.Context, logger commonlib.Logger, metrics
 		var result1 V
 		var result2 W
 
-		if internal.IsCtxCanceledErr(err) {
+		if IsCtxCanceledErr(err) {
 			return result1, result2, err
 		}
 
@@ -781,7 +786,7 @@ func isNonRetryableError(err error) bool {
 	}
 
 	switch err.Error() {
-	case ChannelNotFoundError, "message_not_found", "cant_update_message", "cant_delete_message", "invalid_blocks", "not_in_channel", "is_archived":
+	case SlackChannelNotFoundError, "message_not_found", "cant_update_message", "cant_delete_message", "invalid_blocks", "not_in_channel", "is_archived":
 		return true
 	default:
 		return false

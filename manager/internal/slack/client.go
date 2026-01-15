@@ -11,7 +11,7 @@ import (
 	"github.com/eko/gocache/lib/v4/store"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal/slackapi"
+	"github.com/peteraglen/slack-manager/internal"
 	"github.com/peteraglen/slack-manager/manager/internal/models"
 	"github.com/peteraglen/slack-manager/manager/internal/slack/controllers"
 	"github.com/peteraglen/slack-manager/manager/internal/slack/handler"
@@ -30,7 +30,7 @@ const (
 )
 
 type Client struct {
-	api             *slackapi.Client
+	api             *internal.SlackAPIClient
 	commandHandler  handler.FifoQueueProducer
 	issueFinder     handler.IssueFinder
 	cacheStore      store.StoreInterface
@@ -80,7 +80,7 @@ func (c *Client) Connect(ctx context.Context) error {
 		return errors.New("channel settings must be set before connecting")
 	}
 
-	c.api = slackapi.New(c.cacheStore, c.cfg.CacheKeyPrefix, c.logger, c.metrics, c.cfg.SlackClient)
+	c.api = internal.NewSlackAPIClient(c.cacheStore, c.cfg.CacheKeyPrefix, c.logger, c.metrics, c.cfg.SlackClient)
 
 	if _, err := c.api.Connect(ctx); err != nil {
 		return err
@@ -407,7 +407,7 @@ func (c *Client) GetChannelName(ctx context.Context, channelID string) string {
 	info, err := c.api.GetChannelInfo(ctx, channelID)
 	if err != nil {
 		// We log the error unless it's a channel not found error, which is expected in some cases.
-		if err.Error() != slackapi.ChannelNotFoundError {
+		if err.Error() != internal.SlackChannelNotFoundError {
 			c.logger.Errorf("Failed to find Slack channel info for %s: %s", channelID, err)
 		}
 		return ""

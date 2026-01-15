@@ -23,7 +23,6 @@ import (
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
-	"github.com/peteraglen/slack-manager/internal/slackapi"
 	"github.com/slack-go/slack"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
@@ -140,7 +139,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	// Initialize Slack API client if not already set
 	if s.slackClient == nil {
-		slackAPI := slackapi.New(s.cacheStore, s.cfg.CacheKeyPrefix, s.logger, s.metrics, s.cfg.SlackClient)
+		slackAPI := internal.NewSlackAPIClient(s.cacheStore, s.cfg.CacheKeyPrefix, s.logger, s.metrics, s.cfg.SlackClient)
 
 		if _, err := slackAPI.Connect(ctx); err != nil {
 			return fmt.Errorf("failed to connect to Slack API: %w", err)

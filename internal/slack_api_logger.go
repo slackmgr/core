@@ -1,4 +1,4 @@
-package slackapi
+package internal
 
 import (
 	common "github.com/peteraglen/slack-manager-common"

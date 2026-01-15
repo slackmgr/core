@@ -1,4 +1,4 @@
-package slackapi_test
+package internal_test
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal/slackapi"
+	"github.com/peteraglen/slack-manager/internal"
 	"github.com/slack-go/slack"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,7 +46,7 @@ func (m *mockMetrics) Set(name string, val float64, labelValues ...string)      
 func (m *mockMetrics) Observe(name string, val float64, labelValues ...string)                  {}
 func (m *mockMetrics) Handler() any                                                             { return nil }
 
-func newTestClient() *slackapi.Client {
+func newTestClient() *internal.SlackAPIClient {
 	gocacheClient := gocache.New(5*time.Minute, time.Minute)
 	store := gocache_store.NewGoCache(gocacheClient)
 
@@ -54,7 +54,7 @@ func newTestClient() *slackapi.Client {
 	cfg.AppToken = "xapp-test"
 	cfg.BotToken = "xoxb-test"
 
-	return slackapi.New(store, "test:", &mockLogger{}, newMockMetrics(), cfg)
+	return internal.NewSlackAPIClient(store, "test:", &mockLogger{}, newMockMetrics(), cfg)
 }
 
 func TestNew(t *testing.T) {
@@ -78,7 +78,7 @@ func TestNew(t *testing.T) {
 			BotToken: "xoxb-test",
 		}
 
-		client := slackapi.New(store, "test:", &mockLogger{}, newMockMetrics(), cfg)
+		client := internal.NewSlackAPIClient(store, "test:", &mockLogger{}, newMockMetrics(), cfg)
 		require.NotNil(t, client)
 
 		// Verify defaults were set
@@ -116,92 +116,92 @@ func TestClient_ErrNotConnected(t *testing.T) {
 
 	testCases := []struct {
 		name string
-		fn   func(*slackapi.Client) error
+		fn   func(*internal.SlackAPIClient) error
 	}{
 		{
 			name: "ChatPostMessage",
-			fn: func(c *slackapi.Client) error {
+			fn: func(c *internal.SlackAPIClient) error {
 				_, err := c.ChatPostMessage(ctx, "channel")
 				return err
 			},
 		},
 		{
 			name: "ChatUpdateMessage",
-			fn: func(c *slackapi.Client) error {
+			fn: func(c *internal.SlackAPIClient) error {
 				_, err := c.ChatUpdateMessage(ctx, "channel")
 				return err
 			},
 		},
 		{
 			name: "ChatDeleteMessage",
-			fn: func(c *slackapi.Client) error {
+			fn: func(c *internal.SlackAPIClient) error {
 				return c.ChatDeleteMessage(ctx, "channel", "ts")
 			},
 		},
 		{
 			name: "SendResponse",
-			fn: func(c *slackapi.Client) error {
+			fn: func(c *internal.SlackAPIClient) error {
 				return c.SendResponse(ctx, "channel", "url", "type", "text")
 			},
 		},
 		{
 			name: "PostEphemeral",
-			fn: func(c *slackapi.Client) error {
+			fn: func(c *internal.SlackAPIClient) error {
 				_, err := c.PostEphemeral(ctx, "channel", "user")
 				return err
 			},
 		},
 		{
 			name: "OpenModal",
-			fn: func(c *slackapi.Client) error {
+			fn: func(c *internal.SlackAPIClient) error {
 				return c.OpenModal(ctx, "trigger", slack.ModalViewRequest{})
 			},
 		},
 		{
 			name: "MessageHasReplies",
-			fn: func(c *slackapi.Client) error {
+			fn: func(c *internal.SlackAPIClient) error {
 				_, err := c.MessageHasReplies(ctx, "channel", "ts")
 				return err
 			},
 		},
 		{
 			name: "GetChannelInfo",
-			fn: func(c *slackapi.Client) error {
+			fn: func(c *internal.SlackAPIClient) error {
 				_, err := c.GetChannelInfo(ctx, "channel")
 				return err
 			},
 		},
 		{
 			name: "ListBotChannels",
-			fn: func(c *slackapi.Client) error {
+			fn: func(c *internal.SlackAPIClient) error {
 				_, err := c.ListBotChannels(ctx)
 				return err
 			},
 		},
 		{
 			name: "GetUserInfo",
-			fn: func(c *slackapi.Client) error {
+			fn: func(c *internal.SlackAPIClient) error {
 				_, err := c.GetUserInfo(ctx, "user")
 				return err
 			},
 		},
 		{
 			name: "ListUserGroupMembers",
-			fn: func(c *slackapi.Client) error {
+			fn: func(c *internal.SlackAPIClient) error {
 				_, err := c.ListUserGroupMembers(ctx, "group")
 				return err
 			},
 		},
 		{
 			name: "GetUserIDsInChannel",
-			fn: func(c *slackapi.Client) error {
+			fn: func(c *internal.SlackAPIClient) error {
 				_, err := c.GetUserIDsInChannel(ctx, "channel")
 				return err
 			},
 		},
 		{
 			name: "BotIsInChannel",
-			fn: func(c *slackapi.Client) error {
+			fn: func(c *internal.SlackAPIClient) error {
 				_, err := c.BotIsInChannel(ctx, "channel")
 				return err
 			},
@@ -216,7 +216,7 @@ func TestClient_ErrNotConnected(t *testing.T) {
 			err := tc.fn(client)
 
 			require.Error(t, err)
-			assert.ErrorIs(t, err, slackapi.ErrNotConnected)
+			assert.ErrorIs(t, err, internal.ErrNotConnected)
 		})
 	}
 }
@@ -234,7 +234,7 @@ func TestClient_Connect(t *testing.T) {
 		cfg.AppToken = "xapp-test"
 		cfg.BotToken = "xoxb-test"
 
-		client := slackapi.New(store, "test:", &mockLogger{}, nil, cfg)
+		client := internal.NewSlackAPIClient(store, "test:", &mockLogger{}, nil, cfg)
 
 		_, err := client.Connect(context.Background())
 		require.Error(t, err)
@@ -251,7 +251,7 @@ func TestClient_Connect(t *testing.T) {
 		cfg.AppToken = "xapp-test"
 		cfg.BotToken = ""
 
-		client := slackapi.New(store, "test:", &mockLogger{}, newMockMetrics(), cfg)
+		client := internal.NewSlackAPIClient(store, "test:", &mockLogger{}, newMockMetrics(), cfg)
 
 		_, err := client.Connect(context.Background())
 		require.Error(t, err)
@@ -275,7 +275,7 @@ func TestClient_InputValidation(t *testing.T) {
 		err := client.SendResponse(ctx, "", "url", "type", "text")
 
 		// Should fail with ErrNotConnected first, not channelID validation
-		assert.ErrorIs(t, err, slackapi.ErrNotConnected)
+		assert.ErrorIs(t, err, internal.ErrNotConnected)
 	})
 
 	t.Run("PostEphemeral validates channelID after connection check", func(t *testing.T) {
@@ -285,7 +285,7 @@ func TestClient_InputValidation(t *testing.T) {
 		_, err := client.PostEphemeral(ctx, "", "user")
 
 		// Should fail with ErrNotConnected first
-		assert.ErrorIs(t, err, slackapi.ErrNotConnected)
+		assert.ErrorIs(t, err, internal.ErrNotConnected)
 	})
 
 	t.Run("OpenModal validates triggerID after connection check", func(t *testing.T) {
@@ -295,7 +295,7 @@ func TestClient_InputValidation(t *testing.T) {
 		err := client.OpenModal(ctx, "", slack.ModalViewRequest{})
 
 		// Should fail with ErrNotConnected first
-		assert.ErrorIs(t, err, slackapi.ErrNotConnected)
+		assert.ErrorIs(t, err, internal.ErrNotConnected)
 	})
 
 	t.Run("MessageHasReplies validates channelID after connection check", func(t *testing.T) {
@@ -305,7 +305,7 @@ func TestClient_InputValidation(t *testing.T) {
 		_, err := client.MessageHasReplies(ctx, "", "ts")
 
 		// Should fail with ErrNotConnected first
-		assert.ErrorIs(t, err, slackapi.ErrNotConnected)
+		assert.ErrorIs(t, err, internal.ErrNotConnected)
 	})
 
 	t.Run("GetChannelInfo validates channelID after connection check", func(t *testing.T) {
@@ -315,7 +315,7 @@ func TestClient_InputValidation(t *testing.T) {
 		_, err := client.GetChannelInfo(ctx, "")
 
 		// Should fail with ErrNotConnected first
-		assert.ErrorIs(t, err, slackapi.ErrNotConnected)
+		assert.ErrorIs(t, err, internal.ErrNotConnected)
 	})
 
 	t.Run("GetUserInfo validates userID after connection check", func(t *testing.T) {
@@ -325,7 +325,7 @@ func TestClient_InputValidation(t *testing.T) {
 		_, err := client.GetUserInfo(ctx, "")
 
 		// Should fail with ErrNotConnected first
-		assert.ErrorIs(t, err, slackapi.ErrNotConnected)
+		assert.ErrorIs(t, err, internal.ErrNotConnected)
 	})
 
 	t.Run("ListUserGroupMembers validates groupID after connection check", func(t *testing.T) {
@@ -335,7 +335,7 @@ func TestClient_InputValidation(t *testing.T) {
 		_, err := client.ListUserGroupMembers(ctx, "")
 
 		// Should fail with ErrNotConnected first
-		assert.ErrorIs(t, err, slackapi.ErrNotConnected)
+		assert.ErrorIs(t, err, internal.ErrNotConnected)
 	})
 
 	t.Run("GetUserIDsInChannel validates channelID after connection check", func(t *testing.T) {
@@ -345,7 +345,7 @@ func TestClient_InputValidation(t *testing.T) {
 		_, err := client.GetUserIDsInChannel(ctx, "")
 
 		// Should fail with ErrNotConnected first
-		assert.ErrorIs(t, err, slackapi.ErrNotConnected)
+		assert.ErrorIs(t, err, internal.ErrNotConnected)
 	})
 
 	t.Run("BotIsInChannel validates channelID after connection check", func(t *testing.T) {
@@ -355,7 +355,7 @@ func TestClient_InputValidation(t *testing.T) {
 		_, err := client.BotIsInChannel(ctx, "")
 
 		// Should fail with ErrNotConnected first
-		assert.ErrorIs(t, err, slackapi.ErrNotConnected)
+		assert.ErrorIs(t, err, internal.ErrNotConnected)
 	})
 }
 
@@ -365,15 +365,15 @@ func TestConstants(t *testing.T) {
 	t.Run("error constants are defined", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Equal(t, "channel_not_found", slackapi.ChannelNotFoundError)
-		assert.Equal(t, "thread_not_found", slackapi.ThreadNotFoundError)
-		assert.Equal(t, "no_such_subteam", slackapi.NoSuchSubTeamError)
+		assert.Equal(t, "channel_not_found", internal.SlackChannelNotFoundError)
+		assert.Equal(t, "thread_not_found", internal.SlackThreadNotFoundError)
+		assert.Equal(t, "no_such_subteam", internal.SlackNoSuchSubTeamError)
 	})
 
 	t.Run("ErrNotConnected is exported", func(t *testing.T) {
 		t.Parallel()
 
-		assert.NotNil(t, slackapi.ErrNotConnected)
-		assert.Contains(t, slackapi.ErrNotConnected.Error(), "Connect()")
+		assert.NotNil(t, internal.ErrNotConnected)
+		assert.Contains(t, internal.ErrNotConnected.Error(), "Connect()")
 	})
 }
