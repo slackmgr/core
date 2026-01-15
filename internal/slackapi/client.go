@@ -28,6 +28,9 @@ const (
 	NoSuchSubTeamError   = "no_such_subteam"
 )
 
+// ErrNotConnected is returned when an API method is called before Connect().
+var ErrNotConnected = errors.New("client not connected: Connect() must be called first")
+
 type retryable interface{ Retryable() bool }
 
 type Client struct {
@@ -118,11 +121,22 @@ func (c *Client) NewSocketModeClient() *socketmode.Client {
 	return socketmode.New(c.api, socketmode.OptionDebug(c.cfg.DebugLogging), socketmode.OptionLog(&slackApilogger{logger: c.logger}))
 }
 
+func (c *Client) checkConnected() error {
+	if !c.connected {
+		return ErrNotConnected
+	}
+	return nil
+}
+
 func (c *Client) BotUserID() string {
 	return c.botUserID
 }
 
 func (c *Client) ChatPostMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
+	if err := c.checkConnected(); err != nil {
+		return "", err
+	}
+
 	action := "chat.post"
 
 	c.metrics.Inc(slackRequestMetric, action)
@@ -138,6 +152,10 @@ func (c *Client) ChatPostMessage(ctx context.Context, channelID string, options 
 }
 
 func (c *Client) ChatUpdateMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
+	if err := c.checkConnected(); err != nil {
+		return "", err
+	}
+
 	action := "chat.update"
 
 	c.metrics.Inc(slackRequestMetric, action)
@@ -153,6 +171,10 @@ func (c *Client) ChatUpdateMessage(ctx context.Context, channelID string, option
 }
 
 func (c *Client) ChatDeleteMessage(ctx context.Context, channelID string, ts string) error {
+	if err := c.checkConnected(); err != nil {
+		return err
+	}
+
 	action := "chat.delete"
 
 	c.metrics.Inc(slackRequestMetric, action)
@@ -168,6 +190,10 @@ func (c *Client) ChatDeleteMessage(ctx context.Context, channelID string, ts str
 }
 
 func (c *Client) SendResponse(ctx context.Context, channelID, responseURL, responseType, text string) error {
+	if err := c.checkConnected(); err != nil {
+		return err
+	}
+
 	if channelID == "" {
 		return errors.New("channelID cannot be empty")
 	}
@@ -201,6 +227,10 @@ func (c *Client) SendResponse(ctx context.Context, channelID, responseURL, respo
 }
 
 func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error) {
+	if err := c.checkConnected(); err != nil {
+		return "", err
+	}
+
 	if channelID == "" {
 		return "", errors.New("channelID cannot be empty")
 	}
@@ -224,6 +254,10 @@ func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, op
 }
 
 func (c *Client) OpenModal(ctx context.Context, triggerID string, request slack.ModalViewRequest) error {
+	if err := c.checkConnected(); err != nil {
+		return err
+	}
+
 	if triggerID == "" {
 		return errors.New("triggerID cannot be empty")
 	}
@@ -238,6 +272,10 @@ func (c *Client) OpenModal(ctx context.Context, triggerID string, request slack.
 }
 
 func (c *Client) MessageHasReplies(ctx context.Context, channelID, ts string) (bool, error) {
+	if err := c.checkConnected(); err != nil {
+		return false, err
+	}
+
 	if channelID == "" {
 		return false, errors.New("channelID cannot be empty")
 	}
@@ -274,6 +312,10 @@ func (c *Client) MessageHasReplies(ctx context.Context, channelID, ts string) (b
 }
 
 func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error) {
+	if err := c.checkConnected(); err != nil {
+		return nil, err
+	}
+
 	if channelID == "" {
 		return nil, errors.New("channelID cannot be empty")
 	}
@@ -339,6 +381,10 @@ func (c *Client) GetChannelInfo(ctx context.Context, channelID string) (*slack.C
 }
 
 func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummary, error) {
+	if err := c.checkConnected(); err != nil {
+		return nil, err
+	}
+
 	action := "users.conversations"
 
 	c.metrics.Inc(slackRequestMetric, action)
@@ -392,7 +438,7 @@ func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummar
 
 	resultJSON, err := json.Marshal(channels)
 	if err != nil {
-		c.logger.Errorf("failed to json marshal channel list: %w", err)
+		c.logger.Errorf("failed to json marshal channel list: %s", err)
 	} else {
 		c.cache.Set(ctx, cacheKey, string(resultJSON), time.Minute)
 	}
@@ -401,6 +447,10 @@ func (c *Client) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummar
 }
 
 func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, error) {
+	if err := c.checkConnected(); err != nil {
+		return nil, err
+	}
+
 	if userID == "" {
 		return nil, errors.New("userID cannot be empty")
 	}
@@ -444,6 +494,10 @@ func (c *Client) GetUserInfo(ctx context.Context, userID string) (*slack.User, e
 }
 
 func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[string]struct{}, error) {
+	if err := c.checkConnected(); err != nil {
+		return nil, err
+	}
+
 	if groupID == "" {
 		return nil, errors.New("groupID cannot be empty")
 	}
@@ -496,6 +550,10 @@ func (c *Client) ListUserGroupMembers(ctx context.Context, groupID string) (map[
 }
 
 func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map[string]struct{}, error) {
+	if err := c.checkConnected(); err != nil {
+		return nil, err
+	}
+
 	if channelID == "" {
 		return nil, errors.New("channelID cannot be empty")
 	}
@@ -562,6 +620,10 @@ func (c *Client) GetUserIDsInChannel(ctx context.Context, channelID string) (map
 }
 
 func (c *Client) BotIsInChannel(ctx context.Context, channelID string) (bool, error) {
+	if err := c.checkConnected(); err != nil {
+		return false, err
+	}
+
 	if channelID == "" {
 		return false, errors.New("channelID cannot be empty")
 	}
@@ -641,7 +703,7 @@ func waitForAPIError(ctx context.Context, started time.Time, logger commonlib.Lo
 	if errors.As(err, &rateLimitError) {
 		remainingWaitTime := time.Until(started.Add(time.Duration(cfg.MaxRateLimitErrorWaitTimeSeconds) * time.Second))
 
-		if attempt >= cfg.MaxAttemtsForRateLimitError || remainingWaitTime < time.Second {
+		if attempt >= cfg.MaxAttemptsForRateLimitError || remainingWaitTime < time.Second {
 			return fmt.Errorf("failed to call Slack API %s after %d attempts and %d seconds: rate limit error: %w", action, attempt, int(time.Since(started).Seconds()), err)
 		}
 

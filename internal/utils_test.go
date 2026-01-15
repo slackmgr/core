@@ -34,15 +34,105 @@ func TestTrySend(t *testing.T) {
 func TestIsCtxCanceledErr(t *testing.T) {
 	t.Parallel()
 
+	// Direct context.Canceled error
 	err := context.Canceled
 	assert.True(t, internal.IsCtxCanceledErr(err))
 
+	// Different context error
 	err = context.DeadlineExceeded
 	assert.False(t, internal.IsCtxCanceledErr(err))
 
-	err = errors.New("context canceled")
-	assert.True(t, internal.IsCtxCanceledErr(err))
-
+	// Wrapped context.Canceled error
 	err = fmt.Errorf("some error: %w", context.Canceled)
 	assert.True(t, internal.IsCtxCanceledErr(err))
+
+	// Unrelated error with similar text should NOT match (was a bug before)
+	err = errors.New("context canceled")
+	assert.False(t, internal.IsCtxCanceledErr(err))
+
+	// Deeply wrapped context.Canceled
+	err = fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", context.Canceled))
+	assert.True(t, internal.IsCtxCanceledErr(err))
+}
+
+func TestHash(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty input returns consistent hash", func(t *testing.T) {
+		t.Parallel()
+
+		hash1 := internal.Hash()
+		hash2 := internal.Hash()
+		assert.Equal(t, hash1, hash2)
+		assert.NotEmpty(t, hash1)
+	})
+
+	t.Run("single string input", func(t *testing.T) {
+		t.Parallel()
+
+		hash := internal.Hash("hello")
+		assert.NotEmpty(t, hash)
+		// SHA256 of "hello" base64 encoded should be consistent
+		assert.Equal(t, internal.Hash("hello"), hash)
+	})
+
+	t.Run("multiple strings are concatenated", func(t *testing.T) {
+		t.Parallel()
+
+		hash1 := internal.Hash("hello", "world")
+		hash2 := internal.Hash("helloworld")
+		// These should be the same since strings are just concatenated
+		assert.Equal(t, hash1, hash2)
+	})
+
+	t.Run("different inputs produce different hashes", func(t *testing.T) {
+		t.Parallel()
+
+		hash1 := internal.Hash("foo")
+		hash2 := internal.Hash("bar")
+		assert.NotEqual(t, hash1, hash2)
+	})
+
+	t.Run("hash is URL-safe base64", func(t *testing.T) {
+		t.Parallel()
+
+		hash := internal.Hash("test")
+		// URL-safe base64 should not contain + or /
+		assert.NotContains(t, hash, "+")
+		assert.NotContains(t, hash, "/")
+	})
+}
+
+func TestHashBytes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns 32 bytes for SHA256", func(t *testing.T) {
+		t.Parallel()
+
+		result := internal.HashBytes([]byte("hello"))
+		assert.Len(t, result, 32) // SHA256 produces 32 bytes
+	})
+
+	t.Run("same input produces same hash", func(t *testing.T) {
+		t.Parallel()
+
+		result1 := internal.HashBytes([]byte("test"))
+		result2 := internal.HashBytes([]byte("test"))
+		assert.Equal(t, result1, result2)
+	})
+
+	t.Run("different inputs produce different hashes", func(t *testing.T) {
+		t.Parallel()
+
+		result1 := internal.HashBytes([]byte("foo"))
+		result2 := internal.HashBytes([]byte("bar"))
+		assert.NotEqual(t, result1, result2)
+	})
+
+	t.Run("empty input produces valid hash", func(t *testing.T) {
+		t.Parallel()
+
+		result := internal.HashBytes([]byte{})
+		assert.Len(t, result, 32)
+	})
 }

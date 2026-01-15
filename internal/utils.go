@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"strings"
 )
 
 func TrySend[T any](ctx context.Context, msg T, sinkCh chan<- T) error {
@@ -18,15 +17,7 @@ func TrySend[T any](ctx context.Context, msg T, sinkCh chan<- T) error {
 }
 
 func IsCtxCanceledErr(err error) bool {
-	if errors.Is(err, context.Canceled) {
-		return true
-	}
-
-	if strings.HasSuffix(err.Error(), context.Canceled.Error()) {
-		return true
-	}
-
-	return false
+	return errors.Is(err, context.Canceled)
 }
 
 func Hash(input ...string) string {

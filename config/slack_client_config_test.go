@@ -18,7 +18,7 @@ func TestNewDefaultSlackClientConfig(t *testing.T) {
 	assert.False(t, cfg.DebugLogging)
 	assert.False(t, cfg.DryRun)
 	assert.Equal(t, 3, cfg.Concurrency)
-	assert.Equal(t, 10, cfg.MaxAttemtsForRateLimitError)
+	assert.Equal(t, 10, cfg.MaxAttemptsForRateLimitError)
 	assert.Equal(t, 5, cfg.MaxAttemptsForTransientError)
 	assert.Equal(t, 5, cfg.MaxAttemptsForFatalError)
 	assert.Equal(t, 120, cfg.MaxRateLimitErrorWaitTimeSeconds)
@@ -37,7 +37,7 @@ func TestSlackClientConfig_SetDefaults(t *testing.T) {
 		cfg.SetDefaults()
 
 		assert.Equal(t, 3, cfg.Concurrency)
-		assert.Equal(t, 10, cfg.MaxAttemtsForRateLimitError)
+		assert.Equal(t, 10, cfg.MaxAttemptsForRateLimitError)
 		assert.Equal(t, 5, cfg.MaxAttemptsForTransientError)
 		assert.Equal(t, 5, cfg.MaxAttemptsForFatalError)
 		assert.Equal(t, 120, cfg.MaxRateLimitErrorWaitTimeSeconds)
@@ -51,7 +51,7 @@ func TestSlackClientConfig_SetDefaults(t *testing.T) {
 
 		cfg := &config.SlackClientConfig{
 			Concurrency:                      -1,
-			MaxAttemtsForRateLimitError:      -5,
+			MaxAttemptsForRateLimitError:     -5,
 			MaxAttemptsForTransientError:     -10,
 			MaxAttemptsForFatalError:         -3,
 			MaxRateLimitErrorWaitTimeSeconds: -100,
@@ -62,7 +62,7 @@ func TestSlackClientConfig_SetDefaults(t *testing.T) {
 		cfg.SetDefaults()
 
 		assert.Equal(t, 3, cfg.Concurrency)
-		assert.Equal(t, 10, cfg.MaxAttemtsForRateLimitError)
+		assert.Equal(t, 10, cfg.MaxAttemptsForRateLimitError)
 		assert.Equal(t, 5, cfg.MaxAttemptsForTransientError)
 		assert.Equal(t, 5, cfg.MaxAttemptsForFatalError)
 		assert.Equal(t, 120, cfg.MaxRateLimitErrorWaitTimeSeconds)
@@ -76,7 +76,7 @@ func TestSlackClientConfig_SetDefaults(t *testing.T) {
 
 		cfg := &config.SlackClientConfig{
 			Concurrency:                      5,
-			MaxAttemtsForRateLimitError:      20,
+			MaxAttemptsForRateLimitError:     20,
 			MaxAttemptsForTransientError:     15,
 			MaxAttemptsForFatalError:         10,
 			MaxRateLimitErrorWaitTimeSeconds: 200,
@@ -87,7 +87,7 @@ func TestSlackClientConfig_SetDefaults(t *testing.T) {
 		cfg.SetDefaults()
 
 		assert.Equal(t, 5, cfg.Concurrency)
-		assert.Equal(t, 20, cfg.MaxAttemtsForRateLimitError)
+		assert.Equal(t, 20, cfg.MaxAttemptsForRateLimitError)
 		assert.Equal(t, 15, cfg.MaxAttemptsForTransientError)
 		assert.Equal(t, 10, cfg.MaxAttemptsForFatalError)
 		assert.Equal(t, 200, cfg.MaxRateLimitErrorWaitTimeSeconds)

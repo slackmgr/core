@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 
 	"github.com/eko/gocache/lib/v4/cache"
@@ -17,7 +17,6 @@ type Cache struct {
 	cache        cache.CacheInterface[string]
 	keyPrefix    string
 	logger       common.Logger
-	rng          *rand.Rand
 	panicOnError bool // If true, panics on cache errors instead of logging them
 }
 
@@ -28,7 +27,6 @@ func NewCache(cacheStore store.StoreInterface, keyPrefix string, logger common.L
 		cache:     cache.New[string](cacheStore),
 		keyPrefix: keyPrefix,
 		logger:    logger,
-		rng:       rand.New(rand.NewSource(time.Now().UnixNano())), // #nosec
 	}
 }
 
@@ -92,7 +90,8 @@ func (c *Cache) SetWithRandomExpiration(ctx context.Context, key string, value s
 	expiration := minExpiration
 
 	if variationSeconds > 0 {
-		extra := c.rng.Intn(variationSeconds) // #nosec
+		// #nosec G404 -- weak random is acceptable for cache expiration jitter
+		extra := rand.IntN(variationSeconds)
 		expiration += (time.Duration(extra) * time.Second)
 	}
 

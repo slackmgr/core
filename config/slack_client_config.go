@@ -8,7 +8,7 @@ type SlackClientConfig struct {
 	DebugLogging                     bool   `json:"debugLogging"                     yaml:"debugLogging"`
 	DryRun                           bool   `json:"dryRun"                           yaml:"dryRun"`
 	Concurrency                      int    `json:"concurrency"                      yaml:"concurrency"`
-	MaxAttemtsForRateLimitError      int    `json:"maxAttemtsForRateLimitError"      yaml:"maxAttemtsForRateLimitError"`
+	MaxAttemptsForRateLimitError     int    `json:"maxAttemptsForRateLimitError"      yaml:"maxAttemptsForRateLimitError"`
 	MaxAttemptsForTransientError     int    `json:"maxAttemptsForTransientError"     yaml:"maxAttemptsForTransientError"`
 	MaxAttemptsForFatalError         int    `json:"maxAttemptsForFatalError"         yaml:"maxAttemptsForFatalError"`
 	MaxRateLimitErrorWaitTimeSeconds int    `json:"maxRateLimitErrorWaitTimeSeconds" yaml:"maxRateLimitErrorWaitTimeSeconds"`
@@ -28,8 +28,8 @@ func (c *SlackClientConfig) SetDefaults() {
 		c.Concurrency = 3
 	}
 
-	if c.MaxAttemtsForRateLimitError <= 0 {
-		c.MaxAttemtsForRateLimitError = 10
+	if c.MaxAttemptsForRateLimitError <= 0 {
+		c.MaxAttemptsForRateLimitError = 10
 	}
 
 	if c.MaxAttemptsForTransientError <= 0 {
