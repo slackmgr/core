@@ -392,7 +392,7 @@ func (q *RedisFifoQueue) readOneMessageFromStream(ctx context.Context, streamKey
 		Group:    q.opts.consumerGroup,
 		Consumer: q.consumerName,
 		Streams:  []string{streamKey, ">"},
-		Count:    1, // Only read one message to maintain strict ordering.
+		Count:    1,  // Only read one message to maintain strict ordering.
 		Block:    -1, // Negative value means don't block (Block >= 0 would send BLOCK to Redis)
 	}
 

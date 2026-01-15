@@ -24,6 +24,7 @@ import (
 	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
 	"github.com/peteraglen/slack-manager/internal/slackapi"
+	"github.com/slack-go/slack"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 )
@@ -40,19 +41,26 @@ type FifoQueueProducer interface {
 	Send(ctx context.Context, slackChannelID, dedupID, body string) error
 }
 
+type SlackClient interface {
+	GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error)
+	GetUserIDsInChannel(ctx context.Context, channelID string) (map[string]struct{}, error)
+	BotIsInChannel(ctx context.Context, channelID string) (bool, error)
+	ListBotChannels(ctx context.Context) ([]*internal.ChannelSummary, error)
+}
+
 type Server struct {
-	rawAlertConsumers []FifoQueueConsumer
-	alertQueue        FifoQueueProducer
-	limitersByChannel map[string]*rate.Limiter
-	limitersLock      *sync.Mutex
-	cacheStore        cachestore.StoreInterface
-	slackAPI          *slackapi.Client
-	channelInfoSyncer *channelInfoSyncer
-	logger            common.Logger
-	metrics           common.Metrics
-	apiSettings       *config.APISettings
-	cfg               *config.APIConfig
-	defaultPretty     bool
+	rawAlertConsumers   []FifoQueueConsumer
+	alertQueue          FifoQueueProducer
+	limitersByChannel   map[string]*rate.Limiter
+	limitersLock        *sync.Mutex
+	cacheStore          cachestore.StoreInterface
+	slackClient         SlackClient
+	channelInfoProvider ChannelInfoProvider
+	logger              common.Logger
+	metrics             common.Metrics
+	apiSettings         *config.APISettings
+	cfg                 *config.APIConfig
+	defaultPretty       bool
 }
 
 func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.APIConfig, settings *config.APISettings) *Server {
@@ -79,6 +87,18 @@ func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, log
 		apiSettings:       settings,
 		cfg:               cfg,
 	}
+}
+
+// setChannelInfoProvider allows tests to inject a mock ChannelInfoProvider.
+// This setter is intended for testing only and should not be used in production code.
+func (s *Server) setChannelInfoProvider(provider ChannelInfoProvider) {
+	s.channelInfoProvider = provider
+}
+
+// setSlackClient allows tests to inject a mock SlackAPI.
+// This setter is intended for testing only and should not be used in production code.
+func (s *Server) setSlackClient(client SlackClient) {
+	s.slackClient = client
 }
 
 // WithRawAlertConsumer defines an alternative alert consumer, which reads from a FIFO queue and processes the items similarly to the main rest API.
@@ -118,16 +138,26 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize API settings: %w", err)
 	}
 
-	s.slackAPI = slackapi.New(s.cacheStore, s.cfg.CacheKeyPrefix, s.logger, s.metrics, s.cfg.SlackClient)
+	// Initialize Slack API client if not already set
+	if s.slackClient == nil {
+		slackAPI := slackapi.New(s.cacheStore, s.cfg.CacheKeyPrefix, s.logger, s.metrics, s.cfg.SlackClient)
 
-	if _, err := s.slackAPI.Connect(ctx); err != nil {
-		return fmt.Errorf("failed to connect to Slack API: %w", err)
+		if _, err := slackAPI.Connect(ctx); err != nil {
+			return fmt.Errorf("failed to connect to Slack API: %w", err)
+		}
+
+		s.slackClient = slackAPI
 	}
 
-	s.channelInfoSyncer = newChannelInfoSyncer(s.slackAPI, s.logger)
+	// Initialize channel info provider if not already set
+	if s.channelInfoProvider == nil {
+		channelInfoSyncer := newChannelInfoSyncer(s.slackClient, s.logger)
 
-	if err := s.channelInfoSyncer.Init(ctx); err != nil {
-		return fmt.Errorf("failed to initialize channel info manager: %w", err)
+		if err := channelInfoSyncer.Init(ctx); err != nil {
+			return fmt.Errorf("failed to initialize channel info manager: %w", err)
+		}
+
+		s.channelInfoProvider = channelInfoSyncer
 	}
 
 	// Register prometheus histogram metric for HTTP request durations
@@ -238,9 +268,12 @@ func (s *Server) Run(ctx context.Context) error {
 		})
 	}
 
-	errg.Go(func() error {
-		return s.channelInfoSyncer.Run(ctx)
-	})
+	// Start the channel info syncer, if applicable.
+	if syncer, err := s.channelInfoProvider.(*channelInfoSyncer); err {
+		errg.Go(func() error {
+			return syncer.Run(ctx)
+		})
+	}
 
 	errg.Go(func() error {
 		return srv.ListenAndServe()

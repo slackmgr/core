@@ -14,35 +14,44 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
+// ChannelInfoProvider defines the interface for channel information operations.
+type ChannelInfoProvider interface {
+	GetChannelInfo(ctx context.Context, channel string) (*ChannelInfo, error)
+	MapChannelNameToIDIfNeeded(channelName string) string
+	ManagedChannels() []*internal.ChannelSummary
+}
+
+// channelInfoSyncer periodically syncs Slack channel information and caches it.
+type channelInfoSyncer struct {
+	slackClient      SlackClient
+	channelsLastSeen map[string]time.Time
+	detectedChannels chan string
+	channelInfoCache map[string]*ChannelInfo
+	managedChannels  atomic.Pointer[managedChannelsData]
+	cacheLock        *sync.RWMutex
+	logger           common.Logger
+}
+
 // managedChannelsData holds the managed channels data for atomic swapping.
 type managedChannelsData struct {
 	list   []*internal.ChannelSummary
 	byName map[string]*internal.ChannelSummary
 }
 
-type channelInfoSyncer struct {
-	slackClient      *slackapi.Client
-	channelsLastSeen map[string]time.Time
-	detectedChannels chan string
-	channelInfoCache map[string]*channelInfo
-	managedChannels  atomic.Pointer[managedChannelsData]
-	cacheLock        *sync.RWMutex
-	logger           common.Logger
-}
-
-type channelInfo struct {
+// ChannelInfo contains information about a Slack channel.
+type ChannelInfo struct {
 	ChannelExists      bool
 	ChannelIsArchived  bool
 	ManagerIsInChannel bool
 	UserCount          int
 }
 
-func newChannelInfoSyncer(slackClient *slackapi.Client, logger common.Logger) *channelInfoSyncer {
+func newChannelInfoSyncer(slackClient SlackClient, logger common.Logger) *channelInfoSyncer {
 	return &channelInfoSyncer{
 		slackClient:      slackClient,
 		channelsLastSeen: make(map[string]time.Time),
 		detectedChannels: make(chan string, 10000),
-		channelInfoCache: make(map[string]*channelInfo),
+		channelInfoCache: make(map[string]*ChannelInfo),
 		cacheLock:        &sync.RWMutex{},
 		logger:           logger,
 	}
@@ -118,7 +127,7 @@ func (c *channelInfoSyncer) MapChannelNameToIDIfNeeded(channelName string) strin
 	return channelName
 }
 
-func (c *channelInfoSyncer) GetChannelInfo(ctx context.Context, channel string) (*channelInfo, error) {
+func (c *channelInfoSyncer) GetChannelInfo(ctx context.Context, channel string) (*ChannelInfo, error) {
 	// Refresh the last seen timestamp for the channel, to ensure continued caching
 	if err := internal.TrySend(ctx, channel, c.detectedChannels); err != nil {
 		return nil, err
@@ -141,7 +150,7 @@ func (c *channelInfoSyncer) ManagedChannels() []*internal.ChannelSummary {
 	return data.list
 }
 
-func (c *channelInfoSyncer) getCachedInfo(channel string) (*channelInfo, bool) {
+func (c *channelInfoSyncer) getCachedInfo(channel string) (*ChannelInfo, bool) {
 	c.cacheLock.RLock()
 	defer c.cacheLock.RUnlock()
 
@@ -174,7 +183,7 @@ func (c *channelInfoSyncer) refreshData(ctx context.Context) error {
 	return errg.Wait()
 }
 
-func (c *channelInfoSyncer) refreshChannelInfo(ctx context.Context, channel string) (*channelInfo, error) {
+func (c *channelInfoSyncer) refreshChannelInfo(ctx context.Context, channel string) (*ChannelInfo, error) {
 	channelFound := true
 
 	slackChannel, err := c.slackClient.GetChannelInfo(ctx, channel)
@@ -186,7 +195,7 @@ func (c *channelInfoSyncer) refreshChannelInfo(ctx context.Context, channel stri
 		}
 	}
 
-	var info *channelInfo
+	var info *ChannelInfo
 
 	if channelFound {
 		users, err := c.slackClient.GetUserIDsInChannel(ctx, channel)
@@ -199,14 +208,14 @@ func (c *channelInfoSyncer) refreshChannelInfo(ctx context.Context, channel stri
 			return nil, err
 		}
 
-		info = &channelInfo{
+		info = &ChannelInfo{
 			ChannelExists:      true,
 			ChannelIsArchived:  slackChannel.IsArchived,
 			ManagerIsInChannel: managerIsInChannel,
 			UserCount:          len(users),
 		}
 	} else {
-		info = &channelInfo{ChannelExists: false}
+		info = &ChannelInfo{ChannelExists: false}
 	}
 
 	c.cacheLock.Lock()

@@ -1,0 +1,1567 @@
+package restapi
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	common "github.com/peteraglen/slack-manager-common"
+	"github.com/peteraglen/slack-manager/config"
+	"github.com/peteraglen/slack-manager/internal"
+	"github.com/peteraglen/slack-manager/internal/slackapi"
+	"github.com/slack-go/slack"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+)
+
+func init() {
+	gin.SetMode(gin.TestMode)
+}
+
+// --- Mocks ---
+
+type mockLogger struct {
+	mock.Mock
+}
+
+func (m *mockLogger) Debug(msg string)                               {}
+func (m *mockLogger) Debugf(format string, args ...any)              {}
+func (m *mockLogger) Info(msg string)                                {}
+func (m *mockLogger) Infof(format string, args ...any)               {}
+func (m *mockLogger) Error(msg string)                               {}
+func (m *mockLogger) Errorf(format string, args ...any)              {}
+func (m *mockLogger) WithField(key string, value any) common.Logger  { return m }
+func (m *mockLogger) WithFields(fields map[string]any) common.Logger { return m }
+func (m *mockLogger) HttpLoggingHandler() io.Writer                  { return io.Discard }
+
+type mockFifoQueueProducer struct {
+	mock.Mock
+}
+
+func (m *mockFifoQueueProducer) Send(ctx context.Context, slackChannelID, dedupID, body string) error {
+	args := m.Called(ctx, slackChannelID, dedupID, body)
+	return args.Error(0)
+}
+
+type mockChannelInfoProvider struct {
+	mock.Mock
+}
+
+type mockSlackClient struct {
+	mock.Mock
+}
+
+func (m *mockSlackClient) GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error) {
+	args := m.Called(ctx, channelID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*slack.Channel), args.Error(1)
+}
+
+func (m *mockSlackClient) GetUserIDsInChannel(ctx context.Context, channelID string) (map[string]struct{}, error) {
+	args := m.Called(ctx, channelID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]struct{}), args.Error(1)
+}
+
+func (m *mockSlackClient) BotIsInChannel(ctx context.Context, channelID string) (bool, error) {
+	args := m.Called(ctx, channelID)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *mockSlackClient) ListBotChannels(ctx context.Context) ([]*internal.ChannelSummary, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*internal.ChannelSummary), args.Error(1)
+}
+
+func (m *mockChannelInfoProvider) GetChannelInfo(ctx context.Context, channel string) (*ChannelInfo, error) {
+	args := m.Called(ctx, channel)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*ChannelInfo), args.Error(1)
+}
+
+func (m *mockChannelInfoProvider) MapChannelNameToIDIfNeeded(channelName string) string {
+	args := m.Called(channelName)
+	return args.String(0)
+}
+
+func (m *mockChannelInfoProvider) ManagedChannels() []*internal.ChannelSummary {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).([]*internal.ChannelSummary)
+}
+
+// --- Test Helpers ---
+
+func newTestServer(t *testing.T) (*Server, *mockFifoQueueProducer, *mockChannelInfoProvider) {
+	t.Helper()
+
+	logger := &mockLogger{}
+	queue := &mockFifoQueueProducer{}
+	channelInfo := &mockChannelInfoProvider{}
+
+	cfg := &config.APIConfig{
+		RestPort:               "8080",
+		MaxUsersInAlertChannel: 1000,
+		RateLimit: &config.RateLimitConfig{
+			AlertsPerSecond:          10,
+			AllowedBurst:             100,
+			MaxAttempts:              3,
+			MaxWaitPerAttemptSeconds: 5,
+		},
+	}
+
+	server := New(queue, nil, logger, nil, cfg, nil)
+	server.setChannelInfoProvider(channelInfo)
+	server.apiSettings = &config.APISettings{}
+
+	return server, queue, channelInfo
+}
+
+// --- Tests ---
+
+func TestServer_HandlePing(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns 200 OK", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		router := gin.New()
+		router.GET("/ping", server.ping)
+
+		req := httptest.NewRequest("GET", "/ping", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("returns custom status code", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		router := gin.New()
+		router.GET("/ping", server.ping)
+
+		req := httptest.NewRequest("GET", "/ping?status=503", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	})
+
+	t.Run("ignores invalid status code", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		router := gin.New()
+		router.GET("/ping", server.ping)
+
+		req := httptest.NewRequest("GET", "/ping?status=9999", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestServer_HandleChannels(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns channel list", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, channelInfo := newTestServer(t)
+
+		channels := []*internal.ChannelSummary{
+			{ID: "C123", Name: "general"},
+			{ID: "C456", Name: "random"},
+		}
+		channelInfo.On("ManagedChannels").Return(channels)
+
+		router := gin.New()
+		router.GET("/channels", server.handleChannels)
+
+		req := httptest.NewRequest("GET", "/channels", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Header().Get("Content-Type"), "application/json")
+
+		var result []*internal.ChannelSummary
+		err := json.Unmarshal(w.Body.Bytes(), &result)
+		require.NoError(t, err)
+		assert.Len(t, result, 2)
+		assert.Equal(t, "C123", result[0].ID)
+	})
+
+	t.Run("returns empty array when no channels", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, channelInfo := newTestServer(t)
+		channelInfo.On("ManagedChannels").Return([]*internal.ChannelSummary{})
+
+		router := gin.New()
+		router.GET("/channels", server.handleChannels)
+
+		req := httptest.NewRequest("GET", "/channels", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "[]", w.Body.String())
+	})
+}
+
+func TestServer_HandleMappings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns routing rules", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.apiSettings = &config.APISettings{
+			RoutingRules: []*config.RoutingRule{
+				{Name: "test-rule", Equals: []string{"test"}, Channel: "C123"},
+			},
+		}
+
+		router := gin.New()
+		router.GET("/mappings", server.handleMappings)
+
+		req := httptest.NewRequest("GET", "/mappings", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "test")
+		assert.Contains(t, w.Body.String(), "C123")
+	})
+}
+
+func TestServer_HandleAlerts_Validation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns 400 for empty body", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		req := httptest.NewRequest("POST", "/alert", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.ContentLength = 0
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		req := httptest.NewRequest("POST", "/alert", bytes.NewReader([]byte("invalid json")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 204 for empty alerts array", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		body := `[]`
+		req := httptest.NewRequest("POST", "/alert", bytes.NewReader([]byte(body)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNoContent, w.Code)
+	})
+}
+
+func TestServer_HandleAlerts_Success(t *testing.T) {
+	t.Parallel()
+
+	t.Run("accepts valid alert and queues it", func(t *testing.T) {
+		t.Parallel()
+
+		server, queue, channelInfo := newTestServer(t)
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: true,
+			UserCount:          10,
+		}, nil)
+		queue.On("Send", mock.Anything, "C123", mock.Anything, mock.Anything).Return(nil)
+
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		alert := common.Alert{
+			SlackChannelID: "C123",
+			Header:         "Test Alert",
+		}
+		body, _ := json.Marshal(alert)
+		req := httptest.NewRequest("POST", "/alert", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusAccepted, w.Code)
+		queue.AssertCalled(t, "Send", mock.Anything, "C123", mock.Anything, mock.Anything)
+	})
+
+	t.Run("uses channel ID from URL parameter", func(t *testing.T) {
+		t.Parallel()
+
+		server, queue, channelInfo := newTestServer(t)
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C456").Return("C456")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C456").Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: true,
+			UserCount:          10,
+		}, nil)
+		queue.On("Send", mock.Anything, "C456", mock.Anything, mock.Anything).Return(nil)
+
+		router := gin.New()
+		router.POST("/alert/:slackChannelId", server.handleAlerts)
+
+		alert := common.Alert{Header: "Test Alert"}
+		body, _ := json.Marshal(alert)
+		req := httptest.NewRequest("POST", "/alert/C456", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusAccepted, w.Code)
+		queue.AssertCalled(t, "Send", mock.Anything, "C456", mock.Anything, mock.Anything)
+	})
+}
+
+func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns 400 for non-existent channel", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, channelInfo := newTestServer(t)
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists: false,
+		}, nil)
+
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		alert := common.Alert{SlackChannelID: "C123", Header: "Test"}
+		body, _ := json.Marshal(alert)
+		req := httptest.NewRequest("POST", "/alert", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "Unable to find channel")
+	})
+
+	t.Run("returns 400 for archived channel", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, channelInfo := newTestServer(t)
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists:     true,
+			ChannelIsArchived: true,
+		}, nil)
+
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		alert := common.Alert{SlackChannelID: "C123", Header: "Test"}
+		body, _ := json.Marshal(alert)
+		req := httptest.NewRequest("POST", "/alert", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "archived")
+	})
+
+	t.Run("returns 400 when bot not in channel", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, channelInfo := newTestServer(t)
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: false,
+		}, nil)
+
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		alert := common.Alert{SlackChannelID: "C123", Header: "Test"}
+		body, _ := json.Marshal(alert)
+		req := httptest.NewRequest("POST", "/alert", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "not in channel")
+	})
+
+	t.Run("returns 400 when channel has too many users", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, channelInfo := newTestServer(t)
+		server.cfg.MaxUsersInAlertChannel = 100
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: true,
+			UserCount:          500,
+		}, nil)
+
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		alert := common.Alert{SlackChannelID: "C123", Header: "Test"}
+		body, _ := json.Marshal(alert)
+		req := httptest.NewRequest("POST", "/alert", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "exceeds the limit")
+	})
+}
+
+func TestServer_ValidateChannelInfo(t *testing.T) {
+	t.Parallel()
+
+	server, _, _ := newTestServer(t)
+	server.cfg.MaxUsersInAlertChannel = 100
+
+	tests := []struct {
+		name        string
+		channelInfo *ChannelInfo
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "valid channel",
+			channelInfo: &ChannelInfo{
+				ChannelExists:      true,
+				ManagerIsInChannel: true,
+				UserCount:          50,
+			},
+			expectError: false,
+		},
+		{
+			name: "channel does not exist",
+			channelInfo: &ChannelInfo{
+				ChannelExists: false,
+			},
+			expectError: true,
+			errorMsg:    "unable to find channel",
+		},
+		{
+			name: "channel is archived",
+			channelInfo: &ChannelInfo{
+				ChannelExists:     true,
+				ChannelIsArchived: true,
+			},
+			expectError: true,
+			errorMsg:    "archived",
+		},
+		{
+			name: "bot not in channel",
+			channelInfo: &ChannelInfo{
+				ChannelExists:      true,
+				ManagerIsInChannel: false,
+			},
+			expectError: true,
+			errorMsg:    "not in channel",
+		},
+		{
+			name: "too many users",
+			channelInfo: &ChannelInfo{
+				ChannelExists:      true,
+				ManagerIsInChannel: true,
+				UserCount:          500,
+			},
+			expectError: true,
+			errorMsg:    "exceeds the limit",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := server.validateChannelInfo("C123", tt.channelInfo)
+
+			if tt.expectError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorMsg)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestServer_GetRateLimiter(t *testing.T) {
+	t.Parallel()
+
+	server, _, _ := newTestServer(t)
+
+	t.Run("creates new limiter for channel", func(t *testing.T) {
+		limiter1 := server.getRateLimiter("C123")
+		require.NotNil(t, limiter1)
+	})
+
+	t.Run("returns same limiter for same channel", func(t *testing.T) {
+		limiter1 := server.getRateLimiter("C456")
+		limiter2 := server.getRateLimiter("C456")
+		assert.Same(t, limiter1, limiter2)
+	})
+
+	t.Run("returns different limiters for different channels", func(t *testing.T) {
+		limiter1 := server.getRateLimiter("C789")
+		limiter2 := server.getRateLimiter("C012")
+		assert.NotSame(t, limiter1, limiter2)
+	})
+}
+
+func TestServer_WaitForRateLimit(t *testing.T) {
+	t.Parallel()
+
+	t.Run("succeeds when rate limit allows", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.cfg.RateLimit.AlertsPerSecond = 100
+		server.cfg.RateLimit.AllowedBurst = 100
+
+		ctx := context.Background()
+		count, err := server.waitForRateLimit(ctx, "C123", 5, false)
+
+		require.NoError(t, err)
+		assert.Equal(t, 5, count)
+	})
+
+	t.Run("respects context cancellation", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.cfg.RateLimit.AlertsPerSecond = 0.001 // Very slow
+		server.cfg.RateLimit.AllowedBurst = 1
+		server.cfg.RateLimit.MaxWaitPerAttemptSeconds = 1
+
+		// Exhaust the burst
+		_ = server.getRateLimiter("C999")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		_, err := server.waitForRateLimit(ctx, "C999", 100, false)
+		require.Error(t, err)
+	})
+}
+
+// --- Processing Error Tests ---
+
+func TestProcessingError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("retryable error", func(t *testing.T) {
+		t.Parallel()
+
+		err := newRetryableProcessingError("test error: %s", "details")
+		assert.True(t, err.IsRetryable())
+		assert.Equal(t, "test error: details", err.Error())
+		assert.NotNil(t, err.Unwrap())
+	})
+
+	t.Run("non-retryable error", func(t *testing.T) {
+		t.Parallel()
+
+		err := newNonRetryableProcessingError("test error: %d", 42)
+		assert.False(t, err.IsRetryable())
+		assert.Equal(t, "test error: 42", err.Error())
+		assert.NotNil(t, err.Unwrap())
+	})
+}
+
+// --- Prometheus Webhook Tests ---
+
+func TestServer_HandlePrometheusWebhook_Validation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns 400 for empty body", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		router := gin.New()
+		router.POST("/prometheus-alert", server.handlePrometheusWebhook)
+
+		req := httptest.NewRequest("POST", "/prometheus-alert", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.ContentLength = 0
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		router := gin.New()
+		router.POST("/prometheus-alert", server.handlePrometheusWebhook)
+
+		req := httptest.NewRequest("POST", "/prometheus-alert", bytes.NewReader([]byte("invalid json")))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("returns 400 for empty alerts array", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		router := gin.New()
+		router.POST("/prometheus-alert", server.handlePrometheusWebhook)
+
+		body := `{"alerts": []}`
+		req := httptest.NewRequest("POST", "/prometheus-alert", bytes.NewReader([]byte(body)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "empty")
+	})
+}
+
+func TestServer_HandlePrometheusWebhook_Success(t *testing.T) {
+	t.Parallel()
+
+	t.Run("accepts valid prometheus webhook and queues alerts", func(t *testing.T) {
+		t.Parallel()
+
+		server, queue, channelInfo := newTestServer(t)
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: true,
+			UserCount:          10,
+		}, nil)
+		queue.On("Send", mock.Anything, "C123", mock.Anything, mock.Anything).Return(nil)
+
+		router := gin.New()
+		router.POST("/prometheus-alert", server.handlePrometheusWebhook)
+
+		webhook := PrometheusWebhook{
+			GroupKey: "test-group",
+			Alerts: []*PrometheusAlert{
+				{
+					Status: "firing",
+					Labels: map[string]string{
+						"alertname": "TestAlert",
+						"channel":   "C123",
+					},
+					Annotations: map[string]string{
+						"summary": "Test alert summary",
+					},
+					StartsAt: time.Now(),
+				},
+			},
+		}
+		body, _ := json.Marshal(webhook)
+		req := httptest.NewRequest("POST", "/prometheus-alert", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusAccepted, w.Code)
+		queue.AssertCalled(t, "Send", mock.Anything, "C123", mock.Anything, mock.Anything)
+	})
+
+	t.Run("maps resolved status to resolved severity", func(t *testing.T) {
+		t.Parallel()
+
+		server, queue, channelInfo := newTestServer(t)
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: true,
+			UserCount:          10,
+		}, nil)
+		queue.On("Send", mock.Anything, "C123", mock.Anything, mock.MatchedBy(func(body string) bool {
+			return bytes.Contains([]byte(body), []byte(`"severity":"resolved"`))
+		})).Return(nil)
+
+		router := gin.New()
+		router.POST("/prometheus-alert", server.handlePrometheusWebhook)
+
+		webhook := PrometheusWebhook{
+			Alerts: []*PrometheusAlert{
+				{
+					Status: "resolved",
+					Labels: map[string]string{"channel": "C123"},
+				},
+			},
+		}
+		body, _ := json.Marshal(webhook)
+		req := httptest.NewRequest("POST", "/prometheus-alert", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusAccepted, w.Code)
+	})
+}
+
+func TestMapPrometheusAlert(t *testing.T) {
+	t.Parallel()
+
+	server, _, _ := newTestServer(t)
+
+	t.Run("maps basic alert fields", func(t *testing.T) {
+		t.Parallel()
+
+		webhook := &PrometheusWebhook{
+			GroupKey: "test-group",
+			Alerts: []*PrometheusAlert{
+				{
+					Status: "firing",
+					Labels: map[string]string{
+						"alertname": "TestAlert",
+					},
+					Annotations: map[string]string{
+						"summary":     "Test summary",
+						"description": "Test description",
+					},
+					StartsAt: time.Now(),
+				},
+			},
+		}
+
+		alerts := server.mapPrometheusAlert(webhook)
+
+		require.Len(t, alerts, 1)
+		assert.Equal(t, ":status: Test summary", alerts[0].Header)
+		assert.Equal(t, "Test description", alerts[0].Text)
+	})
+
+	t.Run("uses channel from labels", func(t *testing.T) {
+		t.Parallel()
+
+		webhook := &PrometheusWebhook{
+			Alerts: []*PrometheusAlert{
+				{
+					Labels: map[string]string{
+						"slack_channel_id": "C999",
+					},
+				},
+			},
+		}
+
+		alerts := server.mapPrometheusAlert(webhook)
+
+		require.Len(t, alerts, 1)
+		assert.Equal(t, "C999", alerts[0].SlackChannelID)
+	})
+
+	t.Run("maps severity correctly", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			severity string
+			expected common.AlertSeverity
+		}{
+			{"critical", common.AlertError},
+			{"error", common.AlertError},
+			{"warning", common.AlertWarning},
+			{"info", common.AlertInfo},
+			{"", common.AlertError}, // default
+		}
+
+		for _, tt := range tests {
+			webhook := &PrometheusWebhook{
+				Alerts: []*PrometheusAlert{
+					{
+						Labels: map[string]string{"severity": tt.severity},
+					},
+				},
+			}
+
+			alerts := server.mapPrometheusAlert(webhook)
+			assert.Equal(t, tt.expected, alerts[0].Severity, "severity: %s", tt.severity)
+		}
+	})
+
+	t.Run("generates correlation ID from labels", func(t *testing.T) {
+		t.Parallel()
+
+		webhook := &PrometheusWebhook{
+			Alerts: []*PrometheusAlert{
+				{
+					Labels: map[string]string{
+						"namespace": "prod",
+						"alertname": "HighCPU",
+						"job":       "api-server",
+					},
+				},
+			},
+		}
+
+		alerts := server.mapPrometheusAlert(webhook)
+
+		require.Len(t, alerts, 1)
+		assert.NotEmpty(t, alerts[0].CorrelationID)
+	})
+
+	t.Run("sets ignore if text contains", func(t *testing.T) {
+		t.Parallel()
+
+		webhook := &PrometheusWebhook{
+			Alerts: []*PrometheusAlert{
+				{
+					Annotations: map[string]string{
+						"ignoreIfTextContains": "test-ignore",
+					},
+				},
+			},
+		}
+
+		alerts := server.mapPrometheusAlert(webhook)
+
+		require.Len(t, alerts, 1)
+		assert.Contains(t, alerts[0].IgnoreIfTextContains, "test-ignore")
+	})
+}
+
+func TestCorrelationIDFromLabels(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns empty for nil labels", func(t *testing.T) {
+		result := correlationIDFromLabels(nil)
+		assert.Empty(t, result)
+	})
+
+	t.Run("returns empty for empty labels", func(t *testing.T) {
+		result := correlationIDFromLabels(map[string]string{})
+		assert.Empty(t, result)
+	})
+
+	t.Run("returns empty for labels without known keys", func(t *testing.T) {
+		result := correlationIDFromLabels(map[string]string{"unknown": "value"})
+		assert.Empty(t, result)
+	})
+
+	t.Run("uses namespace and alertname", func(t *testing.T) {
+		labels := map[string]string{
+			"namespace": "prod",
+			"alertname": "HighCPU",
+		}
+		result := correlationIDFromLabels(labels)
+		assert.NotEmpty(t, result)
+	})
+
+	t.Run("includes instance for monitoring namespace", func(t *testing.T) {
+		labels := map[string]string{
+			"namespace": "monitoring",
+			"alertname": "HighCPU",
+			"instance":  "server-1",
+		}
+		result := correlationIDFromLabels(labels)
+		assert.NotEmpty(t, result)
+	})
+
+	t.Run("same labels produce same correlation ID", func(t *testing.T) {
+		labels := map[string]string{
+			"namespace": "prod",
+			"alertname": "HighCPU",
+			"job":       "api",
+		}
+		result1 := correlationIDFromLabels(labels)
+		result2 := correlationIDFromLabels(labels)
+		assert.Equal(t, result1, result2)
+	})
+}
+
+func TestHelperFunctions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("find returns first match from map1", func(t *testing.T) {
+		map1 := map[string]string{"key1": "value1"}
+		map2 := map[string]string{"key2": "value2"}
+
+		result := find(map1, map2, "key1", "key2")
+		assert.Equal(t, "value1", result)
+	})
+
+	t.Run("find falls back to map2", func(t *testing.T) {
+		map1 := map[string]string{"other": "value1"}
+		map2 := map[string]string{"key2": "value2"}
+
+		result := find(map1, map2, "key2")
+		assert.Equal(t, "value2", result)
+	})
+
+	t.Run("find returns empty for no match", func(t *testing.T) {
+		result := find(nil, nil, "missing")
+		assert.Empty(t, result)
+	})
+
+	t.Run("find trims whitespace", func(t *testing.T) {
+		map1 := map[string]string{"key": "  value  "}
+
+		result := find(map1, nil, "key")
+		assert.Equal(t, "value", result)
+	})
+
+	t.Run("valueOrDefault returns value if not empty", func(t *testing.T) {
+		result := valueOrDefault("value", "default")
+		assert.Equal(t, "value", result)
+	})
+
+	t.Run("valueOrDefault returns default if empty", func(t *testing.T) {
+		result := valueOrDefault("", "default")
+		assert.Equal(t, "default", result)
+	})
+
+	t.Run("createLowerCaseKeys handles nil map", func(t *testing.T) {
+		// Should not panic
+		createLowerCaseKeys(nil)
+	})
+
+	t.Run("createLowerCaseKeys adds lowercase keys", func(t *testing.T) {
+		m := map[string]string{"Key": "value", "UPPER": "data"}
+		createLowerCaseKeys(m)
+
+		assert.Equal(t, "value", m["key"])
+		assert.Equal(t, "data", m["upper"])
+		// Original keys should still exist
+		assert.Equal(t, "value", m["Key"])
+	})
+}
+
+func TestDebugGetAlertFields(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns nil for nil alert", func(t *testing.T) {
+		result := debugGetAlertFields(nil)
+		assert.Nil(t, result)
+	})
+
+	t.Run("returns fields from alert", func(t *testing.T) {
+		alert := &common.Alert{
+			CorrelationID: "corr-123",
+			Header:        "Test Header",
+			Text:          "Test Body",
+		}
+
+		result := debugGetAlertFields(alert)
+
+		assert.Equal(t, "corr-123", result["CorrelationId"])
+		assert.Equal(t, "Test Header", result["Header"])
+		assert.Equal(t, "Test Body", result["Body"])
+	})
+
+	t.Run("truncates long header", func(t *testing.T) {
+		longHeader := make([]byte, 300)
+		for i := range longHeader {
+			longHeader[i] = 'a'
+		}
+
+		alert := &common.Alert{Header: string(longHeader)}
+		result := debugGetAlertFields(alert)
+
+		assert.Len(t, result["Header"], 203) // 200 + "..."
+		assert.True(t, len(result["Header"]) <= 203)
+	})
+
+	t.Run("truncates long body", func(t *testing.T) {
+		longBody := make([]byte, 1500)
+		for i := range longBody {
+			longBody[i] = 'b'
+		}
+
+		alert := &common.Alert{Text: string(longBody)}
+		result := debugGetAlertFields(alert)
+
+		assert.Len(t, result["Body"], 1003) // 1000 + "..."
+	})
+}
+
+// --- Channel Info Syncer Tests ---
+
+func newTestChannelInfoSyncer(slackClient SlackClient) *channelInfoSyncer {
+	return newChannelInfoSyncer(slackClient, &mockLogger{})
+}
+
+func TestChannelInfoSyncer_Init(t *testing.T) {
+	t.Parallel()
+
+	t.Run("initializes with channel list", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{
+			{ID: "C123", Name: "general"},
+			{ID: "C456", Name: "random"},
+		}, nil)
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		err := syncer.Init(context.Background())
+
+		require.NoError(t, err)
+		channels := syncer.ManagedChannels()
+		assert.Len(t, channels, 2)
+	})
+
+	t.Run("returns error on slack API failure", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("ListBotChannels", mock.Anything).Return(nil, errors.New("slack API error"))
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		err := syncer.Init(context.Background())
+
+		require.Error(t, err)
+	})
+}
+
+func TestChannelInfoSyncer_MapChannelNameToIDIfNeeded(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns empty for empty input", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{}, nil)
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		_ = syncer.Init(context.Background())
+
+		result := syncer.MapChannelNameToIDIfNeeded("")
+		assert.Empty(t, result)
+	})
+
+	t.Run("maps channel name to ID", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{
+			{ID: "C123", Name: "general"},
+		}, nil)
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		_ = syncer.Init(context.Background())
+
+		result := syncer.MapChannelNameToIDIfNeeded("general")
+		assert.Equal(t, "C123", result)
+	})
+
+	t.Run("maps channel name case-insensitively", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{
+			{ID: "C123", Name: "General"},
+		}, nil)
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		_ = syncer.Init(context.Background())
+
+		result := syncer.MapChannelNameToIDIfNeeded("GENERAL")
+		assert.Equal(t, "C123", result)
+	})
+
+	t.Run("returns original value if not found", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{}, nil)
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		_ = syncer.Init(context.Background())
+
+		result := syncer.MapChannelNameToIDIfNeeded("C999")
+		assert.Equal(t, "C999", result)
+	})
+}
+
+func TestChannelInfoSyncer_GetChannelInfo(t *testing.T) {
+	t.Parallel()
+
+	t.Run("fetches channel info from Slack", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{}, nil)
+		slackClient.On("GetChannelInfo", mock.Anything, "C123").Return(&slack.Channel{
+			GroupConversation: slack.GroupConversation{
+				Conversation: slack.Conversation{
+					ID: "C123",
+				},
+			},
+		}, nil)
+		slackClient.On("GetUserIDsInChannel", mock.Anything, "C123").Return(map[string]struct{}{
+			"U001": {},
+			"U002": {},
+		}, nil)
+		slackClient.On("BotIsInChannel", mock.Anything, "C123").Return(true, nil)
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		_ = syncer.Init(context.Background())
+
+		info, err := syncer.GetChannelInfo(context.Background(), "C123")
+
+		require.NoError(t, err)
+		assert.True(t, info.ChannelExists)
+		assert.True(t, info.ManagerIsInChannel)
+		assert.Equal(t, 2, info.UserCount)
+	})
+
+	t.Run("returns not found for non-existent channel", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{}, nil)
+		slackClient.On("GetChannelInfo", mock.Anything, "C999").Return(nil, errors.New(slackapi.ChannelNotFoundError))
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		_ = syncer.Init(context.Background())
+
+		info, err := syncer.GetChannelInfo(context.Background(), "C999")
+
+		require.NoError(t, err)
+		assert.False(t, info.ChannelExists)
+	})
+
+	t.Run("returns error on Slack API failure", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{}, nil)
+		slackClient.On("GetChannelInfo", mock.Anything, "C123").Return(nil, errors.New("network error"))
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		_ = syncer.Init(context.Background())
+
+		_, err := syncer.GetChannelInfo(context.Background(), "C123")
+
+		require.Error(t, err)
+	})
+
+	t.Run("caches channel info", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{}, nil)
+		slackClient.On("GetChannelInfo", mock.Anything, "C123").Return(&slack.Channel{}, nil).Once()
+		slackClient.On("GetUserIDsInChannel", mock.Anything, "C123").Return(map[string]struct{}{}, nil).Once()
+		slackClient.On("BotIsInChannel", mock.Anything, "C123").Return(true, nil).Once()
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		_ = syncer.Init(context.Background())
+
+		// First call - fetches from Slack
+		info1, err := syncer.GetChannelInfo(context.Background(), "C123")
+		require.NoError(t, err)
+
+		// Second call - should use cache
+		info2, err := syncer.GetChannelInfo(context.Background(), "C123")
+		require.NoError(t, err)
+
+		assert.Equal(t, info1, info2)
+		// Verify Slack API was only called once
+		slackClient.AssertNumberOfCalls(t, "GetChannelInfo", 1)
+	})
+
+	t.Run("detects archived channel", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{}, nil)
+		slackClient.On("GetChannelInfo", mock.Anything, "C123").Return(&slack.Channel{
+			GroupConversation: slack.GroupConversation{
+				IsArchived: true,
+			},
+		}, nil)
+		slackClient.On("GetUserIDsInChannel", mock.Anything, "C123").Return(map[string]struct{}{}, nil)
+		slackClient.On("BotIsInChannel", mock.Anything, "C123").Return(true, nil)
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		_ = syncer.Init(context.Background())
+
+		info, err := syncer.GetChannelInfo(context.Background(), "C123")
+
+		require.NoError(t, err)
+		assert.True(t, info.ChannelIsArchived)
+	})
+}
+
+func TestChannelInfoSyncer_ManagedChannels(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns nil before init", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		syncer := newTestChannelInfoSyncer(slackClient)
+
+		channels := syncer.ManagedChannels()
+		assert.Nil(t, channels)
+	})
+
+	t.Run("returns channels after init", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{
+			{ID: "C123", Name: "general"},
+			{ID: "C456", Name: "random"},
+		}, nil)
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		_ = syncer.Init(context.Background())
+
+		channels := syncer.ManagedChannels()
+		assert.Len(t, channels, 2)
+	})
+}
+
+// --- Additional Server Tests ---
+
+func TestServer_GetHandlerTimeout(t *testing.T) {
+	t.Parallel()
+
+	t.Run("calculates timeout from rate limit config", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.cfg.RateLimit.MaxWaitPerAttemptSeconds = 10
+		server.cfg.RateLimit.MaxAttempts = 3
+
+		timeout := server.getHandlerTimeout()
+
+		// (10 * 3) + 3 = 33 seconds
+		assert.Equal(t, 33*time.Second, timeout)
+	})
+
+	t.Run("uses minimum of 30 seconds", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.cfg.RateLimit.MaxWaitPerAttemptSeconds = 1
+		server.cfg.RateLimit.MaxAttempts = 1
+
+		timeout := server.getHandlerTimeout()
+
+		// (1 * 1) + 3 = 4, but minimum is 30
+		assert.Equal(t, 30*time.Second, timeout)
+	})
+}
+
+func TestServer_CreateClientErrorAlert(t *testing.T) {
+	t.Parallel()
+
+	t.Run("creates warning alert for 4xx errors", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.cfg.ErrorReportChannelID = "C-errors"
+
+		alert := server.createClientErrorAlert(
+			errors.New("bad request"),
+			400,
+			nil,
+			"C123",
+		)
+
+		assert.Equal(t, common.AlertWarning, alert.Severity)
+		assert.Equal(t, "C-errors", alert.SlackChannelID)
+		assert.Contains(t, alert.Header, "400")
+	})
+
+	t.Run("creates error alert for 5xx errors", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.cfg.ErrorReportChannelID = "C-errors"
+
+		alert := server.createClientErrorAlert(
+			errors.New("internal error"),
+			500,
+			nil,
+			"",
+		)
+
+		assert.Equal(t, common.AlertError, alert.Severity)
+		assert.Contains(t, alert.Text, "N/A") // empty target channel
+	})
+
+	t.Run("includes debug fields", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.cfg.ErrorReportChannelID = "C-errors"
+
+		debugFields := map[string]string{
+			"CorrelationId": "corr-123",
+			"Header":        "Test Header",
+		}
+
+		alert := server.createClientErrorAlert(
+			errors.New("error"),
+			400,
+			debugFields,
+			"C123",
+		)
+
+		assert.Contains(t, alert.Text, "corr-123")
+		assert.Contains(t, alert.Text, "Test Header")
+	})
+
+	t.Run("sanitizes debug field values", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.cfg.ErrorReportChannelID = "C-errors"
+
+		debugFields := map[string]string{
+			"Header": ":status: *bold* `code` <link>",
+		}
+
+		alert := server.createClientErrorAlert(
+			errors.New("error"),
+			400,
+			debugFields,
+			"C123",
+		)
+
+		// Markdown chars should be removed
+		assert.NotContains(t, alert.Text, ":status:")
+		assert.NotContains(t, alert.Text, "*bold*")
+		assert.NotContains(t, alert.Text, "`code`")
+	})
+
+	t.Run("truncates long debug field values", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.cfg.ErrorReportChannelID = "C-errors"
+
+		longValue := make([]byte, 200)
+		for i := range longValue {
+			longValue[i] = 'x'
+		}
+
+		debugFields := map[string]string{
+			"LongField": string(longValue),
+		}
+
+		alert := server.createClientErrorAlert(
+			errors.New("error"),
+			400,
+			debugFields,
+			"C123",
+		)
+
+		// Value should be truncated to 100 chars + "..."
+		assert.Contains(t, alert.Text, "...")
+	})
+}
+
+func TestServer_QueueAlert(t *testing.T) {
+	t.Parallel()
+
+	t.Run("queues alert successfully", func(t *testing.T) {
+		t.Parallel()
+
+		server, queue, _ := newTestServer(t)
+		queue.On("Send", mock.Anything, "C123", mock.Anything, mock.Anything).Return(nil)
+
+		alert := &common.Alert{
+			SlackChannelID: "C123",
+			Header:         "Test",
+		}
+
+		err := server.queueAlert(context.Background(), alert)
+
+		require.NoError(t, err)
+		queue.AssertCalled(t, "Send", mock.Anything, "C123", mock.Anything, mock.Anything)
+	})
+
+	t.Run("returns error on queue failure", func(t *testing.T) {
+		t.Parallel()
+
+		server, queue, _ := newTestServer(t)
+		queue.On("Send", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("queue error"))
+
+		alert := &common.Alert{
+			SlackChannelID: "C123",
+			Header:         "Test",
+		}
+
+		err := server.queueAlert(context.Background(), alert)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "queue")
+	})
+}
+
+func TestServer_UpdateSettings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("updates settings successfully", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+
+		newSettings := &config.APISettings{
+			RoutingRules: []*config.RoutingRule{
+				{Name: "new-rule", Equals: []string{"test-key"}, Channel: "C123ABC456"},
+			},
+		}
+
+		err := server.UpdateSettings(newSettings)
+
+		require.NoError(t, err)
+		assert.Equal(t, newSettings, server.apiSettings)
+	})
+
+	t.Run("handles nil settings", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+
+		err := server.UpdateSettings(nil)
+
+		require.NoError(t, err)
+		assert.NotNil(t, server.apiSettings)
+	})
+}
+
+func TestIgnoreAlert(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns false for nil alert", func(t *testing.T) {
+		t.Parallel()
+
+		ignore, _ := ignoreAlert(nil)
+		assert.False(t, ignore)
+	})
+
+	t.Run("returns false when no ignore terms", func(t *testing.T) {
+		t.Parallel()
+
+		alert := &common.Alert{
+			Text: "Some error message",
+		}
+
+		ignore, _ := ignoreAlert(alert)
+		assert.False(t, ignore)
+	})
+
+	t.Run("returns false when text is empty", func(t *testing.T) {
+		t.Parallel()
+
+		alert := &common.Alert{
+			IgnoreIfTextContains: []string{"error"},
+			Text:                 "",
+		}
+
+		ignore, _ := ignoreAlert(alert)
+		assert.False(t, ignore)
+	})
+
+	t.Run("returns true when ignore term found", func(t *testing.T) {
+		t.Parallel()
+
+		alert := &common.Alert{
+			IgnoreIfTextContains: []string{"ignore-this"},
+			Text:                 "This message contains ignore-this text",
+		}
+
+		ignore, reason := ignoreAlert(alert)
+		assert.True(t, ignore)
+		assert.NotEmpty(t, reason)
+	})
+
+	t.Run("case insensitive matching", func(t *testing.T) {
+		t.Parallel()
+
+		alert := &common.Alert{
+			IgnoreIfTextContains: []string{"ERROR"},
+			Text:                 "This has an error in it",
+		}
+
+		ignore, _ := ignoreAlert(alert)
+		assert.True(t, ignore)
+	})
+
+	t.Run("skips empty ignore terms", func(t *testing.T) {
+		t.Parallel()
+
+		alert := &common.Alert{
+			IgnoreIfTextContains: []string{"", "  ", "specific-term"},
+			Text:                 "Text without that term",
+		}
+
+		ignore, _ := ignoreAlert(alert)
+		assert.False(t, ignore)
+	})
+}

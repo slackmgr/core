@@ -7,6 +7,6 @@ import (
 )
 
 func (s *Server) handleChannels(c *gin.Context) {
-	channels := s.channelInfoSyncer.ManagedChannels()
+	channels := s.channelInfoProvider.ManagedChannels()
 	c.IndentedJSON(http.StatusOK, channels)
 }

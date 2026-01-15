@@ -106,7 +106,7 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*common.Alert, started t
 	alertLimitPerChannel := s.cfg.RateLimit.AllowedBurst
 
 	for channel, channelAlerts := range alertsByChannel {
-		channelInfo, err := s.channelInfoSyncer.GetChannelInfo(c.Request.Context(), channel)
+		channelInfo, err := s.channelInfoProvider.GetChannelInfo(c.Request.Context(), channel)
 		if err != nil {
 			err = fmt.Errorf("failed to fetch info for channel %s: %w", channel, err)
 			s.writeErrorResponse(c, err, http.StatusInternalServerError, channelAlerts[0])
@@ -198,7 +198,7 @@ func (s *Server) processQueuedAlert(ctx context.Context, alert *common.Alert) er
 
 	// Find the channel info for the alert channel.
 	// Errors here are retryable, as they may indicate transient issues when communicating with Slack.
-	channelInfo, err := s.channelInfoSyncer.GetChannelInfo(ctx, alert.SlackChannelID)
+	channelInfo, err := s.channelInfoProvider.GetChannelInfo(ctx, alert.SlackChannelID)
 	if err != nil {
 		return newRetryableProcessingError("failed to fetch info for channel %s: %w", alert.SlackChannelID, err)
 	}
@@ -268,7 +268,7 @@ func (s *Server) handleAlertsTest(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func (s *Server) validateChannelInfo(channel string, channelInfo *channelInfo) error {
+func (s *Server) validateChannelInfo(channel string, channelInfo *ChannelInfo) error {
 	if !channelInfo.ChannelExists {
 		return fmt.Errorf("unable to find channel %s in workspace", channel)
 	}
@@ -318,7 +318,7 @@ func (s *Server) setSlackChannelID(c *gin.Context, alerts ...*common.Alert) erro
 
 		// The channel ID may actually be a channel name. If so, attempt to map the name to a channel ID.
 		if alert.SlackChannelID != "" {
-			alert.SlackChannelID = s.channelInfoSyncer.MapChannelNameToIDIfNeeded(alert.SlackChannelID)
+			alert.SlackChannelID = s.channelInfoProvider.MapChannelNameToIDIfNeeded(alert.SlackChannelID)
 		}
 
 		// Channel ID found in the alert body or in the URL -> move on (no need to process the route key).
