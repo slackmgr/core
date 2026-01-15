@@ -230,7 +230,11 @@ func (c *InteractiveController) handleMoveIssueRequest(ctx context.Context, inte
 		return
 	}
 
-	metadata := newPrivateModalMetadata().Set("channelId", interaction.Channel.ID).Set("messageTs", interaction.Message.Timestamp).ToJSON()
+	metadata, err := newPrivateModalMetadata().Set("channelId", interaction.Channel.ID).Set("messageTs", interaction.Message.Timestamp).ToJSON()
+	if err != nil {
+		logger.Errorf("Failed to create modal metadata: %s", err)
+		return
+	}
 
 	blocks, err := views.MoveIssueModal(c.managerSettings.Settings)
 	if err != nil {
@@ -555,10 +559,14 @@ func (c *InteractiveController) handleWebhookRequest(ctx context.Context, intera
 		return
 	}
 
-	metadata := newPrivateModalMetadata().
+	metadata, err := newPrivateModalMetadata().
 		Set("channelId", interaction.Channel.ID).
 		Set("messageTs", interaction.Message.Timestamp).
 		Set("webhookId", webhook.ID).ToJSON()
+	if err != nil {
+		logger.Errorf("Failed to create modal metadata: %s", err)
+		return
+	}
 
 	request := slack.ModalViewRequest{
 		Type:            "modal",
@@ -789,12 +797,12 @@ func newPrivateModalMetadata() *PrivateModalMetadata {
 	}
 }
 
-func (p *PrivateModalMetadata) ToJSON() string {
+func (p *PrivateModalMetadata) ToJSON() (string, error) {
 	s, err := json.Marshal(p)
 	if err != nil {
-		panic(err)
+		return "", fmt.Errorf("failed to marshal modal metadata: %w", err)
 	}
-	return string(s)
+	return string(s), nil
 }
 
 func (p *PrivateModalMetadata) Set(key, value string) *PrivateModalMetadata {
