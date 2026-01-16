@@ -4,26 +4,15 @@ import (
 	"context"
 
 	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/manager/internal/slack/handler"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 )
 
-type EventsAPIController struct {
+type eventsAPIController struct {
 	logger common.Logger
 }
 
-func NewEventsAPIController(eventhandler *handler.SocketModeHandler, logger common.Logger) *EventsAPIController {
-	c := &EventsAPIController{
-		logger: logger,
-	}
-
-	eventhandler.Handle(socketmode.EventTypeEventsAPI, c.handleEventTypeEventsAPI)
-
-	return c
-}
-
-func (c *EventsAPIController) handleEventTypeEventsAPI(_ context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *eventsAPIController) handleEventTypeEventsAPI(_ context.Context, evt *socketmode.Event, clt *socketmode.Client) {
 	ack(evt, clt)
 
 	apiEvent, _ := evt.Data.(slackevents.EventsAPIEvent)

@@ -120,7 +120,7 @@ func (c *channelManager) run(ctx context.Context) {
 			}
 
 			// Process the command. Ack or nack happens inside processCmd, depending on success or type of failure.
-			// Command are typically acked regardless of errors, expect for lock acquisition failures.
+			// Commands are typically acked regardless of errors, except for lock acquisition failures.
 			if err := c.processCmd(ctx, cmd); err != nil {
 				c.logger.WithFields(cmd.LogFields()).Errorf("Failed to process command: %s", err)
 			}

@@ -10,7 +10,6 @@ import (
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/manager/internal/models"
-	"github.com/peteraglen/slack-manager/manager/internal/slack/handler"
 	"github.com/peteraglen/slack-manager/manager/internal/slack/views"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
@@ -28,49 +27,25 @@ const (
 	OptionButtonActionIDPrefix = "option_button_action"
 )
 
-type PrivateModalMetadata struct {
+type IssueFinder interface {
+	FindIssueBySlackPost(ctx context.Context, channelID string, slackPostID string, includeArchived bool) *models.Issue
+}
+
+type privateModalMetadata struct {
 	Values map[string]string `json:"values,omitempty"`
 }
 
-type InteractiveController struct {
-	client          handler.SocketClient
-	commandHandler  handler.FifoQueueProducer
-	issueFinder     handler.IssueFinder
+type interactiveController struct {
+	apiClient       SlackAPIClient
+	commandQueue    FifoQueueProducer
+	issueFinder     IssueFinder
 	logger          common.Logger
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func NewInteractiveController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler handler.FifoQueueProducer, issueFinder handler.IssueFinder, logger common.Logger, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *InteractiveController {
-	c := &InteractiveController{
-		client:          client,
-		commandHandler:  commandHandler,
-		issueFinder:     issueFinder,
-		logger:          logger,
-		cfg:             cfg,
-		managerSettings: managerSettings,
-	}
-
-	// Global shortcuts
-	eventhandler.HandleInteraction(slack.InteractionTypeShortcut, c.globalShortcutHandler)
-
-	// Message action
-	eventhandler.HandleInteraction(slack.InteractionTypeMessageAction, c.messageActionHandler)
-
-	// View submission
-	eventhandler.HandleInteraction(slack.InteractionTypeViewSubmission, c.viewSubmissionHandler)
-
-	// Block actions (buttons etc)
-	eventhandler.HandleInteraction(slack.InteractionTypeBlockActions, c.blockActionsHandler)
-
-	// Every other interaction
-	eventhandler.Handle(socketmode.EventTypeInteractive, c.defaultInteractiveHandler)
-
-	return c
-}
-
 // globalShortcutHandler handles all incoming interaction messages of type 'shortcut'
-func (c *InteractiveController) globalShortcutHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *interactiveController) globalShortcutHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
 	// No need to customize the ack in this context, so we send it immediately
 	ack(evt, clt)
 
@@ -89,7 +64,7 @@ func (c *InteractiveController) globalShortcutHandler(ctx context.Context, evt *
 }
 
 // messageActionHandler handles all incoming interaction messages of type 'message_action'
-func (c *InteractiveController) messageActionHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *interactiveController) messageActionHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
 	// No need to customize the ack in this context, so we send it immediately
 	ack(evt, clt)
 
@@ -110,7 +85,7 @@ func (c *InteractiveController) messageActionHandler(ctx context.Context, evt *s
 }
 
 // viewSubmissionHandler handles all incoming interaction messages of type 'view_submission'
-func (c *InteractiveController) viewSubmissionHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *interactiveController) viewSubmissionHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
 	interaction, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
 	if err != nil {
 		ack(evt, clt)
@@ -134,7 +109,7 @@ func (c *InteractiveController) viewSubmissionHandler(ctx context.Context, evt *
 }
 
 // blockActionsHandler handles all incoming interaction messages of type 'block_actions'
-func (c *InteractiveController) blockActionsHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *interactiveController) blockActionsHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
 	// No need to customize the ack in this context, so we send it immediately
 	ack(evt, clt)
 
@@ -167,7 +142,7 @@ func (c *InteractiveController) blockActionsHandler(ctx context.Context, evt *so
 }
 
 // defaultInteractiveHandler handles all incoming interaction messages not matched by any of the explicit handlers
-func (c *InteractiveController) defaultInteractiveHandler(_ context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *interactiveController) defaultInteractiveHandler(_ context.Context, evt *socketmode.Event, clt *socketmode.Client) {
 	ack(evt, clt)
 
 	_, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
@@ -182,18 +157,18 @@ func (c *InteractiveController) defaultInteractiveHandler(_ context.Context, evt
 // handleMoveIssueRequest handles a request to move an issue from one channel to another. It is triggered by a message shortcut.
 // It opens a modal view with options to move the issue, IF the user is allowed to perform this action AND the issue state allows it.
 // https://api.slack.com/interactivity/shortcuts/using#message_shortcuts
-func (c *InteractiveController) handleMoveIssueRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) handleMoveIssueRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
 	userIsGlobalAdmin := c.managerSettings.Settings.UserIsGlobalAdmin(interaction.User.ID)
 
 	if !userIsGlobalAdmin {
 		msg := fmt.Sprintf("Sorry, but this feature is currently only available to %s global admins.", c.managerSettings.Settings.AppFriendlyName)
-		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", msg); err != nil {
+		if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", msg); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
 	}
 
-	managedChannel, _, err := c.client.IsAlertChannel(ctx, interaction.Channel.ID)
+	managedChannel, _, err := c.apiClient.IsAlertChannel(ctx, interaction.Channel.ID)
 	if err != nil {
 		logger.Errorf("Failed to verify if channel %s is a valid alert channel: %s", interaction.Channel.ID, err)
 		return
@@ -201,7 +176,7 @@ func (c *InteractiveController) handleMoveIssueRequest(ctx context.Context, inte
 
 	if !managedChannel {
 		msg := fmt.Sprintf("Sorry, but you can only move messages in channels managed by %s.", c.managerSettings.Settings.AppFriendlyName)
-		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", msg); err != nil {
+		if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", msg); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
@@ -210,21 +185,21 @@ func (c *InteractiveController) handleMoveIssueRequest(ctx context.Context, inte
 	issue := c.issueFinder.FindIssueBySlackPost(ctx, interaction.Channel.ID, interaction.Message.Timestamp, true)
 
 	if issue == nil {
-		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but no issue was found for this Slack message."); err != nil {
+		if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but no issue was found for this Slack message."); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
 	}
 
 	if issue.Archived {
-		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but the issue is archived and cannot be moved."); err != nil {
+		if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but the issue is archived and cannot be moved."); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
 	}
 
 	if len(issue.LastAlert.Escalation) > 0 {
-		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but issues with escalation rules cannot be moved."); err != nil {
+		if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but issues with escalation rules cannot be moved."); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
@@ -254,14 +229,14 @@ func (c *InteractiveController) handleMoveIssueRequest(ctx context.Context, inte
 		PrivateMetadata: metadata,
 	}
 
-	if err := c.client.OpenModal(ctx, interaction.TriggerID, request); err != nil {
+	if err := c.apiClient.OpenModal(ctx, interaction.TriggerID, request); err != nil {
 		logger.Errorf("failed to open modal view for move issue action: %s", err)
 	}
 }
 
 // moveIssueViewSubmission handles the callback from the modal move issue dialog (created by handleMoveIssueRequest).
 // It dispatches an async command with info about the move request, IF the Slack App integration is in the receiving channel.
-func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) moveIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client, interaction slack.InteractionCallback, logger common.Logger) {
 	targetChannelID, err := getSelectedValue(interaction, "select_channel", "select_channel_input")
 	if err != nil {
 		ack(evt, clt)
@@ -275,7 +250,7 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 		return
 	}
 
-	isAlertChannel, _, err := c.client.IsAlertChannel(ctx, targetChannelID)
+	isAlertChannel, _, err := c.apiClient.IsAlertChannel(ctx, targetChannelID)
 	if err != nil {
 		ack(evt, clt)
 		logger.Errorf("Failed to verify if channel %s is a valid alert channel: %s", targetChannelID, err)
@@ -305,7 +280,7 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 	ackWithPayload(evt, clt, slack.NewClearViewSubmissionResponse())
 
 	// Fetch info about the user
-	userInfo, err := c.client.GetUserInfo(ctx, interaction.User.ID)
+	userInfo, err := c.apiClient.GetUserInfo(ctx, interaction.User.ID)
 	if err != nil {
 		logger.Errorf("Failed to get user info: %s", err)
 		return
@@ -319,14 +294,14 @@ func (c *InteractiveController) moveIssueViewSubmission(ctx context.Context, evt
 	action := models.CommandActionMoveIssue
 	cmd := models.NewCommand(metadata.Get("channelId"), metadata.Get("messageTs"), "", userInfo.ID, userInfo.RealName, action, params)
 
-	if err := sendCommand(ctx, c.commandHandler, cmd); err != nil {
+	if err := sendCommand(ctx, c.commandQueue, cmd); err != nil {
 		logger.Errorf("Failed to send command '%s': %s", action, err)
 	}
 }
 
 // handleCreateIssueRequest handles a request to create a new issue in the current channel. It is triggered by a global shortcut.
 // It opens a modal view with options to create the issue.
-func (c *InteractiveController) handleCreateIssueRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) handleCreateIssueRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
 	blocks, err := views.CreateIssueModal(c.managerSettings.Settings)
 	if err != nil {
 		logger.Errorf("Failed to generate view: %s", err)
@@ -344,14 +319,14 @@ func (c *InteractiveController) handleCreateIssueRequest(ctx context.Context, in
 		Blocks:        blocks,
 	}
 
-	if err := c.client.OpenModal(ctx, interaction.TriggerID, request); err != nil {
+	if err := c.apiClient.OpenModal(ctx, interaction.TriggerID, request); err != nil {
 		logger.Errorf("failed to open modal view for move issue action: %s", err)
 	}
 }
 
 // createIssueViewSubmission handles the callback from the modal create issue dialog (created by handleCreateIssueRequest).
 // It dispatches an async command with info about the create request, IF the Slack App integration is in the receiving channel.
-func (c *InteractiveController) createIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) createIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client, interaction slack.InteractionCallback, logger common.Logger) {
 	targetChannelID, err := getSelectedValue(interaction, "select_channel", "select_channel_input")
 	if err != nil {
 		ack(evt, clt)
@@ -359,7 +334,7 @@ func (c *InteractiveController) createIssueViewSubmission(ctx context.Context, e
 		return
 	}
 
-	isAlertChannel, _, err := c.client.IsAlertChannel(ctx, targetChannelID)
+	isAlertChannel, _, err := c.apiClient.IsAlertChannel(ctx, targetChannelID)
 	if err != nil {
 		ack(evt, clt)
 		logger.Errorf("Failed to verify if channel %s is a valid alert channel: %s", targetChannelID, err)
@@ -374,13 +349,13 @@ func (c *InteractiveController) createIssueViewSubmission(ctx context.Context, e
 	}
 
 	// Fetch info about the user
-	userInfo, err := c.client.GetUserInfo(ctx, interaction.User.ID)
+	userInfo, err := c.apiClient.GetUserInfo(ctx, interaction.User.ID)
 	if err != nil {
 		logger.Errorf("Failed to get user info: %s", err)
 		return
 	}
 
-	isAdminInTargetChannel := c.managerSettings.Settings.UserIsChannelAdmin(ctx, targetChannelID, userInfo.ID, c.client.UserIsInGroup)
+	isAdminInTargetChannel := c.managerSettings.Settings.UserIsChannelAdmin(ctx, targetChannelID, userInfo.ID, c.apiClient.UserIsInGroup)
 
 	if !isAdminInTargetChannel {
 		ackWithFieldErrorMsg(evt, clt, "select_channel", fmt.Sprintf("You need to be %s admin in the selected channel", c.managerSettings.Settings.AppFriendlyName))
@@ -457,15 +432,15 @@ func (c *InteractiveController) createIssueViewSubmission(ctx context.Context, e
 	action := models.CommandActionCreateIssue
 	cmd := models.NewCommand(targetChannelID, "", "", userInfo.ID, userInfo.RealName, action, params)
 
-	if err := sendCommand(ctx, c.commandHandler, cmd); err != nil {
+	if err := sendCommand(ctx, c.commandQueue, cmd); err != nil {
 		logger.Errorf("Failed to send command '%s': %s", action, err)
 	}
 }
 
 // handleViewIssueDetailsRequest handles a request to view issue details. It is triggered by a message shortcut.
 // It opens a modal view with the issue details.
-func (c *InteractiveController) handleViewIssueDetailsRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
-	isAlertChannel, _, err := c.client.IsAlertChannel(ctx, interaction.Channel.ID)
+func (c *interactiveController) handleViewIssueDetailsRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
+	isAlertChannel, _, err := c.apiClient.IsAlertChannel(ctx, interaction.Channel.ID)
 	if err != nil {
 		logger.Errorf("Failed to verify if channel %s is a valid alert channel: %s", interaction.Channel.ID, err)
 		return
@@ -473,7 +448,7 @@ func (c *InteractiveController) handleViewIssueDetailsRequest(ctx context.Contex
 
 	if !isAlertChannel {
 		msg := fmt.Sprintf("Sorry, but you can only view issue details in channels managed by %s.", c.managerSettings.Settings.AppFriendlyName)
-		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", msg); err != nil {
+		if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", msg); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
@@ -482,7 +457,7 @@ func (c *InteractiveController) handleViewIssueDetailsRequest(ctx context.Contex
 	issue := c.issueFinder.FindIssueBySlackPost(ctx, interaction.Channel.ID, interaction.Message.Timestamp, true)
 
 	if issue == nil {
-		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but no issue was found for this Slack message."); err != nil {
+		if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but no issue was found for this Slack message."); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
@@ -504,12 +479,12 @@ func (c *InteractiveController) handleViewIssueDetailsRequest(ctx context.Contex
 		Blocks:        blocks,
 	}
 
-	if err := c.client.OpenModal(ctx, interaction.TriggerID, request); err != nil {
+	if err := c.apiClient.OpenModal(ctx, interaction.TriggerID, request); err != nil {
 		logger.Errorf("failed to open modal view for issue details action: %s", err)
 	}
 }
 
-func (c *InteractiveController) handleIssueOptionsButtonRequest(ctx context.Context, interaction slack.InteractionCallback, action *slack.BlockAction, logger common.Logger) {
+func (c *interactiveController) handleIssueOptionsButtonRequest(ctx context.Context, interaction slack.InteractionCallback, action *slack.BlockAction, logger common.Logger) {
 	switch action.Value {
 	case MoveIssueAction:
 		c.handleMoveIssueRequest(ctx, interaction, logger)
@@ -522,18 +497,18 @@ func (c *InteractiveController) handleIssueOptionsButtonRequest(ctx context.Cont
 
 // handleWebhookRequest handles a request to post to a webhook. It is triggered by an action button in a message.
 // It opens a modal view IF the user is allowed to perform this action.
-func (c *InteractiveController) handleWebhookRequest(ctx context.Context, interaction slack.InteractionCallback, action *slack.BlockAction, logger common.Logger) {
+func (c *interactiveController) handleWebhookRequest(ctx context.Context, interaction slack.InteractionCallback, action *slack.BlockAction, logger common.Logger) {
 	issue := c.issueFinder.FindIssueBySlackPost(ctx, interaction.Channel.ID, interaction.Message.Timestamp, false)
 
 	if issue == nil {
-		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but no active issue was found for this Slack message."); err != nil {
+		if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but no active issue was found for this Slack message."); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
 	}
 
 	if len(issue.LastAlert.Webhooks) == 0 {
-		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but the issue doesn't have any webhooks."); err != nil {
+		if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but the issue doesn't have any webhooks."); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
@@ -549,7 +524,7 @@ func (c *InteractiveController) handleWebhookRequest(ctx context.Context, intera
 	}
 
 	if webhook == nil {
-		if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", fmt.Sprintf("Sorry, but the issue doesn't contain a webhook with ID '%s'.", action.Value)); err != nil {
+		if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", fmt.Sprintf("Sorry, but the issue doesn't contain a webhook with ID '%s'.", action.Value)); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
 		return
@@ -580,18 +555,18 @@ func (c *InteractiveController) handleWebhookRequest(ctx context.Context, intera
 		PrivateMetadata: metadata,
 	}
 
-	if err := c.client.OpenModal(ctx, interaction.TriggerID, request); err != nil {
+	if err := c.apiClient.OpenModal(ctx, interaction.TriggerID, request); err != nil {
 		logger.Errorf("failed to open modal view for confirm webhook action: %s", err)
 	}
 }
 
-func (c *InteractiveController) verifyWebhookAccess(ctx context.Context, interaction slack.InteractionCallback, webhook *common.Webhook, logger common.Logger) bool {
+func (c *interactiveController) verifyWebhookAccess(ctx context.Context, interaction slack.InteractionCallback, webhook *common.Webhook, logger common.Logger) bool {
 	if webhook.AccessLevel == common.WebhookAccessLevelGlobalAdmins || webhook.AccessLevel == "" {
 		userIsGlobalAdmin := c.managerSettings.Settings.UserIsGlobalAdmin(interaction.User.ID)
 
 		if !userIsGlobalAdmin {
 			msg := fmt.Sprintf("Sorry, but this webhook is available only to %s global admins.", c.managerSettings.Settings.AppFriendlyName)
-			if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", msg); err != nil {
+			if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", msg); err != nil {
 				logger.Errorf("Failed to send interactive response: %s", err)
 			}
 			return false
@@ -601,10 +576,10 @@ func (c *InteractiveController) verifyWebhookAccess(ctx context.Context, interac
 	}
 
 	if webhook.AccessLevel == common.WebhookAccessLevelChannelAdmins {
-		userIsChannelAdmin := c.managerSettings.Settings.UserIsChannelAdmin(ctx, interaction.Channel.ID, interaction.User.ID, c.client.UserIsInGroup)
+		userIsChannelAdmin := c.managerSettings.Settings.UserIsChannelAdmin(ctx, interaction.Channel.ID, interaction.User.ID, c.apiClient.UserIsInGroup)
 
 		if !userIsChannelAdmin {
-			if err := c.client.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but this webhook is available only to channel admins and above."); err != nil {
+			if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but this webhook is available only to channel admins and above."); err != nil {
 				logger.Errorf("Failed to send interactive response: %s", err)
 			}
 			return false
@@ -616,9 +591,9 @@ func (c *InteractiveController) verifyWebhookAccess(ctx context.Context, interac
 
 // webhookViewSubmission handles the callback from the modal confirm webhook dialog (created by handleWebhookRequest).
 // It dispatches an async command with info about the webhook.
-func (c *InteractiveController) webhookViewSubmission(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) webhookViewSubmission(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client, interaction slack.InteractionCallback, logger common.Logger) {
 	// Fetch info about the user
-	userInfo, err := c.client.GetUserInfo(ctx, interaction.User.ID)
+	userInfo, err := c.apiClient.GetUserInfo(ctx, interaction.User.ID)
 	if err != nil {
 		logger.Errorf("Failed to get user info: %s", err)
 		return
@@ -644,7 +619,7 @@ func (c *InteractiveController) webhookViewSubmission(ctx context.Context, evt *
 	cmd := models.NewCommand(metadata.Get("channelId"), metadata.Get("messageTs"), "", userInfo.ID, userInfo.RealName, cmdAction, nil)
 	cmd.WebhookParameters = params
 
-	if err := sendCommand(ctx, c.commandHandler, cmd); err != nil {
+	if err := sendCommand(ctx, c.commandQueue, cmd); err != nil {
 		logger.Errorf("Failed to send command '%s': %s", cmdAction, err)
 	}
 }
@@ -781,8 +756,8 @@ func getInteractionAndLoggerFromEvent(evt *socketmode.Event, logger common.Logge
 }
 
 // parsePrivateModalMetadata parses the private metadata object from a modal view
-func (c *InteractiveController) parsePrivateModalMetadata(data string) PrivateModalMetadata {
-	var p PrivateModalMetadata
+func (c *interactiveController) parsePrivateModalMetadata(data string) privateModalMetadata {
+	var p privateModalMetadata
 
 	if err := json.Unmarshal([]byte(data), &p); err != nil {
 		c.logger.Errorf("Failed to unmarshal private modal metadata: %s", err)
@@ -791,13 +766,13 @@ func (c *InteractiveController) parsePrivateModalMetadata(data string) PrivateMo
 	return p
 }
 
-func newPrivateModalMetadata() *PrivateModalMetadata {
-	return &PrivateModalMetadata{
+func newPrivateModalMetadata() *privateModalMetadata {
+	return &privateModalMetadata{
 		Values: make(map[string]string),
 	}
 }
 
-func (p *PrivateModalMetadata) ToJSON() (string, error) {
+func (p *privateModalMetadata) ToJSON() (string, error) {
 	s, err := json.Marshal(p)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal modal metadata: %w", err)
@@ -805,7 +780,7 @@ func (p *PrivateModalMetadata) ToJSON() (string, error) {
 	return string(s), nil
 }
 
-func (p *PrivateModalMetadata) Set(key, value string) *PrivateModalMetadata {
+func (p *privateModalMetadata) Set(key, value string) *privateModalMetadata {
 	if p.Values == nil {
 		p.Values = make(map[string]string)
 	}
@@ -815,7 +790,7 @@ func (p *PrivateModalMetadata) Set(key, value string) *PrivateModalMetadata {
 	return p
 }
 
-func (p *PrivateModalMetadata) Get(key string) string {
+func (p *privateModalMetadata) Get(key string) string {
 	if p.Values == nil {
 		return ""
 	}

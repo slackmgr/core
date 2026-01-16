@@ -1,4 +1,4 @@
-package handler
+package controllers
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	slackapi "github.com/slack-go/slack"
 )
 
-type SocketClient interface {
+type SlackAPIClient interface {
 	PostEphemeral(ctx context.Context, channelID, userID string, options ...slackapi.MsgOption) (string, error)
 	GetUserInfo(ctx context.Context, user string) (*slackapi.User, error)
 	UserIsInGroup(ctx context.Context, groupID, userID string) bool

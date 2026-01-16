@@ -14,7 +14,6 @@ import (
 	"github.com/peteraglen/slack-manager/internal"
 	"github.com/peteraglen/slack-manager/manager/internal/models"
 	"github.com/peteraglen/slack-manager/manager/internal/slack/controllers"
-	"github.com/peteraglen/slack-manager/manager/internal/slack/handler"
 	slack "github.com/slack-go/slack"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -37,10 +36,18 @@ const (
 	postUpdateMethodUpdateDeleted = postUpdateMethod("UPDATE_DELETED")
 )
 
+type IssueFinder interface {
+	FindIssueBySlackPost(ctx context.Context, channelID string, slackPostID string, includeArchived bool) *models.Issue
+}
+
+type FifoQueueProducer interface {
+	Send(ctx context.Context, slackChannelID, dedupID, body string) error
+}
+
 type Client struct {
 	api             *internal.SlackAPIClient
-	commandHandler  handler.FifoQueueProducer
-	issueFinder     handler.IssueFinder
+	commandQueue    FifoQueueProducer
+	issueFinder     IssueFinder
 	cacheStore      store.StoreInterface
 	logger          common.Logger
 	metrics         common.Metrics
@@ -48,9 +55,9 @@ type Client struct {
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func New(commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *Client {
+func New(commandHandler FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *Client {
 	return &Client{
-		commandHandler:  commandHandler,
+		commandQueue:    commandHandler,
 		cacheStore:      cacheStore,
 		logger:          logger,
 		metrics:         metrics,
@@ -59,12 +66,12 @@ func New(commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterfa
 	}
 }
 
-func (c *Client) SetIssueFinder(issueFinder handler.IssueFinder) {
+func (c *Client) SetIssueFinder(issueFinder IssueFinder) {
 	c.issueFinder = issueFinder
 }
 
 func (c *Client) Connect(ctx context.Context) error {
-	if c.commandHandler == nil {
+	if c.commandQueue == nil {
 		return errors.New("command handler must be set before connecting")
 	}
 
@@ -106,28 +113,29 @@ func (c *Client) RunSocketMode(ctx context.Context) error {
 	}
 
 	socketModeClient := c.api.NewSocketModeClient()
-	handler := handler.NewSocketModeHandler(socketModeClient, c.logger)
+
+	handler := controllers.NewSocketModeHandler(c, socketModeClient, c.commandQueue, c.issueFinder, c.cacheStore, c.cfg, c.managerSettings, c.logger)
 
 	// Internal slack client events
-	controllers.NewInternalEventsController(handler, c.logger)
+	handler.RegisterInternalEventsController()
 
 	// Interactive actions
-	controllers.NewInteractiveController(handler, c, c.commandHandler, c.issueFinder, c.logger, c.cfg, c.managerSettings)
+	handler.RegisterInteractiveController()
 
 	// Slash commands actions
-	controllers.NewSlashCommandsController(handler, c.logger)
+	handler.RegisterSlashCommandsController()
 
 	// Post reactions (emojis)
-	controllers.NewReactionsController(handler, c, c.commandHandler, c.cacheStore, c.logger, c.cfg, c.managerSettings)
+	handler.RegisterReactionsController()
 
 	// Greeting situations (joined channel etc)
-	controllers.NewGreetingsController(handler, c, c.logger, c.cfg, c.managerSettings)
+	handler.RegisterGreetingsController()
 
 	// Events API
-	controllers.NewEventsAPIController(handler, c.logger)
+	handler.RegisterEventsAPIController()
 
 	// Default controller (fallback when nothing else matches)
-	controllers.NewDefaultController(handler, c.logger)
+	handler.RegisterDefaultController()
 
 	return handler.RunEventLoop(ctx)
 }

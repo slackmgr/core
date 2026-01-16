@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/eko/gocache/lib/v4/store"
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
 	"github.com/peteraglen/slack-manager/manager/internal/models"
-	"github.com/peteraglen/slack-manager/manager/internal/slack/handler"
 	"github.com/peteraglen/slack-manager/manager/internal/slack/views"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -23,35 +21,16 @@ var (
 	errUserIsNotChannelAdmin = errors.New("user is not channel admin")
 )
 
-type ReactionsController struct {
-	client          handler.SocketClient
-	commandHandler  handler.FifoQueueProducer
+type reactionsController struct {
+	apiClient       SlackAPIClient
+	commandQueue    FifoQueueProducer
 	cache           *internal.Cache
 	logger          common.Logger
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func NewReactionsController(eventhandler *handler.SocketModeHandler, client handler.SocketClient, commandHandler handler.FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *ReactionsController {
-	cacheKeyPrefix := cfg.CacheKeyPrefix + "reactions-controller:"
-	cache := internal.NewCache(cacheStore, cacheKeyPrefix, logger)
-
-	c := &ReactionsController{
-		client:          client,
-		commandHandler:  commandHandler,
-		cache:           cache,
-		logger:          logger,
-		cfg:             cfg,
-		managerSettings: managerSettings,
-	}
-
-	eventhandler.HandleEventsAPI(string(slackevents.ReactionAdded), c.reactionAdded)
-	eventhandler.HandleEventsAPI(string(slackevents.ReactionRemoved), c.reactionRemoved)
-
-	return c
-}
-
-func (c *ReactionsController) reactionAdded(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *reactionsController) reactionAdded(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
 	ack(evt, clt)
 
 	apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
@@ -86,7 +65,7 @@ func (c *ReactionsController) reactionAdded(ctx context.Context, evt *socketmode
 	}
 }
 
-func (c *ReactionsController) reactionRemoved(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *reactionsController) reactionRemoved(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
 	ack(evt, clt)
 
 	apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
@@ -121,7 +100,7 @@ func (c *ReactionsController) reactionRemoved(ctx context.Context, evt *socketmo
 	}
 }
 
-func (c *ReactionsController) sendReactionAddedCommand(ctx context.Context, evt *slackevents.ReactionAddedEvent, action models.CommandAction, requireChannelAdmin bool) {
+func (c *reactionsController) sendReactionAddedCommand(ctx context.Context, evt *slackevents.ReactionAddedEvent, action models.CommandAction, requireChannelAdmin bool) {
 	logger := c.logger.WithField("channel_id", evt.Item.Channel).WithField("user_id", evt.User).WithField("action_type", "added").
 		WithField("reaction", evt.Reaction).WithField("slack_post_id", evt.Item.Timestamp)
 
@@ -144,12 +123,12 @@ func (c *ReactionsController) sendReactionAddedCommand(ctx context.Context, evt 
 		cmd.ExecuteWhenNoIssueFound = true
 	}
 
-	if err := sendCommand(ctx, c.commandHandler, cmd); err != nil {
+	if err := sendCommand(ctx, c.commandQueue, cmd); err != nil {
 		logger.Errorf("Failed to send command '%s': %s", action, err)
 	}
 }
 
-func (c *ReactionsController) sendReactionRemovedCommand(ctx context.Context, evt *slackevents.ReactionRemovedEvent, action models.CommandAction, requireChannelAdmin bool) {
+func (c *reactionsController) sendReactionRemovedCommand(ctx context.Context, evt *slackevents.ReactionRemovedEvent, action models.CommandAction, requireChannelAdmin bool) {
 	logger := c.logger.WithField("channel_id", evt.Item.Channel).WithField("user_id", evt.User).WithField("action_type", "removed").
 		WithField("reaction", evt.Reaction).WithField("slack_post_id", evt.Item.Timestamp)
 
@@ -167,13 +146,13 @@ func (c *ReactionsController) sendReactionRemovedCommand(ctx context.Context, ev
 
 	cmd := models.NewCommand(evt.Item.Channel, evt.Item.Timestamp, evt.Reaction, userInfo.ID, userInfo.RealName, action, nil)
 
-	if err := sendCommand(ctx, c.commandHandler, cmd); err != nil {
+	if err := sendCommand(ctx, c.commandQueue, cmd); err != nil {
 		logger.Errorf("Failed to send command '%s': %s", action, err)
 	}
 }
 
-func (c *ReactionsController) getUserInfo(ctx context.Context, channel, userID string, requireChannelAdmin bool, logger common.Logger) (*slack.User, error) {
-	isAlertChannel, _, err := c.client.IsAlertChannel(ctx, channel)
+func (c *reactionsController) getUserInfo(ctx context.Context, channel, userID string, requireChannelAdmin bool, logger common.Logger) (*slack.User, error) {
+	isAlertChannel, _, err := c.apiClient.IsAlertChannel(ctx, channel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify if channel %s is a valid alert channel: %w", channel, err)
 	}
@@ -183,7 +162,7 @@ func (c *ReactionsController) getUserInfo(ctx context.Context, channel, userID s
 		return nil, errUnmanagedChannel
 	}
 
-	userInfo, err := c.client.GetUserInfo(ctx, userID)
+	userInfo, err := c.apiClient.GetUserInfo(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read user info for %s: %w", userID, err)
 	}
@@ -193,7 +172,7 @@ func (c *ReactionsController) getUserInfo(ctx context.Context, channel, userID s
 	logger.Info("User reaction to message in managed channel")
 
 	if requireChannelAdmin {
-		userIsChannelAdmin := c.managerSettings.Settings.UserIsChannelAdmin(ctx, channel, userInfo.ID, c.client.UserIsInGroup)
+		userIsChannelAdmin := c.managerSettings.Settings.UserIsChannelAdmin(ctx, channel, userInfo.ID, c.apiClient.UserIsInGroup)
 
 		if !userIsChannelAdmin {
 			logger.Info("User is not admin in channel")
@@ -205,7 +184,7 @@ func (c *ReactionsController) getUserInfo(ctx context.Context, channel, userID s
 	return userInfo, nil
 }
 
-func (c *ReactionsController) postNotAdminAlert(ctx context.Context, channel, userID, userRealName string, logger common.Logger) {
+func (c *reactionsController) postNotAdminAlert(ctx context.Context, channel, userID, userRealName string, logger common.Logger) {
 	cacheKey := fmt.Sprintf("ReactionsController:userNotAdmin:%s:%s", channel, userID)
 
 	if _, ok := c.cache.Get(ctx, cacheKey); ok {
@@ -218,7 +197,7 @@ func (c *ReactionsController) postNotAdminAlert(ctx context.Context, channel, us
 		return
 	}
 
-	_, err = c.client.PostEphemeral(ctx, channel, userID, slack.MsgOptionBlocks(blocks...))
+	_, err = c.apiClient.PostEphemeral(ctx, channel, userID, slack.MsgOptionBlocks(blocks...))
 	if err != nil {
 		logger.Errorf("Failed to post ephemeral message: %s", err)
 		return
