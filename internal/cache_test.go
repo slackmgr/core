@@ -161,19 +161,19 @@ func TestCache_ConcurrentAccess(t *testing.T) {
 
 	// Test that SetWithRandomExpiration is thread-safe (uses rand/v2)
 	done := make(chan bool)
-	for i := 0; i < 10; i++ {
-		go func(id int) {
-			for j := 0; j < 100; j++ {
+	for range 10 {
+		go func() {
+			for range 100 {
 				key := "key"
 				cache.SetWithRandomExpiration(ctx, key, "value", time.Minute, 30*time.Second)
 				cache.Get(ctx, key)
 			}
 			done <- true
-		}(i)
+		}()
 	}
 
 	// Wait for all goroutines
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		<-done
 	}
 }

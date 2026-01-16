@@ -24,6 +24,8 @@ go test -v -run TestName ./path/to/package
 go test -v ./manager/internal/models/
 ```
 
+**IMPORTANT:** Both `make test` and `make lint` MUST pass with zero errors before committing any changes. This applies regardless of whether the errors were introduced by your changes or existed previously - all issues must be resolved before committing. Always run both commands to verify code quality.
+
 ## Architecture
 
 The system runs as two main services that communicate via message queues:

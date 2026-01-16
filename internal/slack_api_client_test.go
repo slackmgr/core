@@ -23,8 +23,8 @@ func (m *mockLogger) Info(msg string)                                {}
 func (m *mockLogger) Infof(format string, args ...any)               {}
 func (m *mockLogger) Error(msg string)                               {}
 func (m *mockLogger) Errorf(format string, args ...any)              {}
-func (m *mockLogger) WithField(key string, value any) common.Logger  { return m }
-func (m *mockLogger) WithFields(fields map[string]any) common.Logger { return m }
+func (m *mockLogger) WithField(key string, value any) common.Logger  { return m } //nolint:ireturn // mock implementation
+func (m *mockLogger) WithFields(fields map[string]any) common.Logger { return m } //nolint:ireturn // mock implementation
 
 type mockMetrics struct {
 	counters map[string]int
@@ -371,7 +371,7 @@ func TestConstants(t *testing.T) {
 	t.Run("ErrNotConnected is exported", func(t *testing.T) {
 		t.Parallel()
 
-		assert.NotNil(t, internal.ErrNotConnected)
+		require.Error(t, internal.ErrNotConnected)
 		assert.Contains(t, internal.ErrNotConnected.Error(), "Connect()")
 	})
 }

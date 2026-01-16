@@ -88,18 +88,6 @@ func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, log
 	}
 }
 
-// setChannelInfoProvider allows tests to inject a mock ChannelInfoProvider.
-// This setter is intended for testing only and should not be used in production code.
-func (s *Server) setChannelInfoProvider(provider ChannelInfoProvider) {
-	s.channelInfoProvider = provider
-}
-
-// setSlackClient allows tests to inject a mock SlackAPI.
-// This setter is intended for testing only and should not be used in production code.
-func (s *Server) setSlackClient(client SlackClient) {
-	s.slackClient = client
-}
-
 // WithRawAlertConsumer defines an alternative alert consumer, which reads from a FIFO queue and processes the items similarly to the main rest API.
 // The consumer is started by Run(ctx), and the queue is consumed in a separate goroutine.
 //
@@ -313,6 +301,12 @@ func (s *Server) UpdateSettings(settings *config.APISettings) error {
 	s.logger.Infof("API settings updated")
 
 	return nil
+}
+
+// setChannelInfoProvider allows tests to inject a mock ChannelInfoProvider.
+// This setter is intended for testing only and should not be used in production code.
+func (s *Server) setChannelInfoProvider(provider ChannelInfoProvider) {
+	s.channelInfoProvider = provider
 }
 
 // runRawAlertConsumer starts consuming alerts from the given FIFO queue consumer.

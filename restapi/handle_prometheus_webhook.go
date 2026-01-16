@@ -57,7 +57,7 @@ func (s *Server) handlePrometheusWebhook(c *gin.Context) {
 }
 
 func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*common.Alert {
-	alerts := []*common.Alert{}
+	alerts := make([]*common.Alert, 0, len(webhook.Alerts))
 
 	for _, promAlert := range webhook.Alerts {
 		// Ensure that all annotation and label keys exist in lower-case versions

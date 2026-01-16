@@ -180,7 +180,8 @@ func TestWebhookEncryption(t *testing.T) {
 		require.NoError(t, err)
 
 		// Truncate the encrypted data
-		encData := w.Payload["__encrypted_data"].(string)
+		encData, ok := w.Payload["__encrypted_data"].(string)
+		require.True(t, ok, "expected encrypted data to be string")
 		w.Payload["__encrypted_data"] = encData[:10]
 
 		_, err = internal.DecryptWebhookPayload(w, validKey)

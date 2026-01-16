@@ -8,7 +8,7 @@ type SlackClientConfig struct {
 	DebugLogging                     bool   `json:"debugLogging"                     yaml:"debugLogging"`
 	DryRun                           bool   `json:"dryRun"                           yaml:"dryRun"`
 	Concurrency                      int    `json:"concurrency"                      yaml:"concurrency"`
-	MaxAttemptsForRateLimitError     int    `json:"maxAttemptsForRateLimitError"      yaml:"maxAttemptsForRateLimitError"`
+	MaxAttemptsForRateLimitError     int    `json:"maxAttemptsForRateLimitError"     yaml:"maxAttemptsForRateLimitError"`
 	MaxAttemptsForTransientError     int    `json:"maxAttemptsForTransientError"     yaml:"maxAttemptsForTransientError"`
 	MaxAttemptsForFatalError         int    `json:"maxAttemptsForFatalError"         yaml:"maxAttemptsForFatalError"`
 	MaxRateLimitErrorWaitTimeSeconds int    `json:"maxRateLimitErrorWaitTimeSeconds" yaml:"maxRateLimitErrorWaitTimeSeconds"`

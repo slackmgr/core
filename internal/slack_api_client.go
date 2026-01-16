@@ -126,13 +126,6 @@ func (c *SlackAPIClient) NewSocketModeClient() *socketmode.Client {
 	return socketmode.New(c.api, socketmode.OptionDebug(c.cfg.DebugLogging), socketmode.OptionLog(&slackApilogger{logger: c.logger}))
 }
 
-func (c *SlackAPIClient) checkConnected() error {
-	if !c.connected {
-		return ErrNotConnected
-	}
-	return nil
-}
-
 func (c *SlackAPIClient) BotUserID() string {
 	return c.botUserID
 }
@@ -653,6 +646,13 @@ func (c *SlackAPIClient) BotIsInChannel(ctx context.Context, channelID string) (
 	}
 
 	return found, nil
+}
+
+func (c *SlackAPIClient) checkConnected() error {
+	if !c.connected {
+		return ErrNotConnected
+	}
+	return nil
 }
 
 func callAPI[V any, W any](ctx context.Context, logger commonlib.Logger, metrics commonlib.Metrics,

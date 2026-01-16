@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,8 +22,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func init() {
+func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
+	os.Exit(m.Run())
 }
 
 // --- Mocks ---
@@ -36,8 +39,8 @@ func (m *mockLogger) Info(msg string)                                {}
 func (m *mockLogger) Infof(format string, args ...any)               {}
 func (m *mockLogger) Error(msg string)                               {}
 func (m *mockLogger) Errorf(format string, args ...any)              {}
-func (m *mockLogger) WithField(key string, value any) common.Logger  { return m }
-func (m *mockLogger) WithFields(fields map[string]any) common.Logger { return m }
+func (m *mockLogger) WithField(key string, value any) common.Logger  { return m } //nolint:ireturn // mock implementation
+func (m *mockLogger) WithFields(fields map[string]any) common.Logger { return m } //nolint:ireturn // mock implementation
 
 type mockFifoQueueProducer struct {
 	mock.Mock
@@ -61,7 +64,13 @@ func (m *mockSlackClient) GetChannelInfo(ctx context.Context, channelID string) 
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*slack.Channel), args.Error(1)
+
+	channel, ok := args.Get(0).(*slack.Channel)
+	if !ok {
+		return nil, args.Error(1)
+	}
+
+	return channel, args.Error(1)
 }
 
 func (m *mockSlackClient) GetUserIDsInChannel(ctx context.Context, channelID string) (map[string]struct{}, error) {
@@ -69,7 +78,13 @@ func (m *mockSlackClient) GetUserIDsInChannel(ctx context.Context, channelID str
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(map[string]struct{}), args.Error(1)
+
+	userIDs, ok := args.Get(0).(map[string]struct{})
+	if !ok {
+		return nil, args.Error(1)
+	}
+
+	return userIDs, args.Error(1)
 }
 
 func (m *mockSlackClient) BotIsInChannel(ctx context.Context, channelID string) (bool, error) {
@@ -82,7 +97,13 @@ func (m *mockSlackClient) ListBotChannels(ctx context.Context) ([]*internal.Chan
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]*internal.ChannelSummary), args.Error(1)
+
+	channels, ok := args.Get(0).([]*internal.ChannelSummary)
+	if !ok {
+		return nil, args.Error(1)
+	}
+
+	return channels, args.Error(1)
 }
 
 func (m *mockChannelInfoProvider) GetChannelInfo(ctx context.Context, channel string) (*ChannelInfo, error) {
@@ -90,7 +111,13 @@ func (m *mockChannelInfoProvider) GetChannelInfo(ctx context.Context, channel st
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*ChannelInfo), args.Error(1)
+
+	info, ok := args.Get(0).(*ChannelInfo)
+	if !ok {
+		return nil, args.Error(1)
+	}
+
+	return info, args.Error(1)
 }
 
 func (m *mockChannelInfoProvider) MapChannelNameToIDIfNeeded(channelName string) string {
@@ -103,7 +130,13 @@ func (m *mockChannelInfoProvider) ManagedChannels() []*internal.ChannelSummary {
 	if args.Get(0) == nil {
 		return nil
 	}
-	return args.Get(0).([]*internal.ChannelSummary)
+
+	channels, ok := args.Get(0).([]*internal.ChannelSummary)
+	if !ok {
+		return nil
+	}
+
+	return channels
 }
 
 // --- Test Helpers ---
@@ -145,7 +178,7 @@ func TestServer_HandlePing(t *testing.T) {
 		router := gin.New()
 		router.GET("/ping", server.ping)
 
-		req := httptest.NewRequest("GET", "/ping", nil)
+		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -159,7 +192,7 @@ func TestServer_HandlePing(t *testing.T) {
 		router := gin.New()
 		router.GET("/ping", server.ping)
 
-		req := httptest.NewRequest("GET", "/ping?status=503", nil)
+		req := httptest.NewRequest(http.MethodGet, "/ping?status=503", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -173,7 +206,7 @@ func TestServer_HandlePing(t *testing.T) {
 		router := gin.New()
 		router.GET("/ping", server.ping)
 
-		req := httptest.NewRequest("GET", "/ping?status=9999", nil)
+		req := httptest.NewRequest(http.MethodGet, "/ping?status=9999", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -198,7 +231,7 @@ func TestServer_HandleChannels(t *testing.T) {
 		router := gin.New()
 		router.GET("/channels", server.handleChannels)
 
-		req := httptest.NewRequest("GET", "/channels", nil)
+		req := httptest.NewRequest(http.MethodGet, "/channels", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -221,7 +254,7 @@ func TestServer_HandleChannels(t *testing.T) {
 		router := gin.New()
 		router.GET("/channels", server.handleChannels)
 
-		req := httptest.NewRequest("GET", "/channels", nil)
+		req := httptest.NewRequest(http.MethodGet, "/channels", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -246,7 +279,7 @@ func TestServer_HandleMappings(t *testing.T) {
 		router := gin.New()
 		router.GET("/mappings", server.handleMappings)
 
-		req := httptest.NewRequest("GET", "/mappings", nil)
+		req := httptest.NewRequest(http.MethodGet, "/mappings", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -266,7 +299,7 @@ func TestServer_HandleAlerts_Validation(t *testing.T) {
 		router := gin.New()
 		router.POST("/alert", server.handleAlerts)
 
-		req := httptest.NewRequest("POST", "/alert", nil)
+		req := httptest.NewRequest(http.MethodPost, "/alert", nil)
 		req.Header.Set("Content-Type", "application/json")
 		req.ContentLength = 0
 		w := httptest.NewRecorder()
@@ -282,7 +315,7 @@ func TestServer_HandleAlerts_Validation(t *testing.T) {
 		router := gin.New()
 		router.POST("/alert", server.handleAlerts)
 
-		req := httptest.NewRequest("POST", "/alert", bytes.NewReader([]byte("invalid json")))
+		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader([]byte("invalid json")))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -298,7 +331,7 @@ func TestServer_HandleAlerts_Validation(t *testing.T) {
 		router.POST("/alert", server.handleAlerts)
 
 		body := `[]`
-		req := httptest.NewRequest("POST", "/alert", bytes.NewReader([]byte(body)))
+		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader([]byte(body)))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -331,7 +364,7 @@ func TestServer_HandleAlerts_Success(t *testing.T) {
 			Header:         "Test Alert",
 		}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest("POST", "/alert", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -358,7 +391,7 @@ func TestServer_HandleAlerts_Success(t *testing.T) {
 
 		alert := common.Alert{Header: "Test Alert"}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest("POST", "/alert/C456", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/alert/C456", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -386,7 +419,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 
 		alert := common.Alert{SlackChannelID: "C123", Header: "Test"}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest("POST", "/alert", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -411,7 +444,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 
 		alert := common.Alert{SlackChannelID: "C123", Header: "Test"}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest("POST", "/alert", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -436,7 +469,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 
 		alert := common.Alert{SlackChannelID: "C123", Header: "Test"}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest("POST", "/alert", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -463,7 +496,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 
 		alert := common.Alert{SlackChannelID: "C123", Header: "Test"}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest("POST", "/alert", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -551,20 +584,24 @@ func TestServer_ValidateChannelInfo(t *testing.T) {
 func TestServer_GetRateLimiter(t *testing.T) {
 	t.Parallel()
 
-	server, _, _ := newTestServer(t)
-
 	t.Run("creates new limiter for channel", func(t *testing.T) {
+		t.Parallel()
+		server, _, _ := newTestServer(t)
 		limiter1 := server.getRateLimiter("C123")
 		require.NotNil(t, limiter1)
 	})
 
 	t.Run("returns same limiter for same channel", func(t *testing.T) {
+		t.Parallel()
+		server, _, _ := newTestServer(t)
 		limiter1 := server.getRateLimiter("C456")
 		limiter2 := server.getRateLimiter("C456")
 		assert.Same(t, limiter1, limiter2)
 	})
 
 	t.Run("returns different limiters for different channels", func(t *testing.T) {
+		t.Parallel()
+		server, _, _ := newTestServer(t)
 		limiter1 := server.getRateLimiter("C789")
 		limiter2 := server.getRateLimiter("C012")
 		assert.NotSame(t, limiter1, limiter2)
@@ -618,7 +655,7 @@ func TestProcessingError(t *testing.T) {
 		err := newRetryableProcessingError("test error: %s", "details")
 		assert.True(t, err.IsRetryable())
 		assert.Equal(t, "test error: details", err.Error())
-		assert.NotNil(t, err.Unwrap())
+		assert.Error(t, err.Unwrap())
 	})
 
 	t.Run("non-retryable error", func(t *testing.T) {
@@ -627,7 +664,7 @@ func TestProcessingError(t *testing.T) {
 		err := newNonRetryableProcessingError("test error: %d", 42)
 		assert.False(t, err.IsRetryable())
 		assert.Equal(t, "test error: 42", err.Error())
-		assert.NotNil(t, err.Unwrap())
+		assert.Error(t, err.Unwrap())
 	})
 }
 
@@ -643,7 +680,7 @@ func TestServer_HandlePrometheusWebhook_Validation(t *testing.T) {
 		router := gin.New()
 		router.POST("/prometheus-alert", server.handlePrometheusWebhook)
 
-		req := httptest.NewRequest("POST", "/prometheus-alert", nil)
+		req := httptest.NewRequest(http.MethodPost, "/prometheus-alert", nil)
 		req.Header.Set("Content-Type", "application/json")
 		req.ContentLength = 0
 		w := httptest.NewRecorder()
@@ -659,7 +696,7 @@ func TestServer_HandlePrometheusWebhook_Validation(t *testing.T) {
 		router := gin.New()
 		router.POST("/prometheus-alert", server.handlePrometheusWebhook)
 
-		req := httptest.NewRequest("POST", "/prometheus-alert", bytes.NewReader([]byte("invalid json")))
+		req := httptest.NewRequest(http.MethodPost, "/prometheus-alert", bytes.NewReader([]byte("invalid json")))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -675,7 +712,7 @@ func TestServer_HandlePrometheusWebhook_Validation(t *testing.T) {
 		router.POST("/prometheus-alert", server.handlePrometheusWebhook)
 
 		body := `{"alerts": []}`
-		req := httptest.NewRequest("POST", "/prometheus-alert", bytes.NewReader([]byte(body)))
+		req := httptest.NewRequest(http.MethodPost, "/prometheus-alert", bytes.NewReader([]byte(body)))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -721,7 +758,7 @@ func TestServer_HandlePrometheusWebhook_Success(t *testing.T) {
 			},
 		}
 		body, _ := json.Marshal(webhook)
-		req := httptest.NewRequest("POST", "/prometheus-alert", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/prometheus-alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -742,7 +779,7 @@ func TestServer_HandlePrometheusWebhook_Success(t *testing.T) {
 			UserCount:          10,
 		}, nil)
 		queue.On("Send", mock.Anything, "C123", mock.Anything, mock.MatchedBy(func(body string) bool {
-			return bytes.Contains([]byte(body), []byte(`"severity":"resolved"`))
+			return strings.Contains(body, `"severity":"resolved"`)
 		})).Return(nil)
 
 		router := gin.New()
@@ -757,7 +794,7 @@ func TestServer_HandlePrometheusWebhook_Success(t *testing.T) {
 			},
 		}
 		body, _ := json.Marshal(webhook)
-		req := httptest.NewRequest("POST", "/prometheus-alert", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/prometheus-alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -890,21 +927,25 @@ func TestCorrelationIDFromLabels(t *testing.T) {
 	t.Parallel()
 
 	t.Run("returns empty for nil labels", func(t *testing.T) {
+		t.Parallel()
 		result := correlationIDFromLabels(nil)
 		assert.Empty(t, result)
 	})
 
 	t.Run("returns empty for empty labels", func(t *testing.T) {
+		t.Parallel()
 		result := correlationIDFromLabels(map[string]string{})
 		assert.Empty(t, result)
 	})
 
 	t.Run("returns empty for labels without known keys", func(t *testing.T) {
+		t.Parallel()
 		result := correlationIDFromLabels(map[string]string{"unknown": "value"})
 		assert.Empty(t, result)
 	})
 
 	t.Run("uses namespace and alertname", func(t *testing.T) {
+		t.Parallel()
 		labels := map[string]string{
 			"namespace": "prod",
 			"alertname": "HighCPU",
@@ -914,6 +955,7 @@ func TestCorrelationIDFromLabels(t *testing.T) {
 	})
 
 	t.Run("includes instance for monitoring namespace", func(t *testing.T) {
+		t.Parallel()
 		labels := map[string]string{
 			"namespace": "monitoring",
 			"alertname": "HighCPU",
@@ -924,6 +966,7 @@ func TestCorrelationIDFromLabels(t *testing.T) {
 	})
 
 	t.Run("same labels produce same correlation ID", func(t *testing.T) {
+		t.Parallel()
 		labels := map[string]string{
 			"namespace": "prod",
 			"alertname": "HighCPU",
@@ -939,6 +982,7 @@ func TestHelperFunctions(t *testing.T) {
 	t.Parallel()
 
 	t.Run("find returns first match from map1", func(t *testing.T) {
+		t.Parallel()
 		map1 := map[string]string{"key1": "value1"}
 		map2 := map[string]string{"key2": "value2"}
 
@@ -947,6 +991,7 @@ func TestHelperFunctions(t *testing.T) {
 	})
 
 	t.Run("find falls back to map2", func(t *testing.T) {
+		t.Parallel()
 		map1 := map[string]string{"other": "value1"}
 		map2 := map[string]string{"key2": "value2"}
 
@@ -955,11 +1000,13 @@ func TestHelperFunctions(t *testing.T) {
 	})
 
 	t.Run("find returns empty for no match", func(t *testing.T) {
+		t.Parallel()
 		result := find(nil, nil, "missing")
 		assert.Empty(t, result)
 	})
 
 	t.Run("find trims whitespace", func(t *testing.T) {
+		t.Parallel()
 		map1 := map[string]string{"key": "  value  "}
 
 		result := find(map1, nil, "key")
@@ -967,21 +1014,25 @@ func TestHelperFunctions(t *testing.T) {
 	})
 
 	t.Run("valueOrDefault returns value if not empty", func(t *testing.T) {
+		t.Parallel()
 		result := valueOrDefault("value", "default")
 		assert.Equal(t, "value", result)
 	})
 
 	t.Run("valueOrDefault returns default if empty", func(t *testing.T) {
+		t.Parallel()
 		result := valueOrDefault("", "default")
 		assert.Equal(t, "default", result)
 	})
 
 	t.Run("createLowerCaseKeys handles nil map", func(t *testing.T) {
+		t.Parallel()
 		// Should not panic
 		createLowerCaseKeys(nil)
 	})
 
 	t.Run("createLowerCaseKeys adds lowercase keys", func(t *testing.T) {
+		t.Parallel()
 		m := map[string]string{"Key": "value", "UPPER": "data"}
 		createLowerCaseKeys(m)
 
@@ -996,11 +1047,13 @@ func TestDebugGetAlertFields(t *testing.T) {
 	t.Parallel()
 
 	t.Run("returns nil for nil alert", func(t *testing.T) {
+		t.Parallel()
 		result := debugGetAlertFields(nil)
 		assert.Nil(t, result)
 	})
 
 	t.Run("returns fields from alert", func(t *testing.T) {
+		t.Parallel()
 		alert := &common.Alert{
 			CorrelationID: "corr-123",
 			Header:        "Test Header",
@@ -1015,6 +1068,7 @@ func TestDebugGetAlertFields(t *testing.T) {
 	})
 
 	t.Run("truncates long header", func(t *testing.T) {
+		t.Parallel()
 		longHeader := make([]byte, 300)
 		for i := range longHeader {
 			longHeader[i] = 'a'
@@ -1024,10 +1078,11 @@ func TestDebugGetAlertFields(t *testing.T) {
 		result := debugGetAlertFields(alert)
 
 		assert.Len(t, result["Header"], 203) // 200 + "..."
-		assert.True(t, len(result["Header"]) <= 203)
+		assert.LessOrEqual(t, len(result["Header"]), 203)
 	})
 
 	t.Run("truncates long body", func(t *testing.T) {
+		t.Parallel()
 		longBody := make([]byte, 1500)
 		for i := range longBody {
 			longBody[i] = 'b'

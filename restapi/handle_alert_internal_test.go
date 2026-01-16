@@ -13,10 +13,11 @@ func TestReduceAlerts(t *testing.T) {
 
 	limit := 2
 
-	alerts := []*common.Alert{
-		{SlackChannelID: "123", Header: "a"},
-		{SlackChannelID: "123", Header: "b"},
-	}
+	alerts := make([]*common.Alert, 0, 3)
+	alerts = append(alerts,
+		&common.Alert{SlackChannelID: "123", Header: "a"},
+		&common.Alert{SlackChannelID: "123", Header: "b"},
+	)
 
 	// Two alerts is within the limit -> no alerts should be skipped
 	keptAlerts, skippedAlerts := reduceAlertCountForChannel("123", alerts, limit)

@@ -49,4 +49,4 @@ profiling/
 profile*.pdf
 
 # AI stuff
-.claude/
+.claude/*.local.json

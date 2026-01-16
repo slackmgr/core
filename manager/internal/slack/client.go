@@ -563,7 +563,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 	}
 
 	if len(issue.LastAlert.Fields) > 0 {
-		fields := []*slack.TextBlockObject{}
+		fields := make([]*slack.TextBlockObject, 0, len(issue.LastAlert.Fields))
 		for _, f := range issue.LastAlert.Fields {
 			fields = append(fields, newMrkdwnTextBlock(fmt.Sprintf("*%s:*\n%s", f.Title, f.Value)))
 		}
@@ -619,7 +619,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 		last := "Last: " + issue.LastAlertReceived.In(c.cfg.Location).Format("01-02 15:04:05")
 		alertCount := fmt.Sprintf("#%d", issue.AlertCount)
 
-		fields := []slack.MixedElement{}
+		fields := make([]slack.MixedElement, 0, 3)
 		fields = append(fields, slack.NewTextBlockObject("plain_text", first, false, false))
 		fields = append(fields, slack.NewTextBlockObject("plain_text", last, false, false))
 		fields = append(fields, slack.NewTextBlockObject("plain_text", alertCount, false, false))

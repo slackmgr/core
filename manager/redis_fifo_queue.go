@@ -484,6 +484,7 @@ func (q *RedisFifoQueue) processMessageWithLock(ctx context.Context, streamKey, 
 		once.Do(func() {
 			// For Redis Streams, nack means we don't ack.
 			// The message remains pending and will be reclaimed after claimMinIdleTime.
+			// We do however need to release the channel lock.
 			q.logger.WithField("message_id", msg.ID).WithField("stream_key", streamKey).Debug("Message nacked, will be reclaimed")
 			q.releaseLock(lock)
 		})

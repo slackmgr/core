@@ -116,6 +116,8 @@ func (l *RedisChannelLock) Key() string {
 // Release releases the lock held by the RedisChannelLock instance.
 // It removes the lock from Redis, allowing other instances to obtain the lock.
 // If the lock is already released, or not held, it returns nil.
+// It uses a new timeout context to ensure the release operation completes within a reasonable
+// time frame, even if the caller's context is cancelled.
 func (l *RedisChannelLock) Release() error {
 	if l.lock == nil {
 		return nil
