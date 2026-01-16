@@ -14,6 +14,11 @@ import (
 	"github.com/segmentio/ksuid"
 )
 
+// ackNackTimeout is the timeout for ack/nack operations.
+// These operations use context.Background() because they must complete regardless
+// of the caller's context state - acknowledgment is a commitment, not a cancellable request.
+const ackNackTimeout = 5 * time.Second
+
 // RedisFifoQueue implements the FifoQueue interface using Redis Streams.
 // It uses one stream per Slack channel to ensure message ordering within a channel,
 // mimicking the behavior of SQS FIFO message groups.
@@ -461,21 +466,27 @@ func (q *RedisFifoQueue) processMessageWithLock(ctx context.Context, streamKey, 
 	}
 
 	// Create thread-safe ack/nack functions that also release the lock.
+	// These functions use context.Background() with a timeout because acknowledgment
+	// must complete regardless of the caller's context state.
 	var once sync.Once
 
-	ack := func(ackCtx context.Context) {
+	ack := func() { //nolint:contextcheck // Deliberately uses context.Background() - ack must complete regardless of caller's context
 		once.Do(func() {
-			q.ackMessage(ackCtx, streamKey, msg.ID)
-			q.releaseLock(ackCtx, lock)
+			ctx, cancel := context.WithTimeout(context.Background(), ackNackTimeout)
+			defer cancel()
+			q.ackMessage(ctx, streamKey, msg.ID)
+			q.releaseLock(ctx, lock)
 		})
 	}
 
-	nack := func(nackCtx context.Context) {
+	nack := func() { //nolint:contextcheck // Deliberately uses context.Background() - nack must complete regardless of caller's context
 		once.Do(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), ackNackTimeout)
+			defer cancel()
 			// For Redis Streams, nack means we don't ack.
 			// The message remains pending and will be reclaimed after claimMinIdleTime.
 			q.logger.WithField("message_id", msg.ID).WithField("stream_key", streamKey).Debug("Message nacked, will be reclaimed")
-			q.releaseLock(nackCtx, lock)
+			q.releaseLock(ctx, lock)
 		})
 	}
 

@@ -134,7 +134,7 @@ messageLoop:
 			}
 
 			if err := c.addAlert(ctx, alert); err != nil {
-				msg.Nack(ctx)
+				msg.Nack()
 				c.logger.WithFields(alert.LogFields()).Errorf("Failed to process alert %s: %s", alert.UniqueID(), err)
 				continue
 			}
@@ -150,7 +150,7 @@ messageLoop:
 			}
 
 			if err := c.addCommand(ctx, cmd); err != nil {
-				msg.Nack(ctx)
+				msg.Nack()
 				c.logger.WithFields(cmd.LogFields()).Errorf("Failed to process %s command: %s", cmd.Action, err)
 				continue
 			}
@@ -158,10 +158,52 @@ messageLoop:
 	}
 
 	// When we get here, the context has been cancelled.
+	// Drain remaining messages from both channels before waiting for channel managers.
+	c.drainChannels(alertCh, commandCh)
+
 	// Wait for all channel managers to shut down in an orderly fashion.
 	c.channelManagersWaitGroup.Wait()
 
 	return ctx.Err()
+}
+
+// drainChannels nacks all remaining messages in the alert and command channels.
+// This ensures messages are returned to the queue for reprocessing by another instance.
+func (c *coordinator) drainChannels(alertCh <-chan models.InFlightMessage, commandCh <-chan models.InFlightMessage) {
+	drainCtx, cancel := context.WithTimeout(context.Background(), c.cfg.CoordinatorDrainTimeout)
+	defer cancel()
+
+	drained := 0
+
+	for {
+		select {
+		case msg, ok := <-alertCh:
+			if !ok {
+				// Channel closed - set to nil so select skips it (prevents busy loop)
+				alertCh = nil
+				continue
+			}
+			msg.Nack()
+			drained++
+		case msg, ok := <-commandCh:
+			if !ok {
+				// Channel closed - set to nil so select skips it (prevents busy loop)
+				commandCh = nil
+				continue
+			}
+			msg.Nack()
+			drained++
+		case <-drainCtx.Done():
+			c.logger.Errorf("Coordinator drain timeout reached after draining %d messages", drained)
+			return
+		default:
+			// No more messages available (channels empty or closed)
+			if drained > 0 {
+				c.logger.Infof("Drained %d messages from coordinator channels", drained)
+			}
+			return
+		}
+	}
 }
 
 func (c *coordinator) addCommand(ctx context.Context, cmd *models.Command) error {
@@ -290,7 +332,7 @@ func (c *coordinator) runChannelManagerAsync(ctx context.Context, channelManager
 func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.Command) error {
 	// Commands are attempted exactly once, so we ack regardless of any errors below.
 	defer func() {
-		go ackCommand(ctx, cmd)
+		go ackCommand(cmd)
 	}()
 
 	alert := common.NewAlert(common.AlertSeverity(cmd.ParamAsString("severity")))

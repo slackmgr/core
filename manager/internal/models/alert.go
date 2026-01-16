@@ -1,7 +1,6 @@
 package models
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,8 +19,8 @@ type Alert struct {
 	OriginalSlackChannelID string `json:"originalSlackChannelId"`
 	OriginalText           string `json:"originalText"`
 
-	ack  func(ctx context.Context)
-	nack func(ctx context.Context)
+	ack  func()
+	nack func()
 }
 
 // NewAlertFromQueueItem creates a new Alert instance from a FifoQueueItem.
@@ -46,9 +45,9 @@ func NewAlertFromQueueItem(queueItem *commonlib.FifoQueueItem) (InFlightMessage,
 
 // Ack acknowledges the alert message, indicating successful processing.
 // Any subsequent calls to Ack or Nack will have no effect.
-func (a *Alert) Ack(ctx context.Context) {
+func (a *Alert) Ack() {
 	if a.ack != nil {
-		a.ack(ctx)
+		a.ack()
 	}
 
 	a.ack = nil
@@ -57,9 +56,9 @@ func (a *Alert) Ack(ctx context.Context) {
 
 // Nack negatively acknowledges the alert message, indicating processing failure and requesting re-delivery.
 // Any subsequent calls to Ack or Nack will have no effect.
-func (a *Alert) Nack(ctx context.Context) {
-	if a.ack != nil {
-		a.nack(ctx)
+func (a *Alert) Nack() {
+	if a.nack != nil {
+		a.nack()
 	}
 
 	a.ack = nil

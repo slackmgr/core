@@ -94,6 +94,8 @@ func (c *channelManager) run(ctx context.Context) {
 
 		select {
 		case <-ctx.Done():
+			// Drain internal channels before exiting.
+			c.drainChannels()
 			return
 		case alert, ok := <-c.alertCh:
 			if !ok {
@@ -101,10 +103,10 @@ func (c *channelManager) run(ctx context.Context) {
 			}
 
 			if err := c.processAlert(ctx, alert); err != nil {
-				alert.Nack(ctx)
+				alert.Nack()
 				c.logger.WithFields(alert.LogFields()).Errorf("Failed to process alert: %s", err)
 			} else {
-				alert.Ack(ctx)
+				alert.Ack()
 			}
 
 			// Make sure the issue processor is running after an alert is received.
@@ -118,10 +120,10 @@ func (c *channelManager) run(ctx context.Context) {
 			}
 
 			if err := c.processCmd(ctx, cmd); err != nil {
-				cmd.Nack(ctx)
+				cmd.Nack()
 				c.logger.WithFields(cmd.LogFields()).Errorf("Failed to process command: %s", err)
 			} else {
-				cmd.Ack(ctx)
+				cmd.Ack()
 			}
 
 			// Make sure the issue processor is running after a command is received.
@@ -182,6 +184,35 @@ func (c *channelManager) keepAlive(ctx context.Context) error {
 		return fmt.Errorf("failed to queue keep-alive signal: %w", err)
 	}
 	return nil
+}
+
+// drainChannels nacks all remaining messages in the channel manager's internal buffers.
+// This ensures messages are returned to the queue for reprocessing by another instance.
+func (c *channelManager) drainChannels() {
+	drainCtx, cancel := context.WithTimeout(context.Background(), c.cfg.ChannelManagerDrainTimeout)
+	defer cancel()
+
+	drained := 0
+
+	for {
+		select {
+		case alert := <-c.alertCh:
+			alert.Nack()
+			drained++
+		case cmd := <-c.commandCh:
+			cmd.Nack()
+			drained++
+		case <-drainCtx.Done():
+			c.logger.Errorf("Channel manager drain timeout reached after draining %d messages", drained)
+			return
+		default:
+			// No more messages available
+			if drained > 0 {
+				c.logger.Infof("Drained %d messages from channel manager buffers", drained)
+			}
+			return
+		}
+	}
 }
 
 // findIssueBySlackPost attempts to find an existing issue by the specified Slack post ID.
@@ -306,7 +337,7 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 	// The command is acked after processing, regardless of any errors. Commands are attempted exactly once.
 	// Errors are logged, but otherwise ignored.
 	defer func() {
-		go ackCommand(ctx, cmd)
+		go ackCommand(cmd)
 	}()
 
 	// The lock is released after the command is fully processed.
@@ -347,8 +378,8 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 	return nil
 }
 
-func ackCommand(ctx context.Context, cmd *models.Command) {
-	cmd.Ack(ctx)
+func ackCommand(cmd *models.Command) {
+	cmd.Ack()
 }
 
 // processActiveIssues processes all active issues. It handles escalations, archiving and Slack updates (where needed).

@@ -28,14 +28,39 @@ type ManagerConfig struct {
 
 	// SlackClient holds configuration for the Slack client.
 	SlackClient *SlackClientConfig `json:"slackClient" yaml:"slackClient"`
+
+	// CoordinatorDrainTimeout is the maximum time the coordinator will spend draining
+	// messages from its channels during shutdown. Messages that cannot be drained within
+	// this timeout will remain in the queue for reprocessing by another instance.
+	// Default: 5 seconds.
+	CoordinatorDrainTimeout time.Duration `json:"coordinatorDrainTimeout" yaml:"coordinatorDrainTimeout"`
+
+	// ChannelManagerDrainTimeout is the maximum time each channel manager will spend
+	// draining messages from its internal buffers during shutdown.
+	// Default: 3 seconds.
+	ChannelManagerDrainTimeout time.Duration `json:"channelManagerDrainTimeout" yaml:"channelManagerDrainTimeout"`
 }
 
 // NewDefaultManagerConfig returns a ManagerConfig with default values.
 func NewDefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
-		CacheKeyPrefix: "slack-manager:",
-		Location:       time.UTC,
-		SlackClient:    NewDefaultSlackClientConfig(),
+		CacheKeyPrefix:             "slack-manager:",
+		Location:                   time.UTC,
+		SlackClient:                NewDefaultSlackClientConfig(),
+		CoordinatorDrainTimeout:    5 * time.Second,
+		ChannelManagerDrainTimeout: 3 * time.Second,
+	}
+}
+
+// SetDefaults sets default values for any fields that are not set.
+// This is useful when the config is not created using NewDefaultManagerConfig.
+func (c *ManagerConfig) SetDefaults() {
+	if c.CoordinatorDrainTimeout == 0 {
+		c.CoordinatorDrainTimeout = 5 * time.Second
+	}
+
+	if c.ChannelManagerDrainTimeout == 0 {
+		c.ChannelManagerDrainTimeout = 3 * time.Second
 	}
 }
 

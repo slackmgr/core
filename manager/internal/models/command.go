@@ -1,7 +1,6 @@
 package models
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,8 +41,8 @@ type Command struct {
 	IncludeArchivedIssues   bool                  `json:"includeArchivedIssues"`
 	ExecuteWhenNoIssueFound bool                  `json:"executeWhenNoIssueFound"`
 
-	ack  func(ctx context.Context)
-	nack func(ctx context.Context)
+	ack  func()
+	nack func()
 }
 
 // WebhookCommandParams holds parameters specific to webhook commands.
@@ -88,9 +87,9 @@ func NewCommand(slackChannelID, ts, reaction, userID, userRealName string, actio
 
 // Ack acknowledges the command message, indicating successful processing.
 // Any subsequent calls to Ack or Nack will have no effect.
-func (c *Command) Ack(ctx context.Context) {
+func (c *Command) Ack() {
 	if c.ack != nil {
-		c.ack(ctx)
+		c.ack()
 	}
 
 	c.ack = nil
@@ -99,9 +98,9 @@ func (c *Command) Ack(ctx context.Context) {
 
 // Nack negatively acknowledges the command message, indicating processing failure and requesting re-delivery.
 // Any subsequent calls to Ack or Nack will have no effect.
-func (c *Command) Nack(ctx context.Context) {
-	if c.ack != nil {
-		c.nack(ctx)
+func (c *Command) Nack() {
+	if c.nack != nil {
+		c.nack()
 	}
 
 	c.ack = nil

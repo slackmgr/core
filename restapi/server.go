@@ -347,7 +347,7 @@ func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueCons
 				logger.Errorf("Failed to json unmarshal queued alert: %s", err)
 
 				if item.Ack != nil {
-					item.Ack(ctx)
+					item.Ack()
 					logger.Debug("Alert acked")
 				}
 
@@ -363,7 +363,7 @@ func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueCons
 
 				if errors.As(err, &pErr) && pErr.IsRetryable() {
 					if item.Nack != nil {
-						item.Nack(ctx)
+						item.Nack()
 						logger.Debug("Alert nacked")
 					}
 
@@ -374,7 +374,7 @@ func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueCons
 			// At this point, the alert has been processed successfully OR it failed with a non-retryable error.
 			// In both cases, we ack the message to avoid re-processing it.
 			if item.Ack != nil {
-				item.Ack(ctx)
+				item.Ack()
 				logger.Debug("Alert acked")
 			}
 		}

@@ -624,10 +624,10 @@ func TestRedisFifoQueue_AckReleasesLock(t *testing.T) {
 	item := <-sinkCh
 
 	// Call Ack - should ack message and release lock.
-	item.Ack(ctx)
+	item.Ack()
 
 	// Call Ack again - should be no-op due to sync.Once.
-	item.Ack(ctx)
+	item.Ack()
 
 	mockClient.AssertExpectations(t)
 	mockLock.AssertExpectations(t)
@@ -664,10 +664,10 @@ func TestRedisFifoQueue_NackReleasesLock(t *testing.T) {
 	item := <-sinkCh
 
 	// Call Nack - should release lock without acking.
-	item.Nack(ctx)
+	item.Nack()
 
 	// Call Nack again - should be no-op.
-	item.Nack(ctx)
+	item.Nack()
 
 	mockClient.AssertExpectations(t)
 	mockLock.AssertExpectations(t)
