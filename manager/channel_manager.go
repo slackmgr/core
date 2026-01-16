@@ -11,7 +11,6 @@ import (
 	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/internal"
 	"github.com/peteraglen/slack-manager/manager/internal/models"
-	"github.com/peteraglen/slack-manager/manager/internal/slack"
 )
 
 const alertsTotal = "processed_alerts_total"
@@ -20,7 +19,7 @@ type cmdFunc func(ctx context.Context, issue *models.Issue, cmd *models.Command,
 
 type channelManager struct {
 	channelID       string
-	slackClient     *slack.Client
+	slackClient     SlackClient
 	db              common.DB
 	webhookHandlers []WebhookHandler
 	locker          ChannelLocker
@@ -34,7 +33,7 @@ type channelManager struct {
 	cmdFuncs        map[models.CommandAction]cmdFunc
 }
 
-func newChannelManager(channelID string, slackClient *slack.Client, db common.DB, locker ChannelLocker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
+func newChannelManager(channelID string, slackClient SlackClient, db common.DB, locker ChannelLocker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
 	managerSettings *models.ManagerSettingsWrapper,
 ) *channelManager {
 	logger = logger.WithField("channel_id", channelID)
@@ -94,7 +93,7 @@ func (c *channelManager) run(ctx context.Context) {
 
 		select {
 		case <-ctx.Done():
-			// Drain internal channels before exiting.
+			// Drain internal alert and command channels before exiting.
 			c.drainChannels()
 			return
 		case alert, ok := <-c.alertCh:
@@ -102,6 +101,7 @@ func (c *channelManager) run(ctx context.Context) {
 				return
 			}
 
+			// Process the alert. If successful, ack the alert, otherwise nack it for reprocessing.
 			if err := c.processAlert(ctx, alert); err != nil {
 				alert.Nack()
 				c.logger.WithFields(alert.LogFields()).Errorf("Failed to process alert: %s", err)
@@ -119,11 +119,10 @@ func (c *channelManager) run(ctx context.Context) {
 				return
 			}
 
+			// Process the command. Ack or nack happens inside processCmd, depending on success or type of failure.
+			// Command are typically acked regardless of errors, expect for lock acquisition failures.
 			if err := c.processCmd(ctx, cmd); err != nil {
-				cmd.Nack()
 				c.logger.WithFields(cmd.LogFields()).Errorf("Failed to process command: %s", err)
-			} else {
-				cmd.Ack()
 			}
 
 			// Make sure the issue processor is running after a command is received.
@@ -330,17 +329,16 @@ func (c *channelManager) cleanAlertEscalations(ctx context.Context, alert *model
 func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) error {
 	lock, err := c.obtainLock(ctx, c.channelID, 5*time.Minute, 30*time.Second)
 	if err != nil {
+		cmd.Nack() // Nack the command if we fail to obtain the lock. This is the only case where we nack a command.
 		return fmt.Errorf("failed to obtain lock for channel %s after 30 seconds: %w", c.channelID, err)
 	}
 
-	// The command is acked after processing, regardless of any errors. Commands are attempted exactly once.
-	// Errors are logged, but otherwise ignored.
-	defer func() {
-		go ackCommand(cmd)
-	}()
-
 	// The lock is released after the command is fully processed.
 	defer c.releaseLock(lock)
+
+	// The command is acked after processing, regardless of any errors. Commands are attempted exactly once.
+	defer cmd.Ack()
+
 	logger := c.logger.WithFields(cmd.LogFields())
 
 	issue, err := c.findIssueBySlackPost(ctx, cmd.SlackPostID, cmd.IncludeArchivedIssues)
@@ -374,10 +372,6 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 	}
 
 	return nil
-}
-
-func ackCommand(cmd *models.Command) {
-	cmd.Ack()
 }
 
 // processActiveIssues processes all active issues. It handles escalations, archiving and Slack updates (where needed).

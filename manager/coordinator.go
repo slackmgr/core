@@ -11,7 +11,6 @@ import (
 	common "github.com/peteraglen/slack-manager-common"
 	"github.com/peteraglen/slack-manager/config"
 	"github.com/peteraglen/slack-manager/manager/internal/models"
-	"github.com/peteraglen/slack-manager/manager/internal/slack"
 	"github.com/segmentio/ksuid"
 )
 
@@ -25,7 +24,7 @@ type coordinator struct {
 
 	db              common.DB
 	alertQueue      FifoQueue
-	slack           *slack.Client
+	slack           SlackClient
 	cacheStore      store.StoreInterface
 	locker          ChannelLocker
 	logger          common.Logger
@@ -35,7 +34,7 @@ type coordinator struct {
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func newCoordinator(db common.DB, alertQueue FifoQueue, slack *slack.Client, cacheStore store.StoreInterface,
+func newCoordinator(db common.DB, alertQueue FifoQueue, slack SlackClient, cacheStore store.StoreInterface,
 	locker ChannelLocker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler,
 	cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper,
 ) *coordinator {
@@ -331,9 +330,7 @@ func (c *coordinator) runChannelManagerAsync(ctx context.Context, channelManager
 
 func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.Command) error {
 	// Commands are attempted exactly once, so we ack regardless of any errors below.
-	defer func() {
-		go ackCommand(cmd)
-	}()
+	defer cmd.Ack()
 
 	alert := common.NewAlert(common.AlertSeverity(cmd.ParamAsString("severity")))
 
