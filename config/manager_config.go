@@ -9,6 +9,10 @@ import (
 
 var encryptionKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9]{32}$`)
 
+// minDrainTimeout is the minimum allowed drain timeout.
+// This must be at least as long as the internal ack/nack/lock release operation timeouts (2 seconds).
+const minDrainTimeout = 2 * time.Second
+
 // ManagerConfig holds configuration for the Slack Manager main application (not the API).
 // The configuration here are for basic app settings. They cannot be changed after startup.
 type ManagerConfig struct {
@@ -80,6 +84,14 @@ func (c *ManagerConfig) Validate() error {
 
 	if err := c.SlackClient.Validate(); err != nil {
 		return fmt.Errorf("slack client config is invalid: %w", err)
+	}
+
+	if c.CoordinatorDrainTimeout < minDrainTimeout {
+		return fmt.Errorf("coordinator drain timeout must be at least %v", minDrainTimeout)
+	}
+
+	if c.ChannelManagerDrainTimeout < minDrainTimeout {
+		return fmt.Errorf("channel manager drain timeout must be at least %v", minDrainTimeout)
 	}
 
 	return nil

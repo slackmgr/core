@@ -98,6 +98,28 @@ func TestManagerConfig_Validate(t *testing.T) {
 			},
 			expectError: "slack client config is invalid: bot token is empty",
 		},
+		{
+			name: "coordinator drain timeout too short",
+			modify: func(c *config.ManagerConfig) {
+				c.CoordinatorDrainTimeout = 1 * time.Second
+			},
+			expectError: "coordinator drain timeout must be at least 2s",
+		},
+		{
+			name: "channel manager drain timeout too short",
+			modify: func(c *config.ManagerConfig) {
+				c.ChannelManagerDrainTimeout = 1 * time.Second
+			},
+			expectError: "channel manager drain timeout must be at least 2s",
+		},
+		{
+			name: "drain timeouts at minimum are valid",
+			modify: func(c *config.ManagerConfig) {
+				c.CoordinatorDrainTimeout = 2 * time.Second
+				c.ChannelManagerDrainTimeout = 2 * time.Second
+			},
+			expectError: "",
+		},
 	}
 
 	for _, tt := range tests {
