@@ -28,5 +28,8 @@ type ChannelLock interface {
 	Key() string
 
 	// Release releases the lock.
-	Release(ctx context.Context) error
+	// It does not accept a context parameter because releasing a lock is a commitment
+	// that must complete regardless of the caller's context state. Each implementation
+	// is responsible for managing its own timeouts internally.
+	Release() error
 }

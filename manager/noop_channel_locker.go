@@ -26,6 +26,6 @@ func (n *NoopChannelLock) Key() string {
 }
 
 // Release is a no-op method that does nothing.
-func (n *NoopChannelLock) Release(_ context.Context) error {
+func (n *NoopChannelLock) Release() error {
 	return nil
 }

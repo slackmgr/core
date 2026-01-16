@@ -17,7 +17,8 @@ import (
 // ackNackTimeout is the timeout for ack/nack operations.
 // These operations use context.Background() because they must complete regardless
 // of the caller's context state - acknowledgment is a commitment, not a cancellable request.
-const ackNackTimeout = 5 * time.Second
+// This should be shorter than the drain timeouts (default 3-5s) since these are simple Redis operations.
+const ackNackTimeout = 2 * time.Second
 
 // RedisFifoQueue implements the FifoQueue interface using Redis Streams.
 // It uses one stream per Slack channel to ensure message ordering within a channel,
@@ -354,7 +355,7 @@ func (q *RedisFifoQueue) readMessagesWithLocking(ctx context.Context, knownStrea
 		read, err := q.readOneMessageFromStream(ctx, streamKey, channelID, lock, sinkCh)
 		if err != nil {
 			// Release the lock on error.
-			q.releaseLock(ctx, lock)
+			q.releaseLock(lock)
 			return messagesRead, err
 		}
 
@@ -363,7 +364,7 @@ func (q *RedisFifoQueue) readMessagesWithLocking(ctx context.Context, knownStrea
 			// Lock will be released by the ack/nack function.
 		} else {
 			// No message was available, release the lock.
-			q.releaseLock(ctx, lock)
+			q.releaseLock(lock)
 		}
 	}
 
@@ -456,7 +457,7 @@ func (q *RedisFifoQueue) processMessageWithLock(ctx context.Context, streamKey, 
 	if !ok {
 		q.logger.WithField("message_id", msg.ID).Error("Message has no body, acknowledging and skipping")
 		q.ackMessage(ctx, streamKey, msg.ID)
-		q.releaseLock(ctx, lock)
+		q.releaseLock(lock)
 		return nil
 	}
 
@@ -475,18 +476,16 @@ func (q *RedisFifoQueue) processMessageWithLock(ctx context.Context, streamKey, 
 			ctx, cancel := context.WithTimeout(context.Background(), ackNackTimeout)
 			defer cancel()
 			q.ackMessage(ctx, streamKey, msg.ID)
-			q.releaseLock(ctx, lock)
+			q.releaseLock(lock)
 		})
 	}
 
-	nack := func() { //nolint:contextcheck // Deliberately uses context.Background() - nack must complete regardless of caller's context
+	nack := func() {
 		once.Do(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), ackNackTimeout)
-			defer cancel()
 			// For Redis Streams, nack means we don't ack.
 			// The message remains pending and will be reclaimed after claimMinIdleTime.
 			q.logger.WithField("message_id", msg.ID).WithField("stream_key", streamKey).Debug("Message nacked, will be reclaimed")
-			q.releaseLock(ctx, lock)
+			q.releaseLock(lock)
 		})
 	}
 
@@ -504,7 +503,7 @@ func (q *RedisFifoQueue) processMessageWithLock(ctx context.Context, streamKey, 
 		q.logger.WithField("message_id", msg.ID).WithField("channel_id", channelID).Debug("Message received from Redis stream")
 	case <-ctx.Done():
 		// Context cancelled before we could send. Release lock and return error.
-		q.releaseLock(ctx, lock)
+		q.releaseLock(lock)
 		return ctx.Err()
 	}
 
@@ -512,14 +511,14 @@ func (q *RedisFifoQueue) processMessageWithLock(ctx context.Context, streamKey, 
 }
 
 // releaseLock releases a channel lock.
-func (q *RedisFifoQueue) releaseLock(ctx context.Context, lock ChannelLock) {
+func (q *RedisFifoQueue) releaseLock(lock ChannelLock) {
 	if lock == nil {
 		return
 	}
 
 	key := lock.Key()
 
-	if err := lock.Release(ctx); err != nil {
+	if err := lock.Release(); err != nil {
 		q.logger.WithField("lock_key", key).Errorf("Failed to release lock: %v", err)
 	} else {
 		q.logger.WithField("lock_key", key).Debug("Lock released")

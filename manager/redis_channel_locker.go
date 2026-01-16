@@ -9,6 +9,12 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
+// lockReleaseTimeout is the timeout for lock release operations.
+// Release uses context.Background() because it must complete regardless
+// of the caller's context state - releasing a lock is a commitment.
+// This should be shorter than the drain timeouts (default 3-5s) since this is a simple Redis DEL operation.
+const lockReleaseTimeout = 2 * time.Second
+
 // RedisChannelLocker is an implementation of the ChannelLocker interface that uses Redis for distributed locking.
 // It allows multiple instances of the manager to coordinate access to channels, ensuring that only one instance can perform
 // operations on a channel at a time.
@@ -110,10 +116,13 @@ func (l *RedisChannelLock) Key() string {
 // Release releases the lock held by the RedisChannelLock instance.
 // It removes the lock from Redis, allowing other instances to obtain the lock.
 // If the lock is already released, or not held, it returns nil.
-func (l *RedisChannelLock) Release(ctx context.Context) error {
+func (l *RedisChannelLock) Release() error {
 	if l.lock == nil {
 		return nil
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), lockReleaseTimeout)
+	defer cancel()
 
 	if err := l.lock.Release(ctx); err != nil {
 		if !errors.Is(err, redislock.ErrLockNotHeld) {

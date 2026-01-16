@@ -234,8 +234,8 @@ func (m *mockChannelLock) Key() string {
 	return m.key
 }
 
-func (m *mockChannelLock) Release(ctx context.Context) error {
-	args := m.Called(ctx)
+func (m *mockChannelLock) Release() error {
+	args := m.Called()
 	return args.Error(0)
 }
 
@@ -572,7 +572,7 @@ func TestRedisFifoQueue_ProcessMessageWithLock_MissingBody(t *testing.T) {
 	require.NoError(t, err)
 
 	mockClient.On("XAck", mock.Anything, "slack-manager:queue:test-queue:stream:C12345", "slack-manager", []string{"1234567890-0"}).Return(int64(1), nil)
-	mockLock.On("Release", mock.Anything).Return(nil)
+	mockLock.On("Release").Return(nil)
 
 	msg := redis.XMessage{
 		ID: "1234567890-0",
@@ -605,7 +605,7 @@ func TestRedisFifoQueue_AckReleasesLock(t *testing.T) {
 	require.NoError(t, err)
 
 	mockClient.On("XAck", mock.Anything, "slack-manager:queue:test-queue:stream:C12345", "slack-manager", []string{"1234567890-0"}).Return(int64(1), nil).Once()
-	mockLock.On("Release", mock.Anything).Return(nil).Once()
+	mockLock.On("Release").Return(nil).Once()
 
 	msg := redis.XMessage{
 		ID: "1234567890-0",
@@ -645,7 +645,7 @@ func TestRedisFifoQueue_NackReleasesLock(t *testing.T) {
 	_, err := queue.Init()
 	require.NoError(t, err)
 
-	mockLock.On("Release", mock.Anything).Return(nil).Once()
+	mockLock.On("Release").Return(nil).Once()
 
 	msg := redis.XMessage{
 		ID: "1234567890-0",
@@ -946,7 +946,7 @@ func TestRedisFifoQueue_ReleaseLock_NilLock(t *testing.T) {
 	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
 
 	// Should not panic when lock is nil.
-	queue.releaseLock(context.Background(), nil)
+	queue.releaseLock(nil)
 }
 
 func TestRedisFifoQueue_ReleaseLock_Error(t *testing.T) {
@@ -959,10 +959,10 @@ func TestRedisFifoQueue_ReleaseLock_Error(t *testing.T) {
 
 	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
 
-	mockLock.On("Release", mock.Anything).Return(errors.New("release error"))
+	mockLock.On("Release").Return(errors.New("release error"))
 
 	// Should not panic, just log the error.
-	queue.releaseLock(context.Background(), mockLock)
+	queue.releaseLock(mockLock)
 
 	mockLock.AssertExpectations(t)
 }
@@ -1542,7 +1542,7 @@ func TestRedisFifoQueue_ReadMessagesWithLocking_NoMessageReleasesLock(t *testing
 		Return([]redis.XStream{}, redis.Nil)
 
 	// Lock should be released since no message was read.
-	mockLock.On("Release", mock.Anything).Return(nil)
+	mockLock.On("Release").Return(nil)
 
 	knownStreams := map[string]bool{streamKey: true}
 	sinkCh := make(chan *common.FifoQueueItem, 10)
@@ -1579,7 +1579,7 @@ func TestRedisFifoQueue_ReadMessagesWithLocking_ErrorReleasesLock(t *testing.T) 
 		Return([]redis.XMessage{}, "", errors.New("redis error"))
 
 	// Lock should be released on error.
-	mockLock.On("Release", mock.Anything).Return(nil)
+	mockLock.On("Release").Return(nil)
 
 	knownStreams := map[string]bool{streamKey: true}
 	sinkCh := make(chan *common.FifoQueueItem, 10)
@@ -1642,7 +1642,7 @@ func TestRedisFifoQueue_ProcessMessageWithLock_ContextCancelled(t *testing.T) {
 	}
 
 	// Lock should be released when context is cancelled.
-	mockLock.On("Release", mock.Anything).Return(nil)
+	mockLock.On("Release").Return(nil)
 
 	// Create a cancelled context.
 	ctx, cancel := context.WithCancel(context.Background())
