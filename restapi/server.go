@@ -191,6 +191,20 @@ func (s *Server) Run(ctx context.Context) error {
 		s.defaultPretty = false
 	}
 
+	// Calculate timeouts for the HTTP server and handler middleware.
+	readHeaderTimeout := 5 * time.Second
+	handlerTimeout := s.getHandlerTimeout()
+	timeoutWiggleRoom := time.Second
+	readTimeout := readHeaderTimeout + handlerTimeout + timeoutWiggleRoom
+	writeTimeout := handlerTimeout + timeoutWiggleRoom
+
+	// Apply timeout middleware globally.
+	// This MUST be added before routes are registered, otherwise it won't apply to them.
+	engine.Use(timeout.New(
+		timeout.WithTimeout(handlerTimeout),
+		timeout.WithResponse(timeoutResponse),
+	))
+
 	// We support both /alert and /alerts endpoints for backwards compatibility.
 	// Input is either a single alert (common.Alert), or an array of alerts.
 	engine.POST("/alert", s.handleAlerts)
@@ -215,18 +229,6 @@ func (s *Server) Run(ctx context.Context) error {
 
 	// Ping
 	engine.GET("/ping", s.ping)
-
-	readHeaderTimeout := 5 * time.Second
-	handlerTimeout := s.getHandlerTimeout()
-	timeoutWiggleRoom := time.Second
-	readTimeout := readHeaderTimeout + handlerTimeout + timeoutWiggleRoom
-	writeTimeout := handlerTimeout + timeoutWiggleRoom
-
-	// Apply timeout middleware globally
-	engine.Use(timeout.New(
-		timeout.WithTimeout(handlerTimeout),
-		timeout.WithResponse(timeoutResponse),
-	))
 
 	srv := &http.Server{
 		Addr:              ":" + s.cfg.RestPort,
@@ -256,7 +258,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	// Start the channel info syncer, if applicable.
-	if syncer, err := s.channelInfoProvider.(*channelInfoSyncer); err {
+	if syncer, ok := s.channelInfoProvider.(*channelInfoSyncer); ok {
 		errg.Go(func() error {
 			return syncer.Run(ctx)
 		})
