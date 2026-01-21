@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -16,12 +17,37 @@ const (
 
 var slackChannelIDRegex = regexp.MustCompile(`^[0-9a-zA-Z]{9,15}$`)
 
-// APISettings represents the dynamic settings for the API.
-// They can updated for a running instance of the API, using api.Server.UpdateSettings(settings).
+// APISettings contains runtime configuration for the REST API server.
+//
+// These settings control how incoming alerts are routed to Slack channels when alerts
+// specify a route key rather than a direct channel ID. Unlike APIConfig (which requires
+// a restart to change), APISettings can be updated at runtime via the Server's update method.
+//
+// # Alert Routing
+//
+// Alerts can specify their destination in two ways:
+//  1. Direct channel ID: The alert's slackChannelID field contains a channel ID (e.g., "C1234567890")
+//  2. Route key: The alert's routeKey field contains a logical identifier that is matched
+//     against RoutingRules to determine the target channel
+//
+// When an alert uses a route key, the API evaluates RoutingRules in precedence order
+// (exact match > prefix match > regex match > match-all) to find the target channel.
+// See the Match method and RoutingRule documentation for details.
+//
+// # Immutability
+//
+// Settings passed to the API Server are cloned internally to prevent external modifications
+// from affecting the running system. Once settings are passed to the Server, any subsequent
+// changes to the original struct will have no effect. To update settings, create a new
+// APISettings instance and pass it to the Server's update method.
 type APISettings struct {
-	// RoutingRules is a list of rules that define how alerts are routed to Slack channels,
-	// when alert route keys are used. They have no effect for alerts where the Slack channel ID is specified directly.
-	// Refer to the Match method for details on how the rules are evaluated.
+	// RoutingRules defines how alerts with route keys are mapped to Slack channels.
+	// Rules are evaluated in precedence order: exact match, prefix match, regex match,
+	// then match-all. Within each precedence level, rules with a matching AlertType
+	// take priority over rules with no AlertType specified.
+	//
+	// If no rules match an alert's route key, the API returns an error. Consider adding
+	// a catch-all rule (MatchAll: true) as the last rule to handle unmatched alerts.
 	RoutingRules []*RoutingRule `json:"routingRules" yaml:"routingRules"`
 
 	ruleMatchCache map[string]string
@@ -29,46 +55,125 @@ type APISettings struct {
 	initialized    bool
 }
 
-// RoutingRule represents a single rule for routing alerts to Slack channels.
-// Refer to the Match method for details on how the rules are evaluated.
+// RoutingRule defines a single rule for mapping alert route keys to Slack channels.
+//
+// # Matching Behavior
+//
+// A rule matches an alert's route key using one of these mechanisms (in precedence order):
+//
+//  1. Exact match (Equals): The route key exactly matches one of the Equals values
+//  2. Prefix match (HasPrefix): The route key starts with one of the HasPrefix values
+//  3. Regex match (MatchesRegex): The route key matches one of the regular expressions
+//  4. Match-all (MatchAll): The rule matches any route key (used for catch-all rules)
+//
+// All matching is case-insensitive. A rule must have at least one matching mechanism
+// configured (Equals, HasPrefix, MatchesRegex, or MatchAll).
+//
+// # AlertType Filtering
+//
+// If AlertType is set, the rule only matches alerts with that specific type. Rules
+// with a matching AlertType take precedence over rules with no AlertType at the same
+// precedence level. This allows routing different alert types to different channels
+// even when they share the same route key.
+//
+// # Example Configuration
+//
+//	routingRules:
+//	  - name: "security-alerts"
+//	    alertType: "security"
+//	    hasPrefix: ["prod-", "staging-"]
+//	    channel: "C1234567890"  # #security-alerts
+//
+//	  - name: "prod-metrics"
+//	    equals: ["prod-metrics", "production"]
+//	    channel: "C2345678901"  # #prod-monitoring
+//
+//	  - name: "catch-all"
+//	    matchAll: true
+//	    channel: "C3456789012"  # #alerts-general
 type RoutingRule struct {
-	// Name is a (short) unique name for the rule. It does not effect routing.
-	// All rules must have a unique non-empty name.
+	// Name is a unique identifier for the rule, used in logging and debugging.
+	// Does not affect routing behavior. Required and must be unique across all rules.
 	Name string `json:"name" yaml:"name"`
 
-	// Description is a human-readable description of the rule. It does not effect routing.
-	// This field is optional.
+	// Description provides human-readable documentation for the rule.
+	// Does not affect routing behavior. Optional.
 	Description string `json:"description" yaml:"description"`
 
-	// AlertType is the case-insensitive type of alert that this rule matches,
-	// It is user defined, and may have values such as 'compliance', 'security' or 'metrics'.
-	// This field is optional.
-	// If empty, the rule matches all alert types, but rules with a non-empty AlertType take precedence.
+	// AlertType restricts this rule to alerts of a specific type. The value is
+	// case-insensitive and matched against the alert's type field. Common values
+	// include "security", "compliance", "metrics", "infrastructure".
+	//
+	// When multiple rules match a route key, rules with a matching AlertType take
+	// precedence over rules with no AlertType. Leave empty to match all alert types.
 	AlertType string `json:"alertType" yaml:"alertType"`
 
-	// Equals is a list of case-insensitive exact matches for the alert route key.
+	// Equals lists exact route key values that this rule matches. Matching is
+	// case-insensitive. The rule matches if the alert's route key equals any value
+	// in this list. Exact matches have the highest precedence.
 	Equals []string `json:"equals" yaml:"equals"`
 
-	// HasPrefix is a list of case-insensitive prefixes for the alert route key.
+	// HasPrefix lists route key prefixes that this rule matches. Matching is
+	// case-insensitive. The rule matches if the alert's route key starts with any
+	// value in this list. Prefix matches have second-highest precedence.
 	HasPrefix []string `json:"hasPrefix" yaml:"hasPrefix"`
 
-	// MatchesRegex is a list of case-insensitive regular expressions for the alert route key.
-	// If a regex does not start with the case-insensitive flag (?i), it will be added automatically.
+	// MatchesRegex lists regular expressions that this rule matches against route keys.
+	// Patterns are automatically made case-insensitive ((?i) is prepended if not present).
+	// The rule matches if the alert's route key matches any pattern. Regex matches
+	// have third-highest precedence.
 	MatchesRegex []string `json:"matchesRegex" yaml:"matchesRegex"`
 
-	// MatchAll is a flag that indicates that this rule matches all alerts.
-	// This field is typically used to create a catch-all (fallback) rule, to capture all alerts that do not match any other rule.
+	// MatchAll makes this rule match any route key, regardless of value. Used to
+	// create catch-all rules that handle alerts not matched by more specific rules.
+	// Match-all rules have the lowest precedence - they only match when no other
+	// rule matches. Only one catch-all rule per AlertType is typically needed.
 	MatchAll bool `json:"matchAll" yaml:"matchAll"`
 
-	// Channel is the Slack channel ID to route the alert to (if the rule is a match), for example C1234567890.
+	// Channel is the Slack channel ID where matching alerts are sent. Must be a valid
+	// channel ID (e.g., "C1234567890"), not a channel name. Required.
 	Channel string `json:"channel" yaml:"channel"`
 
 	regex []*regexp.Regexp
 }
 
-// InitAndValidate initializes and validates the API settings.
-// An error is returned if the settings are invalid.
-// This function is called from inside the API, so it is not necessary to call it from the outside.
+// Clone creates a deep copy of the APISettings by marshaling to JSON and back.
+// The returned clone is NOT initialized - InitAndValidate() must be called before use.
+//
+// This method is used internally by the API Server to ensure that external modifications
+// to the original settings struct do not affect the running system.
+//
+// Only exported fields are copied. Unexported fields (compiled regexes, cache, mutex,
+// initialized flag) are intentionally excluded since InitAndValidate() rebuilds them.
+func (s *APISettings) Clone() (*APISettings, error) {
+	data, err := json.Marshal(s)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal settings: %w", err)
+	}
+
+	clone := &APISettings{}
+	if err := json.Unmarshal(data, clone); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal settings: %w", err)
+	}
+
+	return clone, nil
+}
+
+// InitAndValidate initializes internal data structures and validates all routing rules.
+//
+// This method performs the following operations:
+//  1. Normalizes all string values (trims whitespace, converts to lowercase for matching)
+//  2. Validates that each rule has a unique, non-empty name
+//  3. Compiles regular expressions for MatchesRegex patterns
+//  4. Validates that each rule has at least one matching mechanism configured
+//  5. Validates that all channel IDs are valid Slack channel ID format
+//  6. Initializes the route match cache for performance
+//
+// This method is idempotent - calling it multiple times on an already-initialized
+// APISettings has no effect. The API Server calls this internally when settings
+// are updated, so external callers typically don't need to call it directly.
+//
+// Returns an error describing the first validation failure encountered, or nil if valid.
 func (s *APISettings) InitAndValidate(logger common.Logger) error {
 	if s.initialized {
 		return nil
@@ -163,18 +268,25 @@ func (s *APISettings) InitAndValidate(logger common.Logger) error {
 	return nil
 }
 
-// Match matches a route key and alert type to a Slack channel ID, based on the routing rules.
-// If more than one rule matches, the most specific rule is returned.
-// Specificity is determined by the type of match, in the following order:
-//  1. Exact match
-//  2. Prefix match
-//  3. Regex match
-//  4. Match-all rule
+// Match finds the target Slack channel for an alert based on its route key and alert type.
 //
-// Furthermore, rules with a non-empty matching AlertType take precedence over rules with an empty AlertType.
+// The method evaluates routing rules in precedence order to find the best match:
 //
-// If a match is found, the Slack channel ID is returned, along with a boolean indicating success.
-// If no match is found, an empty string and false are returned.
+//  1. Exact match (Equals) - highest precedence
+//  2. Prefix match (HasPrefix)
+//  3. Regex match (MatchesRegex)
+//  4. Match-all rule (MatchAll) - lowest precedence, used as catch-all
+//
+// Within each precedence level, rules with a matching AlertType take priority over rules
+// with no AlertType configured. This allows different alert types to be routed to different
+// channels even when they share the same route key.
+//
+// Results are cached in a thread-safe map for performance, as route matching occurs
+// frequently during alert processing. Both the route key and alert type are normalized
+// to lowercase before matching.
+//
+// Returns the target channel ID and true if a match is found, or ("", false) if no
+// routing rule matches the given route key and alert type.
 func (s *APISettings) Match(routeKey, alertType string, logger common.Logger) (string, bool) {
 	routeKey = strings.ToLower(routeKey)
 	alertType = strings.ToLower(alertType)

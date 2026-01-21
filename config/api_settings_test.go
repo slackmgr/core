@@ -583,3 +583,185 @@ func TestRoutingRule_ValidChannelIDFormats(t *testing.T) {
 		})
 	}
 }
+
+func TestAPISettings_Clone(t *testing.T) {
+	t.Parallel()
+
+	t.Run("creates independent copy of settings", func(t *testing.T) {
+		t.Parallel()
+
+		original := &config.APISettings{
+			RoutingRules: []*config.RoutingRule{
+				{
+					Name:         "rule-1",
+					Description:  "First rule",
+					AlertType:    "security",
+					Equals:       []string{"exact-match"},
+					HasPrefix:    []string{"prefix-"},
+					MatchesRegex: []string{"regex.*"},
+					Channel:      "C1234567890",
+				},
+				{
+					Name:     "rule-2",
+					MatchAll: true,
+					Channel:  "C0987654321",
+				},
+			},
+		}
+
+		clone, err := original.Clone()
+
+		require.NoError(t, err)
+		require.NotNil(t, clone)
+
+		// Verify the clone has the same values
+		require.Len(t, clone.RoutingRules, 2)
+		assert.Equal(t, original.RoutingRules[0].Name, clone.RoutingRules[0].Name)
+		assert.Equal(t, original.RoutingRules[0].Description, clone.RoutingRules[0].Description)
+		assert.Equal(t, original.RoutingRules[0].AlertType, clone.RoutingRules[0].AlertType)
+		assert.Equal(t, original.RoutingRules[0].Equals, clone.RoutingRules[0].Equals)
+		assert.Equal(t, original.RoutingRules[0].HasPrefix, clone.RoutingRules[0].HasPrefix)
+		assert.Equal(t, original.RoutingRules[0].MatchesRegex, clone.RoutingRules[0].MatchesRegex)
+		assert.Equal(t, original.RoutingRules[0].Channel, clone.RoutingRules[0].Channel)
+
+		assert.Equal(t, original.RoutingRules[1].Name, clone.RoutingRules[1].Name)
+		assert.Equal(t, original.RoutingRules[1].MatchAll, clone.RoutingRules[1].MatchAll)
+		assert.Equal(t, original.RoutingRules[1].Channel, clone.RoutingRules[1].Channel)
+	})
+
+	t.Run("modifications to original do not affect clone", func(t *testing.T) {
+		t.Parallel()
+
+		original := &config.APISettings{
+			RoutingRules: []*config.RoutingRule{
+				{
+					Name:    "rule-1",
+					Equals:  []string{"key1", "key2"},
+					Channel: "C1234567890",
+				},
+			},
+		}
+
+		clone, err := original.Clone()
+		require.NoError(t, err)
+
+		// Modify the original
+		original.RoutingRules[0].Name = "modified-name"
+		original.RoutingRules[0].Equals[0] = "modified-key"
+		original.RoutingRules[0].Equals = append(original.RoutingRules[0].Equals, "key3")
+		original.RoutingRules = append(original.RoutingRules, &config.RoutingRule{
+			Name:    "rule-2",
+			Channel: "C0000000000",
+		})
+
+		// Clone should be unaffected
+		assert.Equal(t, "rule-1", clone.RoutingRules[0].Name)
+		assert.Equal(t, []string{"key1", "key2"}, clone.RoutingRules[0].Equals)
+		assert.Len(t, clone.RoutingRules, 1)
+	})
+
+	t.Run("modifications to clone do not affect original", func(t *testing.T) {
+		t.Parallel()
+
+		original := &config.APISettings{
+			RoutingRules: []*config.RoutingRule{
+				{
+					Name:    "rule-1",
+					Equals:  []string{"key1"},
+					Channel: "C1234567890",
+				},
+			},
+		}
+
+		clone, err := original.Clone()
+		require.NoError(t, err)
+
+		// Modify the clone
+		clone.RoutingRules[0].Name = "clone-name"
+		clone.RoutingRules[0].Equals[0] = "clone-key"
+
+		// Original should be unaffected
+		assert.Equal(t, "rule-1", original.RoutingRules[0].Name)
+		assert.Equal(t, []string{"key1"}, original.RoutingRules[0].Equals)
+	})
+
+	t.Run("clone is not initialized", func(t *testing.T) {
+		t.Parallel()
+
+		original := &config.APISettings{
+			RoutingRules: []*config.RoutingRule{
+				{
+					Name:    "rule-1",
+					Equals:  []string{"key1"},
+					Channel: "C1234567890",
+				},
+			},
+		}
+
+		// Initialize the original
+		logger := &mockLogger{}
+		err := original.InitAndValidate(logger)
+		require.NoError(t, err)
+
+		// Clone should not be initialized
+		clone, err := original.Clone()
+		require.NoError(t, err)
+
+		// The clone should work after InitAndValidate is called
+		err = clone.InitAndValidate(logger)
+		assert.NoError(t, err)
+	})
+
+	t.Run("clone can be validated and used independently", func(t *testing.T) {
+		t.Parallel()
+
+		original := &config.APISettings{
+			RoutingRules: []*config.RoutingRule{
+				{
+					Name:    "rule-1",
+					Equals:  []string{"key1"},
+					Channel: "C1234567890",
+				},
+			},
+		}
+
+		clone, err := original.Clone()
+		require.NoError(t, err)
+
+		// Clone should validate successfully
+		logger := &mockLogger{}
+		err = clone.InitAndValidate(logger)
+		require.NoError(t, err)
+
+		// Clone should be usable for matching
+		channel, matched := clone.Match("key1", "", logger)
+		assert.True(t, matched)
+		assert.Equal(t, "C1234567890", channel)
+	})
+
+	t.Run("empty settings clone successfully", func(t *testing.T) {
+		t.Parallel()
+
+		original := &config.APISettings{}
+
+		clone, err := original.Clone()
+
+		require.NoError(t, err)
+		require.NotNil(t, clone)
+		assert.Nil(t, clone.RoutingRules)
+	})
+
+	t.Run("settings with empty routing rules clone successfully", func(t *testing.T) {
+		t.Parallel()
+
+		original := &config.APISettings{
+			RoutingRules: []*config.RoutingRule{},
+		}
+
+		clone, err := original.Clone()
+
+		require.NoError(t, err)
+		require.NotNil(t, clone)
+		assert.Empty(t, clone.RoutingRules)
+	})
+}

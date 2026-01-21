@@ -916,3 +916,171 @@ func TestManagerSettings_MethodsBeforeInitialization(t *testing.T) {
 	// IssueProcessingInterval returns a default value
 	assert.Equal(t, time.Duration(config.DefaultIssueProcessingIntervalSeconds)*time.Second, settings.IssueProcessingInterval("C123"))
 }
+
+func TestManagerSettings_Clone(t *testing.T) {
+	t.Parallel()
+
+	t.Run("creates independent copy of settings", func(t *testing.T) {
+		t.Parallel()
+
+		original := &config.ManagerSettings{
+			AppFriendlyName:                   "Test App",
+			GlobalAdmins:                      []string{"U001", "U002"},
+			DefaultPostIconEmoji:              ":rocket:",
+			DefaultPostUsername:               "Test Bot",
+			DefaultIssueArchivingDelaySeconds: 7200,
+			IssueReorderingLimit:              25,
+			IssueProcessingIntervalSeconds:    15,
+			MinIssueCountForThrottle:          10,
+			MaxThrottleDurationSeconds:        120,
+			IssueReactions: &config.IssueReactionSettings{
+				TerminateEmojis:   []string{":boom:"},
+				ResolveEmojis:     []string{":done:"},
+				InvestigateEmojis: []string{":mag:"},
+			},
+			IssueStatus: &config.IssueStatusSettings{
+				PanicEmoji: ":fire:",
+				ErrorEmoji: ":red_circle:",
+			},
+			AlertChannels: []*config.AlertChannelSettings{
+				{
+					ID:                   "C001",
+					AdminUsers:           []string{"U100"},
+					IssueReorderingLimit: 50,
+				},
+			},
+			InfoChannels: []*config.InfoChannelSettings{
+				{
+					ID:           "C002",
+					TemplatePath: "/path/to/template",
+				},
+			},
+		}
+
+		clone, err := original.Clone()
+
+		require.NoError(t, err)
+		require.NotNil(t, clone)
+
+		// Verify the clone has the same values
+		assert.Equal(t, original.AppFriendlyName, clone.AppFriendlyName)
+		assert.Equal(t, original.GlobalAdmins, clone.GlobalAdmins)
+		assert.Equal(t, original.DefaultPostIconEmoji, clone.DefaultPostIconEmoji)
+		assert.Equal(t, original.DefaultIssueArchivingDelaySeconds, clone.DefaultIssueArchivingDelaySeconds)
+		assert.Equal(t, original.IssueReorderingLimit, clone.IssueReorderingLimit)
+		assert.Equal(t, original.MinIssueCountForThrottle, clone.MinIssueCountForThrottle)
+
+		// Verify nested structs are cloned
+		require.NotNil(t, clone.IssueReactions)
+		assert.Equal(t, original.IssueReactions.TerminateEmojis, clone.IssueReactions.TerminateEmojis)
+
+		require.NotNil(t, clone.IssueStatus)
+		assert.Equal(t, original.IssueStatus.PanicEmoji, clone.IssueStatus.PanicEmoji)
+
+		// Verify slices are independent copies
+		require.Len(t, clone.AlertChannels, 1)
+		assert.Equal(t, original.AlertChannels[0].ID, clone.AlertChannels[0].ID)
+
+		require.Len(t, clone.InfoChannels, 1)
+		assert.Equal(t, original.InfoChannels[0].ID, clone.InfoChannels[0].ID)
+	})
+
+	t.Run("modifications to original do not affect clone", func(t *testing.T) {
+		t.Parallel()
+
+		original := &config.ManagerSettings{
+			AppFriendlyName: "Original Name",
+			GlobalAdmins:    []string{"U001"},
+			AlertChannels: []*config.AlertChannelSettings{
+				{ID: "C001", AdminUsers: []string{"U100"}},
+			},
+		}
+
+		clone, err := original.Clone()
+		require.NoError(t, err)
+
+		// Modify the original
+		original.AppFriendlyName = "Modified Name"
+		original.GlobalAdmins[0] = "U999"
+		original.GlobalAdmins = append(original.GlobalAdmins, "U002")
+		original.AlertChannels[0].ID = "C999"
+
+		// Clone should be unaffected
+		assert.Equal(t, "Original Name", clone.AppFriendlyName)
+		assert.Equal(t, []string{"U001"}, clone.GlobalAdmins)
+		assert.Equal(t, "C001", clone.AlertChannels[0].ID)
+	})
+
+	t.Run("modifications to clone do not affect original", func(t *testing.T) {
+		t.Parallel()
+
+		original := &config.ManagerSettings{
+			AppFriendlyName: "Original Name",
+			GlobalAdmins:    []string{"U001"},
+		}
+
+		clone, err := original.Clone()
+		require.NoError(t, err)
+
+		// Modify the clone
+		clone.AppFriendlyName = "Clone Name"
+		clone.GlobalAdmins[0] = "U999"
+
+		// Original should be unaffected
+		assert.Equal(t, "Original Name", original.AppFriendlyName)
+		assert.Equal(t, []string{"U001"}, original.GlobalAdmins)
+	})
+
+	t.Run("clone is not initialized", func(t *testing.T) {
+		t.Parallel()
+
+		original := &config.ManagerSettings{
+			AppFriendlyName: "Test App",
+		}
+
+		// Initialize the original
+		err := original.InitAndValidate()
+		require.NoError(t, err)
+
+		// Clone should not be initialized
+		clone, err := original.Clone()
+		require.NoError(t, err)
+
+		// The clone should work after InitAndValidate is called
+		err = clone.InitAndValidate()
+		assert.NoError(t, err)
+	})
+
+	t.Run("clone can be validated independently", func(t *testing.T) {
+		t.Parallel()
+
+		original := &config.ManagerSettings{
+			AppFriendlyName:      "Test App",
+			IssueReorderingLimit: 30,
+			AlertChannels: []*config.AlertChannelSettings{
+				{ID: "C001"},
+			},
+		}
+
+		clone, err := original.Clone()
+		require.NoError(t, err)
+
+		// Clone should validate successfully
+		err = clone.InitAndValidate()
+		require.NoError(t, err)
+
+		// Verify the clone's internal state is properly initialized
+		assert.True(t, clone.OrderIssuesBySeverity("C001", 10))
+	})
+
+	t.Run("empty settings clone successfully", func(t *testing.T) {
+		t.Parallel()
+
+		original := &config.ManagerSettings{}
+
+		clone, err := original.Clone()
+
+		require.NoError(t, err)
+		require.NotNil(t, clone)
+	})
+}
