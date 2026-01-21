@@ -1639,3 +1639,316 @@ func TestIgnoreAlert(t *testing.T) {
 		assert.False(t, ignore)
 	})
 }
+
+// --- Raw Alert Consumer Tests ---
+
+type mockFifoQueueConsumer struct {
+	mock.Mock
+
+	items chan *common.FifoQueueItem
+}
+
+func newMockFifoQueueConsumer() *mockFifoQueueConsumer {
+	return &mockFifoQueueConsumer{
+		items: make(chan *common.FifoQueueItem, 10),
+	}
+}
+
+func (m *mockFifoQueueConsumer) Receive(ctx context.Context, sinkCh chan<- *common.FifoQueueItem) error {
+	args := m.Called(ctx, sinkCh)
+
+	// Forward items from internal channel to sink channel
+	for {
+		select {
+		case <-ctx.Done():
+			close(sinkCh)
+			return ctx.Err()
+		case item, ok := <-m.items:
+			if !ok {
+				close(sinkCh)
+				return args.Error(0)
+			}
+			sinkCh <- item
+		}
+	}
+}
+
+func (m *mockFifoQueueConsumer) SendItem(item *common.FifoQueueItem) {
+	m.items <- item
+}
+
+func (m *mockFifoQueueConsumer) Close() {
+	close(m.items)
+}
+
+func newTestServerWithInitializedSettings(t *testing.T) (*Server, *mockFifoQueueProducer, *mockChannelInfoProvider) {
+	t.Helper()
+
+	server, queue, channelInfo := newTestServer(t)
+	// Initialize settings to set up the internal matchCache
+	_ = server.apiSettings.InitAndValidate(&mockLogger{})
+	return server, queue, channelInfo
+}
+
+func TestServer_RunRawAlertConsumer(t *testing.T) {
+	t.Parallel()
+
+	t.Run("acks message on successful processing", func(t *testing.T) {
+		t.Parallel()
+
+		server, queue, channelInfo := newTestServerWithInitializedSettings(t)
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: true,
+			UserCount:          10,
+		}, nil)
+		queue.On("Send", mock.Anything, "C123", mock.Anything, mock.Anything).Return(nil)
+
+		consumer := newMockFifoQueueConsumer()
+		consumer.On("Receive", mock.Anything, mock.Anything).Return(nil)
+
+		ackCalled := false
+		nackCalled := false
+
+		alert := common.Alert{
+			SlackChannelID: "C123",
+			Header:         "Test Alert",
+		}
+		alertJSON, _ := json.Marshal(alert)
+
+		item := &common.FifoQueueItem{
+			MessageID:      "msg-1",
+			SlackChannelID: "C123",
+			Body:           string(alertJSON),
+			Ack:            func() { ackCalled = true },
+			Nack:           func() { nackCalled = true },
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		go func() {
+			consumer.SendItem(item)
+			time.Sleep(50 * time.Millisecond)
+			cancel()
+		}()
+
+		_ = server.runRawAlertConsumer(ctx, consumer)
+
+		assert.True(t, ackCalled, "ack should be called on successful processing")
+		assert.False(t, nackCalled, "nack should not be called on successful processing")
+	})
+
+	t.Run("acks message on invalid JSON", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServerWithInitializedSettings(t)
+
+		consumer := newMockFifoQueueConsumer()
+		consumer.On("Receive", mock.Anything, mock.Anything).Return(nil)
+
+		ackCalled := false
+		nackCalled := false
+
+		item := &common.FifoQueueItem{
+			MessageID:      "msg-1",
+			SlackChannelID: "C123",
+			Body:           "invalid json",
+			Ack:            func() { ackCalled = true },
+			Nack:           func() { nackCalled = true },
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		go func() {
+			consumer.SendItem(item)
+			time.Sleep(50 * time.Millisecond)
+			cancel()
+		}()
+
+		_ = server.runRawAlertConsumer(ctx, consumer)
+
+		assert.True(t, ackCalled, "ack should be called on invalid JSON to avoid reprocessing")
+		assert.False(t, nackCalled, "nack should not be called on invalid JSON")
+	})
+
+	t.Run("nacks message on retryable processing error", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, channelInfo := newTestServerWithInitializedSettings(t)
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		// Return an error from GetChannelInfo - this causes a retryable error
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(nil, errors.New("transient error"))
+
+		consumer := newMockFifoQueueConsumer()
+		consumer.On("Receive", mock.Anything, mock.Anything).Return(nil)
+
+		ackCalled := false
+		nackCalled := false
+
+		alert := common.Alert{
+			SlackChannelID: "C123",
+			Header:         "Test Alert",
+		}
+		alertJSON, _ := json.Marshal(alert)
+
+		item := &common.FifoQueueItem{
+			MessageID:      "msg-1",
+			SlackChannelID: "C123",
+			Body:           string(alertJSON),
+			Ack:            func() { ackCalled = true },
+			Nack:           func() { nackCalled = true },
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		go func() {
+			consumer.SendItem(item)
+			time.Sleep(50 * time.Millisecond)
+			cancel()
+		}()
+
+		_ = server.runRawAlertConsumer(ctx, consumer)
+
+		assert.False(t, ackCalled, "ack should not be called on retryable error")
+		assert.True(t, nackCalled, "nack should be called on retryable error")
+	})
+
+	t.Run("acks message on non-retryable processing error", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, channelInfo := newTestServerWithInitializedSettings(t)
+
+		// No channel ID and no route key match - this causes a non-retryable error
+		channelInfo.On("MapChannelNameToIDIfNeeded", "").Return("")
+
+		consumer := newMockFifoQueueConsumer()
+		consumer.On("Receive", mock.Anything, mock.Anything).Return(nil)
+
+		ackCalled := false
+		nackCalled := false
+
+		// Alert without SlackChannelID - will fail validation (non-retryable)
+		alert := common.Alert{
+			Header: "Test Alert",
+		}
+		alertJSON, _ := json.Marshal(alert)
+
+		item := &common.FifoQueueItem{
+			MessageID:      "msg-1",
+			SlackChannelID: "",
+			Body:           string(alertJSON),
+			Ack:            func() { ackCalled = true },
+			Nack:           func() { nackCalled = true },
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		go func() {
+			consumer.SendItem(item)
+			time.Sleep(50 * time.Millisecond)
+			cancel()
+		}()
+
+		_ = server.runRawAlertConsumer(ctx, consumer)
+
+		assert.True(t, ackCalled, "ack should be called on non-retryable error to avoid reprocessing")
+		assert.False(t, nackCalled, "nack should not be called on non-retryable error")
+	})
+
+	t.Run("handles nil ack and nack functions", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServerWithInitializedSettings(t)
+
+		consumer := newMockFifoQueueConsumer()
+		consumer.On("Receive", mock.Anything, mock.Anything).Return(nil)
+
+		item := &common.FifoQueueItem{
+			MessageID:      "msg-1",
+			SlackChannelID: "C123",
+			Body:           "invalid json",
+			Ack:            nil,
+			Nack:           nil,
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		go func() {
+			consumer.SendItem(item)
+			time.Sleep(50 * time.Millisecond)
+			cancel()
+		}()
+
+		// Should not panic when Ack/Nack are nil
+		err := server.runRawAlertConsumer(ctx, consumer)
+		assert.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("processes multiple messages in order", func(t *testing.T) {
+		t.Parallel()
+
+		server, queue, channelInfo := newTestServerWithInitializedSettings(t)
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", mock.Anything).Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: true,
+			UserCount:          10,
+		}, nil)
+		queue.On("Send", mock.Anything, "C123", mock.Anything, mock.Anything).Return(nil)
+
+		consumer := newMockFifoQueueConsumer()
+		consumer.On("Receive", mock.Anything, mock.Anything).Return(nil)
+
+		ackCount := 0
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		go func() {
+			for i := range 3 {
+				alert := common.Alert{
+					SlackChannelID: "C123",
+					Header:         "Test Alert",
+				}
+				alertJSON, _ := json.Marshal(alert)
+
+				item := &common.FifoQueueItem{
+					MessageID:      "msg-" + string(rune('1'+i)),
+					SlackChannelID: "C123",
+					Body:           string(alertJSON),
+					Ack:            func() { ackCount++ },
+					Nack:           nil,
+				}
+				consumer.SendItem(item)
+			}
+			time.Sleep(100 * time.Millisecond)
+			cancel()
+		}()
+
+		_ = server.runRawAlertConsumer(ctx, consumer)
+
+		assert.Equal(t, 3, ackCount, "all messages should be acked")
+	})
+
+	t.Run("returns error from consumer", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServerWithInitializedSettings(t)
+
+		consumer := newMockFifoQueueConsumer()
+		expectedErr := errors.New("consumer error")
+		consumer.On("Receive", mock.Anything, mock.Anything).Return(expectedErr)
+
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			consumer.Close()
+		}()
+
+		err := server.runRawAlertConsumer(context.Background(), consumer)
+
+		assert.ErrorIs(t, err, expectedErr)
+	})
+}
