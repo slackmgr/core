@@ -50,3 +50,4 @@ profile*.pdf
 
 # AI stuff
 .claude/*.local.json
+plan.md

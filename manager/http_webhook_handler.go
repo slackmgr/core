@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -64,15 +65,26 @@ func (h *HTTPWebhookHandler) HandleWebhook(ctx context.Context, target string, d
 	return nil
 }
 
-// webhookRetryPolicy defines the retry policy for webhook HTTP requests.
-// It retries on network errors and on HTTP 429 and 5xx status codes.
+// webhookRetryPolicy determines whether a failed webhook request should be retried.
+// It retries on connection errors (except context cancellation, deadline exceeded,
+// and DNS resolution failures) and on HTTP 429 (rate limit) or 5xx server errors.
 func webhookRetryPolicy(r *resty.Response, err error) bool {
 	if err != nil {
-		return !errors.Is(err, context.Canceled) &&
-			!errors.Is(err, context.DeadlineExceeded) &&
-			!strings.Contains(err.Error(), "no such host")
+		// Don't retry on context cancellation or deadline exceeded
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return false
+		}
+
+		// Don't retry on DNS resolution errors
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) {
+			return false
+		}
+
+		// Retry on other connection errors
+		return true
 	}
 
-	// Retry on 429 and 5xx errors
+	// Retry on 429 (rate limit) and 5xx (server errors)
 	return r.StatusCode() == 429 || r.StatusCode() >= 500
 }
