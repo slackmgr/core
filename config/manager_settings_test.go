@@ -372,14 +372,14 @@ func TestManagerSettings_InitAndValidate_AlertChannels(t *testing.T) {
 			channels: []*config.AlertChannelSettings{
 				{ID: "C123456789", IssueReorderingLimit: config.MinIssueReorderingLimit - 1},
 			},
-			expectError: "alertChannels[0].issueReorderingLimit must be between MinIssueReorderingLimit and MaxIssueReorderingLimit (use DisableIssueReordering to turn off reordering)",
+			expectError: "alertChannels[0].issueReorderingLimit must be between 5 and 100 (use DisableIssueReordering to turn off reordering)",
 		},
 		{
 			name: "channel processing interval below minimum",
 			channels: []*config.AlertChannelSettings{
 				{ID: "C123456789", IssueProcessingIntervalSeconds: config.MinIssueProcessingIntervalSeconds - 1},
 			},
-			expectError: "alertChannels[0].issueProcessingIntervalSeconds must be between MinIssueProcessingIntervalSeconds and MaxIssueProcessingIntervalSeconds",
+			expectError: "alertChannels[0].issueProcessingIntervalSeconds must be between 3 and 600 seconds",
 		},
 	}
 
@@ -660,4 +660,259 @@ func TestManagerSettings_MapSlackPostReaction(t *testing.T) {
 
 	// Empty string
 	assert.Equal(t, config.IssueReaction(""), settings.MapSlackPostReaction(""))
+}
+
+func TestManagerSettings_InitAndValidate_DefaultPostIconEmoji_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		emoji    string
+		expected string
+	}{
+		{
+			name:     "missing leading colon",
+			emoji:    "rocket:",
+			expected: ":rocket:",
+		},
+		{
+			name:     "missing trailing colon",
+			emoji:    ":rocket",
+			expected: ":rocket:",
+		},
+		{
+			name:     "missing both colons",
+			emoji:    "rocket",
+			expected: ":rocket:",
+		},
+		{
+			name:     "valid format unchanged",
+			emoji:    ":rocket:",
+			expected: ":rocket:",
+		},
+		{
+			name:     "whitespace trimmed",
+			emoji:    "  :rocket:  ",
+			expected: ":rocket:",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			settings := &config.ManagerSettings{
+				DefaultPostIconEmoji: tt.emoji,
+			}
+
+			err := settings.InitAndValidate()
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, settings.DefaultPostIconEmoji)
+		})
+	}
+}
+
+func TestManagerSettings_InitAndValidate_DuplicateAlertChannelIDs(t *testing.T) {
+	t.Parallel()
+
+	settings := &config.ManagerSettings{
+		AlertChannels: []*config.AlertChannelSettings{
+			{ID: "C123456789"},
+			{ID: "C123456789"},
+		},
+	}
+
+	err := settings.InitAndValidate()
+
+	require.Error(t, err)
+	assert.Equal(t, `alertChannels[1].id "C123456789" is a duplicate`, err.Error())
+}
+
+func TestManagerSettings_InitAndValidate_DuplicateInfoChannelIDs(t *testing.T) {
+	t.Parallel()
+
+	settings := &config.ManagerSettings{
+		InfoChannels: []*config.InfoChannelSettings{
+			{ID: "C123456789", TemplatePath: "/path1"},
+			{ID: "C123456789", TemplatePath: "/path2"},
+		},
+	}
+
+	err := settings.InitAndValidate()
+
+	require.Error(t, err)
+	assert.Equal(t, `infoChannels[1].id "C123456789" is a duplicate`, err.Error())
+}
+
+func TestManagerSettings_InitAndValidate_OverlappingAlertAndInfoChannelIDs(t *testing.T) {
+	t.Parallel()
+
+	settings := &config.ManagerSettings{
+		AlertChannels: []*config.AlertChannelSettings{
+			{ID: "C123456789"},
+		},
+		InfoChannels: []*config.InfoChannelSettings{
+			{ID: "C123456789", TemplatePath: "/path"},
+		},
+	}
+
+	err := settings.InitAndValidate()
+
+	require.Error(t, err)
+	assert.Equal(t, `infoChannels[0].id "C123456789" is already configured as an alert channel`, err.Error())
+}
+
+func TestManagerSettings_InitAndValidate_ThrottleSettings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                       string
+		minIssueCountForThrottle   int
+		maxThrottleDurationSeconds int
+		expectError                string
+	}{
+		{
+			name:                       "valid at lower bounds",
+			minIssueCountForThrottle:   config.MinMinIssueCountForThrottle,
+			maxThrottleDurationSeconds: config.MinMaxThrottleDurationSeconds,
+			expectError:                "",
+		},
+		{
+			name:                       "valid at upper bounds",
+			minIssueCountForThrottle:   config.MaxMinIssueCountForThrottle,
+			maxThrottleDurationSeconds: config.MaxMaxThrottleDurationSeconds,
+			expectError:                "",
+		},
+		{
+			name:                     "min issue count above maximum",
+			minIssueCountForThrottle: config.MaxMinIssueCountForThrottle + 1,
+			expectError:              "min issue count for throttle must be between 1 and 100",
+		},
+		{
+			name:                       "max throttle duration above maximum",
+			maxThrottleDurationSeconds: config.MaxMaxThrottleDurationSeconds + 1,
+			expectError:                "max throttle duration must be between 1 and 600 seconds",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			settings := &config.ManagerSettings{
+				MinIssueCountForThrottle:   tt.minIssueCountForThrottle,
+				MaxThrottleDurationSeconds: tt.maxThrottleDurationSeconds,
+			}
+
+			err := settings.InitAndValidate()
+
+			if tt.expectError == "" {
+				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tt.expectError, err.Error())
+			}
+		})
+	}
+}
+
+func TestManagerSettings_InitAndValidate_ThrottleSettingsDefaults(t *testing.T) {
+	t.Parallel()
+
+	// Zero and negative values should use defaults instead of erroring
+	tests := []struct {
+		name                       string
+		minIssueCountForThrottle   int
+		maxThrottleDurationSeconds int
+	}{
+		{
+			name:                       "zero values use defaults",
+			minIssueCountForThrottle:   0,
+			maxThrottleDurationSeconds: 0,
+		},
+		{
+			name:                       "negative values use defaults",
+			minIssueCountForThrottle:   -5,
+			maxThrottleDurationSeconds: -10,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			settings := &config.ManagerSettings{
+				MinIssueCountForThrottle:   tt.minIssueCountForThrottle,
+				MaxThrottleDurationSeconds: tt.maxThrottleDurationSeconds,
+			}
+
+			err := settings.InitAndValidate()
+
+			require.NoError(t, err)
+			assert.Equal(t, config.DefaultMinIssueCountForThrottle, settings.MinIssueCountForThrottle)
+			assert.Equal(t, config.DefaultMaxThrottleDurationSeconds, settings.MaxThrottleDurationSeconds)
+		})
+	}
+}
+
+func TestManagerSettings_InitAndValidate_InvalidReactionEmojis(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		reactions   *config.IssueReactionSettings
+		expectError string
+	}{
+		{
+			name: "empty emoji in terminate list",
+			reactions: &config.IssueReactionSettings{
+				TerminateEmojis: []string{":valid:", ""},
+			},
+			expectError: "issueReactions.terminateEmojis[1] cannot be empty",
+		},
+		{
+			name: "whitespace only emoji in mute list",
+			reactions: &config.IssueReactionSettings{
+				MuteEmojis: []string{"   "},
+			},
+			expectError: "issueReactions.muteEmojis[0] cannot be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			settings := &config.ManagerSettings{
+				IssueReactions: tt.reactions,
+			}
+
+			err := settings.InitAndValidate()
+
+			require.Error(t, err)
+			assert.Equal(t, tt.expectError, err.Error())
+		})
+	}
+}
+
+func TestManagerSettings_MethodsBeforeInitialization(t *testing.T) {
+	t.Parallel()
+
+	// Test that methods return safe defaults when called before initialization
+	settings := &config.ManagerSettings{}
+
+	// These should return false/nil instead of panicking
+	assert.False(t, settings.UserIsGlobalAdmin("U123"))
+	assert.False(t, settings.UserIsChannelAdmin(context.Background(), "C123", "U123", nil))
+	assert.False(t, settings.IsInfoChannel("C123"))
+	assert.False(t, settings.OrderIssuesBySeverity("C123", 5))
+	assert.Equal(t, config.IssueReaction(""), settings.MapSlackPostReaction("firecracker"))
+
+	cfg, found := settings.GetInfoChannelConfig("C123")
+	assert.Nil(t, cfg)
+	assert.False(t, found)
+
+	// IssueProcessingInterval returns a default value
+	assert.Equal(t, time.Duration(config.DefaultIssueProcessingIntervalSeconds)*time.Second, settings.IssueProcessingInterval("C123"))
 }

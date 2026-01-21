@@ -6,41 +6,112 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	common "github.com/peteraglen/slack-manager-common"
 )
 
+// Default values for ManagerSettings fields.
 const (
-	DefaultPostIconEmoji                  = ":female-detective:"
-	DefaultPostUsername                   = "Slack Manager"
-	DefaultAlertSeverity                  = common.AlertError
-	DefaultIssueArchivingDelaySeconds     = 12 * 3600 // 12 hours
-	MinIssueArchivingDelaySeconds         = 60
-	MaxIssueArchivingDelaySeconds         = 30 * 24 * 3600 // 30 days
-	DefaultIssueReorderingLimit           = 30
-	MinIssueReorderingLimit               = 5
-	MaxIssueReorderingLimit               = 100
+	// DefaultPostIconEmoji is the default Slack post icon emoji.
+	DefaultPostIconEmoji = ":female-detective:"
+
+	// DefaultPostUsername is the default Slack post username.
+	DefaultPostUsername = "Slack Manager"
+
+	// DefaultAlertSeverity is the default severity for alerts.
+	DefaultAlertSeverity = common.AlertError
+
+	// DefaultAppFriendlyName is the default friendly name for the app.
+	DefaultAppFriendlyName = "Slack Manager"
+)
+
+// Issue archiving delay constants.
+const (
+	// DefaultIssueArchivingDelaySeconds is the default delay before archiving resolved issues (12 hours).
+	DefaultIssueArchivingDelaySeconds = 12 * 3600
+
+	// MinIssueArchivingDelaySeconds is the minimum archiving delay (1 minute).
+	// Shorter delays risk archiving issues before users have seen them.
+	MinIssueArchivingDelaySeconds = 60
+
+	// MaxIssueArchivingDelaySeconds is the maximum archiving delay (30 days).
+	// Longer delays would cause excessive accumulation of resolved issues.
+	MaxIssueArchivingDelaySeconds = 30 * 24 * 3600
+)
+
+// Issue reordering constants.
+const (
+	// DefaultIssueReorderingLimit is the default maximum number of issues that can be reordered.
+	DefaultIssueReorderingLimit = 30
+
+	// MinIssueReorderingLimit is the minimum reordering limit.
+	// Below this, reordering provides little value.
+	MinIssueReorderingLimit = 5
+
+	// MaxIssueReorderingLimit is the maximum reordering limit.
+	// Above this, reordering becomes too slow and may hit Slack rate limits.
+	MaxIssueReorderingLimit = 100
+)
+
+// Issue processing interval constants.
+const (
+	// DefaultIssueProcessingIntervalSeconds is the default interval between issue processing runs (10 seconds).
 	DefaultIssueProcessingIntervalSeconds = 10
-	MinIssueProcessingIntervalSeconds     = 3
-	MaxIssueProcessingIntervalSeconds     = 600
-	DefaultIssueTerminateEmoji            = ":firecracker:"
-	DefaultIssueResolveEmoji              = ":white_check_mark:"
-	DefaultIssueInvestigateEmoji          = ":eyes:"
-	DefaultIssueMuteEmoji                 = ":mask:"
-	DefaultIssueShowOptionButtonsEmoji    = ":information_source:"
-	DefaultMinIssueCountForThrottle       = 5
-	DefaultMaxThrottleDurationSeconds     = 90 // 1.5 minutes
-	DefaultAppFriendlyName                = "Slack Manager"
-	DefaultPanicEmoji                     = ":scream:"
-	DefaultErrorEmoji                     = ":x:"
-	DefaultWarningEmoji                   = ":warning:"
-	DefaultInfoEmoji                      = ":information_source:"
-	DefaultMutePanicEmoji                 = ":no_bell:"
-	DefaultMuteErrorEmoji                 = ":no_bell:"
-	DefaultMuteWarningEmoji               = ":no_bell:"
-	DefaultInconclusiveEmoji              = ":grey_question:"
-	DefaultResolvedEmoji                  = ":white_check_mark:"
+
+	// MinIssueProcessingIntervalSeconds is the minimum processing interval (3 seconds).
+	// Shorter intervals may cause excessive API calls and rate limiting.
+	MinIssueProcessingIntervalSeconds = 3
+
+	// MaxIssueProcessingIntervalSeconds is the maximum processing interval (10 minutes).
+	// Longer intervals cause delayed updates to issue states.
+	MaxIssueProcessingIntervalSeconds = 600
+)
+
+// Throttle constants to prevent excessive Slack API calls.
+const (
+	// DefaultMinIssueCountForThrottle is the default minimum issue count before throttling is considered.
+	DefaultMinIssueCountForThrottle = 5
+
+	// MinMinIssueCountForThrottle is the minimum allowed value for MinIssueCountForThrottle.
+	MinMinIssueCountForThrottle = 1
+
+	// MaxMinIssueCountForThrottle is the maximum allowed value for MinIssueCountForThrottle.
+	// Higher values effectively disable throttling in most scenarios.
+	MaxMinIssueCountForThrottle = 100
+
+	// DefaultMaxThrottleDurationSeconds is the default maximum throttle duration (90 seconds).
+	DefaultMaxThrottleDurationSeconds = 90
+
+	// MinMaxThrottleDurationSeconds is the minimum allowed throttle duration (1 second).
+	MinMaxThrottleDurationSeconds = 1
+
+	// MaxMaxThrottleDurationSeconds is the maximum allowed throttle duration (10 minutes).
+	// Longer durations cause unacceptable delays in issue updates.
+	MaxMaxThrottleDurationSeconds = 600
+)
+
+// Default emoji constants for issue reactions.
+const (
+	DefaultIssueTerminateEmoji         = ":firecracker:"
+	DefaultIssueResolveEmoji           = ":white_check_mark:"
+	DefaultIssueInvestigateEmoji       = ":eyes:"
+	DefaultIssueMuteEmoji              = ":mask:"
+	DefaultIssueShowOptionButtonsEmoji = ":information_source:"
+)
+
+// Default emoji constants for issue status indicators.
+const (
+	DefaultPanicEmoji        = ":scream:"
+	DefaultErrorEmoji        = ":x:"
+	DefaultWarningEmoji      = ":warning:"
+	DefaultInfoEmoji         = ":information_source:"
+	DefaultMutePanicEmoji    = ":no_bell:"
+	DefaultMuteErrorEmoji    = ":no_bell:"
+	DefaultMuteWarningEmoji  = ":no_bell:"
+	DefaultInconclusiveEmoji = ":grey_question:"
+	DefaultResolvedEmoji     = ":white_check_mark:"
 )
 
 // ManagerSettings contains the settings for the Slack Manager system,
@@ -130,11 +201,12 @@ type ManagerSettings struct {
 	// These channels are used to display information about the Slack Manager system, but cannot be used to handle alerts.
 	InfoChannels []*InfoChannelSettings `json:"infoChannels" yaml:"infoChannels"`
 
-	globalAdmins     map[string]struct{}
-	alertChannels    map[string]*AlertChannelSettings
-	infoChannels     map[string]*InfoChannelSettings
-	issueReactionMap map[string]IssueReaction
-	initialized      bool
+	globalAdmins       map[string]struct{}
+	alertChannels      map[string]*AlertChannelSettings
+	infoChannels       map[string]*InfoChannelSettings
+	issueReactionMap   map[string]IssueReaction
+	issueReactionMutex sync.RWMutex
+	initialized        bool
 }
 
 // IssueReactionSettings contains the settings for Slack post reactions.
@@ -233,14 +305,23 @@ func (s *ManagerSettings) InitAndValidate() error {
 		s.globalAdmins[userID] = struct{}{}
 	}
 
-	if s.DefaultPostIconEmoji != "" && !strings.HasPrefix(s.DefaultPostIconEmoji, ":") && !strings.HasSuffix(s.DefaultPostIconEmoji, ":") {
-		s.DefaultPostIconEmoji = ":" + s.DefaultPostIconEmoji + ":"
-	}
-
 	if s.DefaultPostIconEmoji == "" {
 		s.DefaultPostIconEmoji = DefaultPostIconEmoji
-	} else if !common.IconRegex.MatchString(s.DefaultPostIconEmoji) {
-		return errors.New("default icon emoji must be on the format \":emoji:\"")
+	} else {
+		// Normalize emoji format by ensuring it has colons on both ends
+		s.DefaultPostIconEmoji = strings.TrimSpace(s.DefaultPostIconEmoji)
+
+		if !strings.HasPrefix(s.DefaultPostIconEmoji, ":") {
+			s.DefaultPostIconEmoji = ":" + s.DefaultPostIconEmoji
+		}
+
+		if !strings.HasSuffix(s.DefaultPostIconEmoji, ":") {
+			s.DefaultPostIconEmoji += ":"
+		}
+
+		if !common.IconRegex.MatchString(s.DefaultPostIconEmoji) {
+			return errors.New("default icon emoji must be on the format \":emoji:\"")
+		}
 	}
 
 	if s.DefaultPostUsername == "" {
@@ -262,30 +343,50 @@ func (s *ManagerSettings) InitAndValidate() error {
 	if s.DefaultIssueArchivingDelaySeconds <= 0 {
 		s.DefaultIssueArchivingDelaySeconds = DefaultIssueArchivingDelaySeconds
 	} else if s.DefaultIssueArchivingDelaySeconds < MinIssueArchivingDelaySeconds || s.DefaultIssueArchivingDelaySeconds > MaxIssueArchivingDelaySeconds {
-		return errors.New("default archiving delay must be between MinIssueArchivingDelaySeconds and MaxIssueArchivingDelaySeconds")
+		return fmt.Errorf("default archiving delay must be between %d and %d seconds", MinIssueArchivingDelaySeconds, MaxIssueArchivingDelaySeconds)
 	}
 
 	if s.IssueReorderingLimit <= 0 {
 		s.IssueReorderingLimit = DefaultIssueReorderingLimit
 	} else if s.IssueReorderingLimit < MinIssueReorderingLimit || s.IssueReorderingLimit > MaxIssueReorderingLimit {
-		return errors.New("issue reordering limit must be between MinIssueReorderingLimit and MaxIssueReorderingLimit (use DisableIssueReordering to turn off reordering)")
+		return fmt.Errorf("issue reordering limit must be between %d and %d (use DisableIssueReordering to turn off reordering)", MinIssueReorderingLimit, MaxIssueReorderingLimit)
 	}
 
 	if s.IssueProcessingIntervalSeconds <= 0 {
 		s.IssueProcessingIntervalSeconds = DefaultIssueProcessingIntervalSeconds
 	} else if s.IssueProcessingIntervalSeconds < MinIssueProcessingIntervalSeconds || s.IssueProcessingIntervalSeconds > MaxIssueProcessingIntervalSeconds {
-		return errors.New("issue processing interval must be between MinIssueProcessingIntervalSeconds and MaxIssueProcessingIntervalSeconds")
+		return fmt.Errorf("issue processing interval must be between %d and %d seconds", MinIssueProcessingIntervalSeconds, MaxIssueProcessingIntervalSeconds)
 	}
 
 	if s.IssueReactions == nil {
 		s.IssueReactions = &IssueReactionSettings{}
 	}
 
-	s.IssueReactions.TerminateEmojis = initReactionEmojiSlice(s.IssueReactions.TerminateEmojis, DefaultIssueTerminateEmoji)
-	s.IssueReactions.ResolveEmojis = initReactionEmojiSlice(s.IssueReactions.ResolveEmojis, DefaultIssueResolveEmoji)
-	s.IssueReactions.InvestigateEmojis = initReactionEmojiSlice(s.IssueReactions.InvestigateEmojis, DefaultIssueInvestigateEmoji)
-	s.IssueReactions.MuteEmojis = initReactionEmojiSlice(s.IssueReactions.MuteEmojis, DefaultIssueMuteEmoji)
-	s.IssueReactions.ShowOptionButtonsEmojis = initReactionEmojiSlice(s.IssueReactions.ShowOptionButtonsEmojis, DefaultIssueShowOptionButtonsEmoji)
+	var err error
+	s.IssueReactions.TerminateEmojis, err = initReactionEmojiSlice(s.IssueReactions.TerminateEmojis, DefaultIssueTerminateEmoji, "issueReactions.terminateEmojis")
+	if err != nil {
+		return err
+	}
+
+	s.IssueReactions.ResolveEmojis, err = initReactionEmojiSlice(s.IssueReactions.ResolveEmojis, DefaultIssueResolveEmoji, "issueReactions.resolveEmojis")
+	if err != nil {
+		return err
+	}
+
+	s.IssueReactions.InvestigateEmojis, err = initReactionEmojiSlice(s.IssueReactions.InvestigateEmojis, DefaultIssueInvestigateEmoji, "issueReactions.investigateEmojis")
+	if err != nil {
+		return err
+	}
+
+	s.IssueReactions.MuteEmojis, err = initReactionEmojiSlice(s.IssueReactions.MuteEmojis, DefaultIssueMuteEmoji, "issueReactions.muteEmojis")
+	if err != nil {
+		return err
+	}
+
+	s.IssueReactions.ShowOptionButtonsEmojis, err = initReactionEmojiSlice(s.IssueReactions.ShowOptionButtonsEmojis, DefaultIssueShowOptionButtonsEmoji, "issueReactions.showOptionButtonsEmojis")
+	if err != nil {
+		return err
+	}
 
 	if s.IssueStatus == nil {
 		s.IssueStatus = &IssueStatusSettings{}
@@ -303,10 +404,14 @@ func (s *ManagerSettings) InitAndValidate() error {
 
 	if s.MinIssueCountForThrottle <= 0 {
 		s.MinIssueCountForThrottle = DefaultMinIssueCountForThrottle
+	} else if s.MinIssueCountForThrottle < MinMinIssueCountForThrottle || s.MinIssueCountForThrottle > MaxMinIssueCountForThrottle {
+		return fmt.Errorf("min issue count for throttle must be between %d and %d", MinMinIssueCountForThrottle, MaxMinIssueCountForThrottle)
 	}
 
 	if s.MaxThrottleDurationSeconds <= 0 {
 		s.MaxThrottleDurationSeconds = DefaultMaxThrottleDurationSeconds
+	} else if s.MaxThrottleDurationSeconds < MinMaxThrottleDurationSeconds || s.MaxThrottleDurationSeconds > MaxMaxThrottleDurationSeconds {
+		return fmt.Errorf("max throttle duration must be between %d and %d seconds", MinMaxThrottleDurationSeconds, MaxMaxThrottleDurationSeconds)
 	}
 
 	for i, a := range s.AlertChannels {
@@ -314,6 +419,10 @@ func (s *ManagerSettings) InitAndValidate() error {
 
 		if a.ID == "" {
 			return fmt.Errorf("alertChannels[%d].id cannot be empty", i)
+		}
+
+		if _, exists := s.alertChannels[a.ID]; exists {
+			return fmt.Errorf("alertChannels[%d].id %q is a duplicate", i, a.ID)
 		}
 
 		a.adminUsers = make(map[string]struct{})
@@ -342,13 +451,13 @@ func (s *ManagerSettings) InitAndValidate() error {
 		if a.IssueReorderingLimit <= 0 {
 			a.IssueReorderingLimit = s.IssueReorderingLimit
 		} else if a.IssueReorderingLimit < MinIssueReorderingLimit || a.IssueReorderingLimit > MaxIssueReorderingLimit {
-			return fmt.Errorf("alertChannels[%d].issueReorderingLimit must be between MinIssueReorderingLimit and MaxIssueReorderingLimit (use DisableIssueReordering to turn off reordering)", i)
+			return fmt.Errorf("alertChannels[%d].issueReorderingLimit must be between %d and %d (use DisableIssueReordering to turn off reordering)", i, MinIssueReorderingLimit, MaxIssueReorderingLimit)
 		}
 
 		if a.IssueProcessingIntervalSeconds <= 0 {
 			a.IssueProcessingIntervalSeconds = s.IssueProcessingIntervalSeconds
 		} else if a.IssueProcessingIntervalSeconds < MinIssueProcessingIntervalSeconds || a.IssueProcessingIntervalSeconds > MaxIssueProcessingIntervalSeconds {
-			return fmt.Errorf("alertChannels[%d].issueProcessingIntervalSeconds must be between MinIssueProcessingIntervalSeconds and MaxIssueProcessingIntervalSeconds", i)
+			return fmt.Errorf("alertChannels[%d].issueProcessingIntervalSeconds must be between %d and %d seconds", i, MinIssueProcessingIntervalSeconds, MaxIssueProcessingIntervalSeconds)
 		}
 
 		s.alertChannels[a.ID] = a
@@ -360,6 +469,14 @@ func (s *ManagerSettings) InitAndValidate() error {
 
 		if a.ID == "" {
 			return fmt.Errorf("infoChannels[%d].id cannot be empty", i)
+		}
+
+		if _, exists := s.infoChannels[a.ID]; exists {
+			return fmt.Errorf("infoChannels[%d].id %q is a duplicate", i, a.ID)
+		}
+
+		if _, exists := s.alertChannels[a.ID]; exists {
+			return fmt.Errorf("infoChannels[%d].id %q is already configured as an alert channel", i, a.ID)
 		}
 
 		if a.TemplatePath == "" {
@@ -374,53 +491,23 @@ func (s *ManagerSettings) InitAndValidate() error {
 	return nil
 }
 
-func initReactionEmojiSlice(emojis []string, defaultEmoji string) []string {
-	result := []string{}
-
-	for _, emoji := range emojis {
-		emoji = strings.TrimSpace(emoji)
-
-		if !common.IconRegex.MatchString(emoji) {
-			continue
-		}
-
-		if emoji != "" {
-			result = append(result, emoji)
-		}
-	}
-
-	if len(result) == 0 {
-		result = []string{defaultEmoji}
-	}
-
-	// When comparing with reaction events, we need to remove the colons from the emojis.
-	for i, emoji := range result {
-		result[i] = strings.Trim(emoji, ":")
-	}
-
-	return result
-}
-
-func initStatusEmoji(emoji, defaultEmoji string) string {
-	emoji = strings.TrimSpace(emoji)
-
-	if !common.IconRegex.MatchString(emoji) {
-		return defaultEmoji
-	}
-
-	return emoji
-}
-
+// UserIsGlobalAdmin returns true if the user is a global admin.
+// This method must only be called after InitAndValidate has been called.
 func (s *ManagerSettings) UserIsGlobalAdmin(userID string) bool {
-	if _, ok := s.globalAdmins[userID]; ok {
-		return true
+	if !s.initialized {
+		return false
 	}
 
-	return false
+	_, ok := s.globalAdmins[userID]
+	return ok
 }
 
+// UserIsChannelAdmin returns true if the user is an admin for the specified channel.
+// A user is a channel admin if they are a global admin, a channel-specific admin user,
+// or a member of a channel-specific admin group.
+// This method must only be called after InitAndValidate has been called.
 func (s *ManagerSettings) UserIsChannelAdmin(ctx context.Context, channelID, userID string, userIsInGroup func(ctx context.Context, groupID, userID string) bool) bool {
-	if userID == "" || channelID == "" {
+	if !s.initialized || userID == "" || channelID == "" {
 		return false
 	}
 
@@ -449,23 +536,35 @@ func (s *ManagerSettings) UserIsChannelAdmin(ctx context.Context, channelID, use
 	return false
 }
 
+// IsInfoChannel returns true if the channel is configured as an info channel.
+// This method must only be called after InitAndValidate has been called.
 func (s *ManagerSettings) IsInfoChannel(channelID string) bool {
-	if _, ok := s.infoChannels[channelID]; ok {
-		return true
+	if !s.initialized {
+		return false
 	}
 
-	return false
+	_, ok := s.infoChannels[channelID]
+	return ok
 }
 
+// GetInfoChannelConfig returns the configuration for an info channel.
+// This method must only be called after InitAndValidate has been called.
 func (s *ManagerSettings) GetInfoChannelConfig(channelID string) (*InfoChannelSettings, bool) {
-	if c, ok := s.infoChannels[channelID]; ok {
-		return c, true
+	if !s.initialized {
+		return nil, false
 	}
 
-	return nil, false
+	c, ok := s.infoChannels[channelID]
+	return c, ok
 }
 
+// OrderIssuesBySeverity returns true if issues should be reordered by severity for the channel.
+// This method must only be called after InitAndValidate has been called.
 func (s *ManagerSettings) OrderIssuesBySeverity(channelID string, openIssueCount int) bool {
+	if !s.initialized {
+		return false
+	}
+
 	if a, ok := s.alertChannels[channelID]; ok {
 		return !a.DisableIssueReordering && openIssueCount <= a.IssueReorderingLimit
 	}
@@ -473,7 +572,13 @@ func (s *ManagerSettings) OrderIssuesBySeverity(channelID string, openIssueCount
 	return !s.DisableIssueReordering && openIssueCount <= s.IssueReorderingLimit
 }
 
+// IssueProcessingInterval returns the issue processing interval for the channel.
+// This method must only be called after InitAndValidate has been called.
 func (s *ManagerSettings) IssueProcessingInterval(channelID string) time.Duration {
+	if !s.initialized {
+		return time.Duration(DefaultIssueProcessingIntervalSeconds) * time.Second
+	}
+
 	if a, ok := s.alertChannels[channelID]; ok {
 		return time.Duration(a.IssueProcessingIntervalSeconds) * time.Second
 	}
@@ -481,15 +586,23 @@ func (s *ManagerSettings) IssueProcessingInterval(channelID string) time.Duratio
 	return time.Duration(s.IssueProcessingIntervalSeconds) * time.Second
 }
 
+// MapSlackPostReaction maps a Slack reaction emoji to an IssueReaction type.
+// Results are cached for performance. This method is thread-safe.
+// This method must only be called after InitAndValidate has been called.
 func (s *ManagerSettings) MapSlackPostReaction(reaction string) IssueReaction {
-	if reaction == "" {
+	if reaction == "" || !s.initialized {
 		return ""
 	}
 
+	// Check cache with read lock first
+	s.issueReactionMutex.RLock()
 	if val, ok := s.issueReactionMap[reaction]; ok {
+		s.issueReactionMutex.RUnlock()
 		return val
 	}
+	s.issueReactionMutex.RUnlock()
 
+	// Compute the reaction type
 	var r IssueReaction
 
 	switch {
@@ -507,7 +620,58 @@ func (s *ManagerSettings) MapSlackPostReaction(reaction string) IssueReaction {
 		r = ""
 	}
 
+	// Store in cache with write lock
+	s.issueReactionMutex.Lock()
 	s.issueReactionMap[reaction] = r
+	s.issueReactionMutex.Unlock()
 
 	return r
+}
+
+func initReactionEmojiSlice(emojis []string, defaultEmoji string, fieldName string) ([]string, error) {
+	result := []string{}
+
+	for i, emoji := range emojis {
+		emoji = strings.TrimSpace(emoji)
+
+		if emoji == "" {
+			return nil, fmt.Errorf("%s[%d] cannot be empty", fieldName, i)
+		}
+
+		// Normalize by adding colons if missing
+		if !strings.HasPrefix(emoji, ":") {
+			emoji = ":" + emoji
+		}
+
+		if !strings.HasSuffix(emoji, ":") {
+			emoji += ":"
+		}
+
+		if !common.IconRegex.MatchString(emoji) {
+			return nil, fmt.Errorf("%s[%d] %q is not a valid emoji format (expected :emoji:)", fieldName, i, emojis[i])
+		}
+
+		result = append(result, emoji)
+	}
+
+	if len(result) == 0 {
+		result = []string{defaultEmoji}
+	}
+
+	// When comparing with reaction events, we need to remove the colons from the emojis.
+	for i, emoji := range result {
+		result[i] = strings.Trim(emoji, ":")
+	}
+
+	return result, nil
+}
+
+func initStatusEmoji(emoji, defaultEmoji string) string {
+	emoji = strings.TrimSpace(emoji)
+
+	if !common.IconRegex.MatchString(emoji) {
+		return defaultEmoji
+	}
+
+	return emoji
 }
