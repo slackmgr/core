@@ -32,6 +32,8 @@ const (
 	httpRequestMetric = "http_server_request_duration_seconds"
 )
 
+var ErrRateLimit = errors.New("rate limit exceeded")
+
 type FifoQueueConsumer interface {
 	Receive(ctx context.Context, sinkCh chan<- *common.FifoQueueItem) error
 }
@@ -381,26 +383,27 @@ func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueCons
 	return errg.Wait()
 }
 
-func (s *Server) writeErrorResponse(c *gin.Context, clientErr error, statusCode int, alert *common.Alert) {
-	errText := clientErr.Error()
-
-	if len(errText) > 1 {
-		errText = strings.ToUpper(string(errText[0])) + errText[1:]
-	}
+func (s *Server) writeErrorResponse(c *gin.Context, err error, statusCode int, alert *common.Alert) {
+	errorMsg := err.Error()
 
 	if statusCode < 500 {
-		s.logger.Infof("Request failed: %s", errText)
+		s.logger.WithField("error", err.Error()).Info("Request failed")
 	} else {
-		s.logger.Errorf("Request failed: %s", errText)
+		s.logger.WithField("error", err.Error()).Error("Request failed")
+		errorMsg = "Internal server error"
 	}
 
-	c.JSON(statusCode, errorResponse{Error: errText})
+	if len(errorMsg) > 1 {
+		errorMsg = strings.ToUpper(string(errorMsg[0])) + errorMsg[1:]
+	}
+
+	c.JSON(statusCode, errorResponse{Error: errorMsg})
 
 	if s.cfg.ErrorReportChannelID != "" {
 		targetChannel := debugGetAlertChannelOrRouteKey(c, alert)
 		debugFields := debugGetAlertFields(alert)
 
-		alert := s.createClientErrorAlert(clientErr, statusCode, debugFields, targetChannel)
+		alert := s.createClientErrorAlert(err, statusCode, debugFields, targetChannel)
 
 		if err := s.queueAlert(c.Request.Context(), alert); err != nil {
 			s.logger.Errorf("Failed to queue client error alert: %s", err)
@@ -474,38 +477,22 @@ func (s *Server) queueAlert(ctx context.Context, alert *common.Alert) error {
 	return nil
 }
 
-func (s *Server) waitForRateLimit(ctx context.Context, channel string, count int, failOnRateLimitError bool) (int, error) {
+func (s *Server) waitForRateLimit(ctx context.Context, channel string, count int) error {
 	limiter := s.getRateLimiter(channel)
-	attempt := 1
 
-	for {
-		timeout := time.Duration(s.cfg.RateLimit.MaxWaitPerAttemptSeconds) * time.Second
-		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	timeoutCtx, cancel := context.WithTimeout(ctx, s.cfg.RateLimitPerAlertChannel.MaxRequestWaitTime)
+	defer cancel()
 
-		err := limiter.WaitN(timeoutCtx, count)
-		cancel()
-
-		if err == nil {
-			return count, nil
+	err := limiter.WaitN(timeoutCtx, count)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "rate") {
+			return ErrRateLimit
 		}
 
-		// Something other than rate limiting is going on
-		if !strings.Contains(err.Error(), "rate") {
-			return 0, fmt.Errorf("failed to wait for rate limit: %w", err)
-		}
-
-		// Stop trying after configured number of events
-		if attempt >= s.cfg.RateLimit.MaxAttempts {
-			return 0, fmt.Errorf("rate limit exceeded for %d alerts in channel %s", count, channel)
-		}
-
-		attempt++
-
-		// Reduce the number of permits to wait for, IF failOnRateLimitError is false
-		if count > 3 && !failOnRateLimitError {
-			count /= 2
-		}
+		return fmt.Errorf("failed to wait for rate limit: %w", err)
 	}
+
+	return nil
 }
 
 func (s *Server) getRateLimiter(channel string) *rate.Limiter {
@@ -515,7 +502,7 @@ func (s *Server) getRateLimiter(channel string) *rate.Limiter {
 	limiter, ok := s.limitersByChannel[channel]
 
 	if !ok {
-		limiter = rate.NewLimiter(rate.Limit(s.cfg.RateLimit.AlertsPerSecond), s.cfg.RateLimit.AllowedBurst)
+		limiter = rate.NewLimiter(rate.Limit(s.cfg.RateLimitPerAlertChannel.AlertsPerSecond), s.cfg.RateLimitPerAlertChannel.AllowedBurst)
 		s.limitersByChannel[channel] = limiter
 	}
 
@@ -530,8 +517,9 @@ func (s *Server) debugLogRequest(c *gin.Context, body []byte) {
 // It ensures that the timeout is sufficient to handle the maximum wait time due to rate limiting, plus a small buffer.
 // The timeout is never less than 30 seconds.
 func (s *Server) getHandlerTimeout() time.Duration {
-	apiRateLimitMaxTimeSeconds := (s.cfg.RateLimit.MaxWaitPerAttemptSeconds * s.cfg.RateLimit.MaxAttempts) + 3
+	apiRateLimitMaxTimeSeconds := int(s.cfg.RateLimitPerAlertChannel.MaxRequestWaitTime.Seconds()) + 5
 
+	// Ensure a minimum timeout of 30 seconds.
 	timeoutSeconds := max(
 		apiRateLimitMaxTimeSeconds,
 		30,

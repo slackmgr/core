@@ -103,7 +103,16 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*common.Alert, started t
 		return
 	}
 
-	alertLimitPerChannel := s.cfg.RateLimit.AllowedBurst
+	alertLimitPerChannel := s.cfg.RateLimitPerAlertChannel.AllowedBurst
+
+	// Check that no channel exceeds the maximum number of alerts allowed per request.
+	for channel, channelAlerts := range alertsByChannel {
+		if len(channelAlerts) > alertLimitPerChannel {
+			err := fmt.Errorf("too many alerts for channel %s: %d alerts (limit: %d)", channel, len(channelAlerts), alertLimitPerChannel)
+			s.writeErrorResponse(c, err, http.StatusBadRequest, channelAlerts[0])
+			return
+		}
+	}
 
 	for channel, channelAlerts := range alertsByChannel {
 		channelInfo, err := s.channelInfoProvider.GetChannelInfo(c.Request.Context(), channel)
@@ -118,34 +127,17 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*common.Alert, started t
 			return
 		}
 
-		keptAlerts, skippedAlerts := reduceAlertCountForChannel(channel, channelAlerts, alertLimitPerChannel)
-
-		if len(skippedAlerts) > 0 {
-			channelAlerts = keptAlerts
-
-			s.logAlerts("Alert dropped", "Too many alerts in request", started, skippedAlerts...)
-		}
-
-		failOnRateLimitError := channelAlerts[0].FailOnRateLimitError
 		alertCount := len(channelAlerts)
 
-		permitCount, err := s.waitForRateLimit(c.Request.Context(), channel, alertCount, failOnRateLimitError)
-		if err != nil {
-			s.writeErrorResponse(c, err, http.StatusTooManyRequests, channelAlerts[0])
+		if err = s.waitForRateLimit(c.Request.Context(), channel, alertCount); err != nil {
+			if errors.Is(err, ErrRateLimit) {
+				err = fmt.Errorf("rate limit exceeded for %d alerts in channel %s", alertCount, channel)
+				s.writeErrorResponse(c, err, http.StatusTooManyRequests, channelAlerts[0])
+				return
+			}
+
+			s.writeErrorResponse(c, err, http.StatusInternalServerError, channelAlerts[0])
 			return
-		}
-
-		if permitCount < alertCount {
-			keptAlerts := channelAlerts[0:permitCount]
-			skippedAlerts := channelAlerts[permitCount:]
-			overflow := alertCount - permitCount
-			firstVictim := channelAlerts[permitCount]
-			rateLimitAlert := createRateLimitAlert(channel, overflow, firstVictim)
-			keptAlerts = append(keptAlerts, rateLimitAlert)
-
-			s.logAlerts("Alert dropped", "Rate limiting", started, skippedAlerts...)
-
-			channelAlerts = keptAlerts
 		}
 
 		for _, alert := range channelAlerts {
@@ -356,38 +348,6 @@ func (s *Server) logAlerts(text, reason string, started time.Time, alerts ...*co
 
 		entry.Info(text)
 	}
-}
-
-func reduceAlertCountForChannel(channel string, alerts []*common.Alert, limit int) ([]*common.Alert, []*common.Alert) {
-	if len(alerts) <= limit {
-		return alerts, []*common.Alert{}
-	}
-
-	reducedAlerts := alerts[0:limit]
-	overflow := len(alerts) - len(reducedAlerts)
-	firstVictim := alerts[limit]
-	rateLimitAlert := createRateLimitAlert(channel, overflow, firstVictim)
-	reducedAlerts = append(reducedAlerts, rateLimitAlert)
-
-	return reducedAlerts, alerts[limit:]
-}
-
-func createRateLimitAlert(channel string, overflow int, template *common.Alert) *common.Alert {
-	summary := common.NewPanicAlert()
-	summary.CorrelationID = "__rate_limit_" + channel
-	summary.Header = ":status: Too many alerts"
-	summary.Text = fmt.Sprintf("%d alerts were dropped", overflow)
-	summary.FallbackText = "Too many alerts"
-	summary.IconEmoji = template.IconEmoji
-	summary.Username = template.Username
-	summary.SlackChannelID = channel
-
-	if template.IssueFollowUpEnabled {
-		summary.IssueFollowUpEnabled = true
-		summary.AutoResolveSeconds = 3600
-	}
-
-	return summary
 }
 
 func ignoreAlert(alert *common.Alert) (bool, string) {

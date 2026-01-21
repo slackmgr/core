@@ -169,11 +169,10 @@ func newTestServer(t *testing.T) (*Server, *mockFifoQueueProducer, *mockChannelI
 	cfg := &config.APIConfig{
 		RestPort:               "8080",
 		MaxUsersInAlertChannel: 1000,
-		RateLimit: &config.RateLimitConfig{
-			AlertsPerSecond:          10,
-			AllowedBurst:             100,
-			MaxAttempts:              3,
-			MaxWaitPerAttemptSeconds: 5,
+		RateLimitPerAlertChannel: &config.RateLimitConfig{
+			AlertsPerSecond:    10,
+			AllowedBurst:       100,
+			MaxRequestWaitTime: 5 * time.Second,
 		},
 	}
 
@@ -529,15 +528,47 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 	t.Parallel()
 
+	t.Run("returns 400 when too many alerts for channel", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, channelInfo := newTestServer(t)
+		server.cfg.RateLimitPerAlertChannel.AllowedBurst = 3 // Only allow 3 alerts per channel
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: true,
+			UserCount:          10,
+		}, nil)
+
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		// Send 5 alerts which exceeds AllowedBurst of 3
+		alerts := []common.Alert{
+			{SlackChannelID: "C123", Header: "Alert 1"},
+			{SlackChannelID: "C123", Header: "Alert 2"},
+			{SlackChannelID: "C123", Header: "Alert 3"},
+			{SlackChannelID: "C123", Header: "Alert 4"},
+			{SlackChannelID: "C123", Header: "Alert 5"},
+		}
+		body, _ := json.Marshal(alerts)
+		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertJSONError(t, w, "Too many alerts")
+	})
+
 	t.Run("returns 429 when rate limit exceeded", func(t *testing.T) {
 		t.Parallel()
 
 		server, _, channelInfo := newTestServer(t)
-		// Configure very restrictive rate limiting
-		server.cfg.RateLimit.AlertsPerSecond = 0.001 // Very slow
-		server.cfg.RateLimit.AllowedBurst = 1
-		server.cfg.RateLimit.MaxAttempts = 1
-		server.cfg.RateLimit.MaxWaitPerAttemptSeconds = 1
+		server.cfg.RateLimitPerAlertChannel.AlertsPerSecond = 0.001 // Very slow
+		server.cfg.RateLimitPerAlertChannel.AllowedBurst = 1
+		server.cfg.RateLimitPerAlertChannel.MaxRequestWaitTime = 100 * time.Millisecond
 
 		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
 		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
@@ -553,11 +584,9 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 		router := gin.New()
 		router.POST("/alert", server.handleAlerts)
 
-		// Send alert with FailOnRateLimitError=true to get immediate failure
 		alert := common.Alert{
-			SlackChannelID:       "C123",
-			Header:               "Test Alert",
-			FailOnRateLimitError: true,
+			SlackChannelID: "C123",
+			Header:         "Test Alert",
 		}
 		body, _ := json.Marshal(alert)
 		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
@@ -569,19 +598,12 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 		assertJSONError(t, w, "Rate limit exceeded")
 	})
 
-	t.Run("reduces alerts when exceeding AllowedBurst in single request", func(t *testing.T) {
+	t.Run("accepts alerts within burst limit", func(t *testing.T) {
 		t.Parallel()
 
 		server, queue, channelInfo := newTestServer(t)
-		// Set AllowedBurst to 3 for reduceAlertCountForChannel
-		// After reduction: 3 kept + 1 overflow = 4 alerts
-		// Rate limiter burst=3 can't handle 4, so waitForRateLimit will reduce
-		// With count=4 > 3 and failOnRateLimitError=false, it reduces 4 -> 2
-		// Eventually succeeds with 2 permits
-		server.cfg.RateLimit.AlertsPerSecond = 100
-		server.cfg.RateLimit.AllowedBurst = 3
-		server.cfg.RateLimit.MaxAttempts = 5
-		server.cfg.RateLimit.MaxWaitPerAttemptSeconds = 1
+		server.cfg.RateLimitPerAlertChannel.AlertsPerSecond = 100
+		server.cfg.RateLimitPerAlertChannel.AllowedBurst = 10
 
 		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
 		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
@@ -590,27 +612,21 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 			UserCount:          10,
 		}, nil)
 
-		var queuedBodies []string
+		queueCallCount := 0
 		queue.On("Send", mock.Anything, "C123", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-			queuedBodies = append(queuedBodies, args.String(3))
+			queueCallCount++
 		}).Return(nil)
 
 		router := gin.New()
 		router.POST("/alert", server.handleAlerts)
 
-		// Send 6 alerts with AllowedBurst=3:
-		// 1. reduceAlertCountForChannel: keeps 3 + 1 overflow = 4 alerts, drops 3
-		// 2. waitForRateLimit: requests 4 permits, burst=3
-		//    - count=4 > 3, so reduces: 4 -> 2
-		//    - 2 permits granted
-		// 3. permitCount(2) < alertCount(4): keeps 2 + 1 overflow = 3 alerts
+		// Send 5 alerts which is within AllowedBurst of 10
 		alerts := []common.Alert{
 			{SlackChannelID: "C123", Header: "Alert 1"},
 			{SlackChannelID: "C123", Header: "Alert 2"},
 			{SlackChannelID: "C123", Header: "Alert 3"},
 			{SlackChannelID: "C123", Header: "Alert 4"},
 			{SlackChannelID: "C123", Header: "Alert 5"},
-			{SlackChannelID: "C123", Header: "Alert 6"},
 		}
 		body, _ := json.Marshal(alerts)
 		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
@@ -619,83 +635,15 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusAccepted, w.Code)
-		// Some alerts should be queued (2 kept + 1 rate limit overflow = 3)
-		assert.Len(t, queuedBodies, 3, "expected 3 alerts to be queued")
-
-		// Check that a rate limit alert was created (contains "Too many alerts")
-		hasRateLimitAlert := false
-		for _, body := range queuedBodies {
-			if strings.Contains(body, "Too many alerts") {
-				hasRateLimitAlert = true
-				break
-			}
-		}
-		assert.True(t, hasRateLimitAlert, "expected a rate limit alert to be queued")
-	})
-
-	t.Run("creates rate limit alert with correct overflow count when only reduceAlertCountForChannel triggers", func(t *testing.T) {
-		t.Parallel()
-
-		server, queue, channelInfo := newTestServer(t)
-		// AllowedBurst=3 means reduceAlertCountForChannel keeps 3 alerts + 1 overflow = 4 alerts
-		// We need rate limiter burst high enough to accept 4 alerts
-		server.cfg.RateLimit.AlertsPerSecond = 100
-		server.cfg.RateLimit.AllowedBurst = 3
-
-		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
-		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
-			ChannelExists:      true,
-			ManagerIsInChannel: true,
-			UserCount:          10,
-		}, nil)
-
-		var queuedBodies []string
-		queue.On("Send", mock.Anything, "C123", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-			queuedBodies = append(queuedBodies, args.String(3))
-		}).Return(nil)
-
-		// Pre-allow the rate limiter to have tokens available
-		// The limiter is created on first access with burst=3, which may cause issues
-		// We need the rate limiter to handle 4 alerts (3 kept + 1 overflow)
-		// Set MaxAttempts high so it can retry and reduce count
-
-		router := gin.New()
-		router.POST("/alert", server.handleAlerts)
-
-		// Send 7 alerts with AllowedBurst=3:
-		// reduceAlertCountForChannel: keeps 3 + 1 overflow = 4 alerts, drops 4
-		// waitForRateLimit: requests 4, burst=3, may reduce
-		alerts := make([]common.Alert, 7)
-		for i := range 7 {
-			alerts[i] = common.Alert{SlackChannelID: "C123", Header: "Alert"}
-		}
-		body, _ := json.Marshal(alerts)
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusAccepted, w.Code)
-		// At least some alerts should be queued with overflow message
-		assert.NotEmpty(t, queuedBodies, "expected some alerts to be queued")
-
-		// Check overflow alert contains dropped alerts message
-		hasOverflowAlert := false
-		for _, body := range queuedBodies {
-			if strings.Contains(body, "alerts were dropped") {
-				hasOverflowAlert = true
-				break
-			}
-		}
-		assert.True(t, hasOverflowAlert, "expected overflow alert showing dropped alerts")
+		assert.Equal(t, 5, queueCallCount, "expected all 5 alerts to be queued")
 	})
 
 	t.Run("handles multiple channels independently", func(t *testing.T) {
 		t.Parallel()
 
 		server, queue, channelInfo := newTestServer(t)
-		server.cfg.RateLimit.AlertsPerSecond = 100
-		server.cfg.RateLimit.AllowedBurst = 100
+		server.cfg.RateLimitPerAlertChannel.AlertsPerSecond = 100
+		server.cfg.RateLimitPerAlertChannel.AllowedBurst = 100
 
 		channelInfo.On("MapChannelNameToIDIfNeeded", "C111").Return("C111")
 		channelInfo.On("MapChannelNameToIDIfNeeded", "C222").Return("C222")
@@ -986,95 +934,53 @@ func TestServer_WaitForRateLimit(t *testing.T) {
 		t.Parallel()
 
 		server, _, _ := newTestServer(t)
-		server.cfg.RateLimit.AlertsPerSecond = 100
-		server.cfg.RateLimit.AllowedBurst = 100
+		server.cfg.RateLimitPerAlertChannel.AlertsPerSecond = 100
+		server.cfg.RateLimitPerAlertChannel.AllowedBurst = 100
 
 		ctx := context.Background()
-		count, err := server.waitForRateLimit(ctx, "C123", 5, false)
+		err := server.waitForRateLimit(ctx, "C123", 5)
 
 		require.NoError(t, err)
-		assert.Equal(t, 5, count)
 	})
 
-	t.Run("respects context cancellation", func(t *testing.T) {
+	t.Run("returns ErrRateLimit when timeout exceeded", func(t *testing.T) {
 		t.Parallel()
 
 		server, _, _ := newTestServer(t)
-		server.cfg.RateLimit.AlertsPerSecond = 0.001 // Very slow
-		server.cfg.RateLimit.AllowedBurst = 1
-		server.cfg.RateLimit.MaxWaitPerAttemptSeconds = 1
+		server.cfg.RateLimitPerAlertChannel.AlertsPerSecond = 0.001 // Very slow
+		server.cfg.RateLimitPerAlertChannel.AllowedBurst = 1
+		server.cfg.RateLimitPerAlertChannel.MaxRequestWaitTime = 100 * time.Millisecond
 
 		// Exhaust the burst
-		_ = server.getRateLimiter("C999")
-
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		defer cancel()
-
-		_, err := server.waitForRateLimit(ctx, "C999", 100, false)
-		require.Error(t, err)
-	})
-
-	t.Run("returns error after max attempts when failOnRateLimitError is true", func(t *testing.T) {
-		t.Parallel()
-
-		server, _, _ := newTestServer(t)
-		server.cfg.RateLimit.AlertsPerSecond = 0.001 // Very slow - won't replenish in time
-		server.cfg.RateLimit.AllowedBurst = 1
-		server.cfg.RateLimit.MaxAttempts = 2
-		server.cfg.RateLimit.MaxWaitPerAttemptSeconds = 1
-
-		// Exhaust the burst by getting a limiter and using tokens
-		limiter := server.getRateLimiter("C_FAIL_TRUE")
-		limiter.AllowN(time.Now(), 1) // Use up the burst
-
-		ctx := context.Background()
-		count, err := server.waitForRateLimit(ctx, "C_FAIL_TRUE", 10, true)
-
-		require.Error(t, err)
-		assert.Equal(t, 0, count)
-		assert.Contains(t, err.Error(), "rate limit exceeded")
-	})
-
-	t.Run("reduces count when failOnRateLimitError is false and count > 3", func(t *testing.T) {
-		t.Parallel()
-
-		server, _, _ := newTestServer(t)
-		// Allow 2 tokens to replenish quickly, but not enough for 10
-		server.cfg.RateLimit.AlertsPerSecond = 2
-		server.cfg.RateLimit.AllowedBurst = 2
-		server.cfg.RateLimit.MaxAttempts = 5
-		server.cfg.RateLimit.MaxWaitPerAttemptSeconds = 1
-
-		ctx := context.Background()
-		// Request 10, which will be reduced: 10 -> 5 -> 2 (succeeds when burst allows 2)
-		count, err := server.waitForRateLimit(ctx, "C_REDUCE", 10, false)
-
-		require.NoError(t, err)
-		// Count should be reduced from 10 to something <= AllowedBurst
-		assert.LessOrEqual(t, count, 10)
-		assert.Positive(t, count)
-	})
-
-	t.Run("does not reduce count when count <= 3", func(t *testing.T) {
-		t.Parallel()
-
-		server, _, _ := newTestServer(t)
-		server.cfg.RateLimit.AlertsPerSecond = 0.001 // Very slow
-		server.cfg.RateLimit.AllowedBurst = 1
-		server.cfg.RateLimit.MaxAttempts = 2
-		server.cfg.RateLimit.MaxWaitPerAttemptSeconds = 1
-
-		// Exhaust the burst
-		limiter := server.getRateLimiter("C_NO_REDUCE")
+		limiter := server.getRateLimiter("C_TIMEOUT")
 		limiter.AllowN(time.Now(), 1)
 
 		ctx := context.Background()
-		// Request 3 alerts - count should NOT be reduced since count <= 3
-		count, err := server.waitForRateLimit(ctx, "C_NO_REDUCE", 3, false)
+		err := server.waitForRateLimit(ctx, "C_TIMEOUT", 10)
 
 		require.Error(t, err)
-		assert.Equal(t, 0, count)
-		assert.Contains(t, err.Error(), "rate limit exceeded")
+		require.ErrorIs(t, err, ErrRateLimit)
+	})
+
+	t.Run("returns ErrRateLimit when context is cancelled", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.cfg.RateLimitPerAlertChannel.AlertsPerSecond = 0.001 // Very slow
+		server.cfg.RateLimitPerAlertChannel.AllowedBurst = 1
+		server.cfg.RateLimitPerAlertChannel.MaxRequestWaitTime = 10 * time.Second
+
+		// Exhaust the burst
+		limiter := server.getRateLimiter("C_CANCEL")
+		limiter.AllowN(time.Now(), 1)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		err := server.waitForRateLimit(ctx, "C_CANCEL", 10)
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrRateLimit)
 	})
 }
 
@@ -1776,29 +1682,27 @@ func TestChannelInfoSyncer_ManagedChannels(t *testing.T) {
 func TestServer_GetHandlerTimeout(t *testing.T) {
 	t.Parallel()
 
-	t.Run("calculates timeout from rate limit config", func(t *testing.T) {
+	t.Run("calculates timeout from MaxRequestWaitTime plus buffer", func(t *testing.T) {
 		t.Parallel()
 
 		server, _, _ := newTestServer(t)
-		server.cfg.RateLimit.MaxWaitPerAttemptSeconds = 10
-		server.cfg.RateLimit.MaxAttempts = 3
+		server.cfg.RateLimitPerAlertChannel.MaxRequestWaitTime = 60 * time.Second
 
 		timeout := server.getHandlerTimeout()
 
-		// (10 * 3) + 3 = 33 seconds
-		assert.Equal(t, 33*time.Second, timeout)
+		// 60 + 5 = 65 seconds
+		assert.Equal(t, 65*time.Second, timeout)
 	})
 
 	t.Run("uses minimum of 30 seconds", func(t *testing.T) {
 		t.Parallel()
 
 		server, _, _ := newTestServer(t)
-		server.cfg.RateLimit.MaxWaitPerAttemptSeconds = 1
-		server.cfg.RateLimit.MaxAttempts = 1
+		server.cfg.RateLimitPerAlertChannel.MaxRequestWaitTime = 10 * time.Second
 
 		timeout := server.getHandlerTimeout()
 
-		// (1 * 1) + 3 = 4, but minimum is 30
+		// 10 + 5 = 15, but minimum is 30
 		assert.Equal(t, 30*time.Second, timeout)
 	})
 }

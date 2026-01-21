@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // APIConfig holds configuration for the Slack Manager REST API.
@@ -29,18 +30,23 @@ type APIConfig struct {
 	// MaxUsersInAlertChannel is the maximum number of users allowed in an alert channel. If the number of users exceeds this value, the API will return 400 when posting alerts to the channel.
 	MaxUsersInAlertChannel int `json:"maxUsersInAlertChannel" yaml:"maxUsersInAlertChannel"`
 
-	// RateLimit holds configuration for API rate limiting.
-	RateLimit *RateLimitConfig `json:"rateLimit" yaml:"rateLimit"`
+	// RateLimitPerAlertChannel holds rate limiting configuration per alert channel.
+	RateLimitPerAlertChannel *RateLimitConfig `json:"rateLimitPerAlertChannel" yaml:"rateLimitPerAlertChannel"`
 
 	// SlackClient holds configuration for the Slack client.
 	SlackClient *SlackClientConfig `json:"slackClient" yaml:"slackClient"`
 }
 
+// RateLimitConfig holds rate limiting configuration.
 type RateLimitConfig struct {
-	AlertsPerSecond          float64 `json:"alertsPerSecond"          yaml:"alertsPerSecond"`
-	AllowedBurst             int     `json:"allowedBurst"             yaml:"allowedBurst"`
-	MaxWaitPerAttemptSeconds int     `json:"maxWaitPerAttemptSeconds" yaml:"maxWaitPerAttemptSeconds"`
-	MaxAttempts              int     `json:"maxAttempts"              yaml:"maxAttempts"`
+	// AlertsPerSecond is the number of alerts allowed per second.
+	AlertsPerSecond float64 `json:"alertsPerSecond" yaml:"alertsPerSecond"`
+
+	// AllowedBurst is the maximum burst size.
+	AllowedBurst int `json:"allowedBurst" yaml:"allowedBurst"`
+
+	// MaxRequestWaitTime is the maximum time a request will wait for available rate limit tokens.
+	MaxRequestWaitTime time.Duration `json:"maxRequestWaitTime" yaml:"maxRequestWaitTime"`
 }
 
 // NewDefaultAPIConfig returns an APIConfig with default values.
@@ -53,11 +59,10 @@ func NewDefaultAPIConfig() *APIConfig {
 		CacheKeyPrefix:         "slack-manager:",
 		ErrorReportChannelID:   "",
 		MaxUsersInAlertChannel: 100,
-		RateLimit: &RateLimitConfig{
-			AlertsPerSecond:          0.5,
-			AllowedBurst:             10,
-			MaxWaitPerAttemptSeconds: 10,
-			MaxAttempts:              3,
+		RateLimitPerAlertChannel: &RateLimitConfig{
+			AlertsPerSecond:    1,
+			AllowedBurst:       30,
+			MaxRequestWaitTime: 15 * time.Second,
 		},
 		SlackClient: NewDefaultSlackClientConfig(),
 	}

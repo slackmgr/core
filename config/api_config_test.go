@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/peteraglen/slack-manager/config"
 	"github.com/stretchr/testify/assert"
@@ -21,11 +22,10 @@ func TestNewDefaultAPIConfig(t *testing.T) {
 	assert.Empty(t, cfg.ErrorReportChannelID)
 	assert.Equal(t, 100, cfg.MaxUsersInAlertChannel)
 
-	require.NotNil(t, cfg.RateLimit)
-	assert.InDelta(t, 0.5, cfg.RateLimit.AlertsPerSecond, 0.001)
-	assert.Equal(t, 10, cfg.RateLimit.AllowedBurst)
-	assert.Equal(t, 10, cfg.RateLimit.MaxWaitPerAttemptSeconds)
-	assert.Equal(t, 3, cfg.RateLimit.MaxAttempts)
+	require.NotNil(t, cfg.RateLimitPerAlertChannel)
+	assert.InDelta(t, 1.0, cfg.RateLimitPerAlertChannel.AlertsPerSecond, 0.001)
+	assert.Equal(t, 30, cfg.RateLimitPerAlertChannel.AllowedBurst)
+	assert.Equal(t, 15*time.Second, cfg.RateLimitPerAlertChannel.MaxRequestWaitTime)
 
 	require.NotNil(t, cfg.SlackClient)
 }
