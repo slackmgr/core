@@ -392,12 +392,7 @@ func (s *Server) writeErrorResponse(c *gin.Context, clientErr error, statusCode 
 		s.logger.Errorf("Request failed: %s", errText)
 	}
 
-	c.Header("Content-Type", "text/plain")
-	c.Status(statusCode)
-
-	if _, err := c.Writer.Write([]byte(errText)); err != nil {
-		s.logger.Errorf("Failed to write error response: %s", err)
-	}
+	c.JSON(statusCode, errorResponse{Error: errText})
 
 	if s.cfg.ErrorReportChannelID != "" {
 		targetChannel := debugGetAlertChannelOrRouteKey(c, alert)
@@ -641,7 +636,7 @@ func (s *Server) recoveryMiddleware() gin.HandlerFunc {
 					c.Abort()
 				} else {
 					// If panic occurred but connection is still alive, return HTTP 500
-					c.AbortWithStatus(http.StatusInternalServerError)
+					c.AbortWithStatusJSON(http.StatusInternalServerError, errorResponse{Error: "Internal server error"})
 				}
 			}
 		}()
@@ -652,7 +647,7 @@ func (s *Server) recoveryMiddleware() gin.HandlerFunc {
 
 // timeoutResponse is called when a request times out. It sends a 503 Service Unavailable response with a "timeout" message.
 func timeoutResponse(c *gin.Context) {
-	c.String(http.StatusServiceUnavailable, "timeout")
+	c.JSON(http.StatusServiceUnavailable, errorResponse{Error: "Request timeout"})
 }
 
 func debugGetAlertChannelOrRouteKey(c *gin.Context, alert *common.Alert) string {

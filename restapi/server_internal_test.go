@@ -141,6 +141,24 @@ func (m *mockChannelInfoProvider) ManagedChannels() []*internal.ChannelSummary {
 
 // --- Test Helpers ---
 
+// assertJSONError verifies that the response is a JSON error with the expected content-type
+// and that the error message contains the expected substring.
+func assertJSONError(t *testing.T, w *httptest.ResponseRecorder, expectedContains string) {
+	t.Helper()
+
+	// Verify Content-Type header
+	contentType := w.Header().Get("Content-Type")
+	assert.Contains(t, contentType, "application/json", "expected JSON content-type")
+
+	// Parse the JSON response
+	var errResp errorResponse
+	err := json.Unmarshal(w.Body.Bytes(), &errResp)
+	require.NoError(t, err, "response should be valid JSON")
+
+	// Verify the error field contains the expected substring
+	assert.Contains(t, errResp.Error, expectedContains, "error message should contain expected text")
+}
+
 func newTestServer(t *testing.T) (*Server, *mockFifoQueueProducer, *mockChannelInfoProvider) {
 	t.Helper()
 
@@ -306,6 +324,7 @@ func TestServer_HandleAlerts_Validation(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertJSONError(t, w, "POST body")
 	})
 
 	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
@@ -321,6 +340,7 @@ func TestServer_HandleAlerts_Validation(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertJSONError(t, w, "parse")
 	})
 
 	t.Run("returns 204 for empty alerts array", func(t *testing.T) {
@@ -425,7 +445,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "Unable to find channel")
+		assertJSONError(t, w, "Unable to find channel")
 	})
 
 	t.Run("returns 400 for archived channel", func(t *testing.T) {
@@ -450,7 +470,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "archived")
+		assertJSONError(t, w, "archived")
 	})
 
 	t.Run("returns 400 when bot not in channel", func(t *testing.T) {
@@ -475,7 +495,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "not in channel")
+		assertJSONError(t, w, "not in channel")
 	})
 
 	t.Run("returns 400 when channel has too many users", func(t *testing.T) {
@@ -502,7 +522,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "exceeds the limit")
+		assertJSONError(t, w, "exceeds the limit")
 	})
 }
 
@@ -687,6 +707,7 @@ func TestServer_HandlePrometheusWebhook_Validation(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertJSONError(t, w, "POST body")
 	})
 
 	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
@@ -702,6 +723,7 @@ func TestServer_HandlePrometheusWebhook_Validation(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertJSONError(t, w, "decode")
 	})
 
 	t.Run("returns 400 for empty alerts array", func(t *testing.T) {
@@ -718,7 +740,7 @@ func TestServer_HandlePrometheusWebhook_Validation(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "empty")
+		assertJSONError(t, w, "empty")
 	})
 }
 
