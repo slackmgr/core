@@ -13,6 +13,9 @@ import (
 var (
 	slackMentionRegex         = regexp.MustCompile(`<[@!]([^>\s]+)>`)
 	slackMentionEveryoneRegex = regexp.MustCompile(`(?i)<[@!]everyone>`)
+
+	// nowFunc returns the current time. It can be overridden in tests for deterministic behavior.
+	nowFunc = time.Now //nolint:gochecknoglobals // Required for testing time-dependent code
 )
 
 const (
@@ -92,7 +95,7 @@ func NewIssue(alert *Alert, logger common.Logger) *Issue {
 		return nil
 	}
 
-	now := time.Now().UTC()
+	now := nowFunc().UTC()
 
 	issue := Issue{
 		ID:                   internal.Hash(alert.CorrelationID, alert.SlackChannelID, now.Format(time.RFC3339Nano)),
@@ -195,7 +198,7 @@ func (issue *Issue) AddAlert(alert *Alert, logger common.Logger) bool {
 	}
 
 	issue.LastAlert = alert
-	issue.LastAlertReceived = time.Now().UTC()
+	issue.LastAlertReceived = nowFunc().UTC()
 	issue.AlertCount++
 	issue.AutoResolvePeriod = time.Duration(alert.AutoResolveSeconds) * time.Second
 	issue.ArchiveDelay = time.Duration(alert.ArchivingDelaySeconds) * time.Second
@@ -230,7 +233,7 @@ func (issue *Issue) GetSlackAction() SlackAction {
 		return ActionNone
 	}
 
-	if issue.SlackPostDelayedUntil.After(time.Now()) {
+	if issue.SlackPostDelayedUntil.After(nowFunc()) {
 		return ActionNone
 	}
 
@@ -258,7 +261,7 @@ func (issue *Issue) GetSlackAction() SlackAction {
 
 // RegisterSlackPostCreatedOrUpdated registers that a Slack post has been created or updated for this issue
 func (issue *Issue) RegisterSlackPostCreatedOrUpdated(slackPostID string, action SlackAction) {
-	now := time.Now().UTC()
+	now := nowFunc().UTC()
 
 	if issue.SlackPostID != slackPostID {
 		issue.SlackPostID = slackPostID
@@ -314,7 +317,7 @@ func (issue *Issue) RegisterResolveRequest(user string) {
 
 	issue.IsEmojiResolved = true
 	issue.ResolvedByUser = user
-	issue.ResolveTime = time.Now().UTC()
+	issue.ResolveTime = nowFunc().UTC()
 	issue.SlackPostNeedsUpdate = true
 
 	issue.setArchivingTime()
@@ -340,7 +343,7 @@ func (issue *Issue) RegisterInvestigateRequest(user string) {
 
 	issue.IsEmojiInvestigated = true
 	issue.InvestigatedByUser = user
-	issue.InvestigatedSince = time.Now().UTC()
+	issue.InvestigatedSince = nowFunc().UTC()
 	issue.SlackPostNeedsUpdate = true
 }
 
@@ -362,7 +365,7 @@ func (issue *Issue) RegisterMuteRequest(user string) {
 
 	issue.IsEmojiMuted = true
 	issue.MutedByUser = user
-	issue.MutedSince = time.Now().UTC()
+	issue.MutedSince = nowFunc().UTC()
 	issue.SlackPostNeedsUpdate = true
 }
 
@@ -407,7 +410,7 @@ func (issue *Issue) RegisterMoveRequest(reason MoveIssueReason, user, newChannel
 // IsReadyForArchiving returns true if the issue is ready to be archived
 func (issue *Issue) IsReadyForArchiving() bool {
 	if !issue.LastAlert.IssueFollowUpEnabled {
-		return time.Now().After(issue.ArchiveTime)
+		return nowFunc().After(issue.ArchiveTime)
 	}
 
 	// We can't archive an issue with a connected Slack post, which hasn't been resolved yet
@@ -415,7 +418,7 @@ func (issue *Issue) IsReadyForArchiving() bool {
 		return false
 	}
 
-	return time.Now().After(issue.ArchiveTime)
+	return nowFunc().After(issue.ArchiveTime)
 }
 
 // RegisterArchiving registers that the issue has been archived
@@ -473,7 +476,7 @@ func (issue *Issue) IsResolvedAsInconclusive() bool {
 }
 
 func (issue *Issue) IsResolved() bool {
-	return issue.LastAlert.Severity == common.AlertResolved || (issue.LastAlert.IssueFollowUpEnabled && time.Now().After(issue.ResolveTime))
+	return issue.LastAlert.Severity == common.AlertResolved || (issue.LastAlert.IssueFollowUpEnabled && nowFunc().After(issue.ResolveTime))
 }
 
 func (issue *Issue) IsInfoOrResolved() bool {
@@ -527,7 +530,7 @@ func (issue *Issue) ApplyEscalationRules() *EscalationResult {
 	}
 
 	var escalation *common.Escalation
-	issueAge := int(time.Since(issue.Created).Seconds())
+	issueAge := int(nowFunc().Sub(issue.Created).Seconds())
 
 	// The alerts API ensures that escalation rules are sorted by delay (ascending)
 	// Find the last rule that has a delay smaller than the current issue age
@@ -627,7 +630,7 @@ func (issue *Issue) ResetCachedJSONBody() {
 func (issue *Issue) setArchivingTime() {
 	// Manually terminated issues are archived immediately
 	if issue.IsEmojiTerminated {
-		issue.ArchiveTime = time.Now().UTC()
+		issue.ArchiveTime = nowFunc().UTC()
 		return
 	}
 
@@ -678,14 +681,14 @@ func (issue *Issue) sanitizeSlackMentions(skipMuting bool) {
 
 	// If skipMuting is true, we keep the mentions regardless of previous mention actions
 	if skipMuting {
-		issue.LastSlackMentionTime = time.Now().UTC()
+		issue.LastSlackMentionTime = nowFunc().UTC()
 		issue.LastSlackMention = mentionsString
 		return
 	}
 
 	// Allow mentions if the mention string has changed OR the muting threshold has passed since the last mention
-	if issue.LastSlackMention != mentionsString || time.Since(issue.LastSlackMentionTime) > mentionMutingThreshold {
-		issue.LastSlackMentionTime = time.Now().UTC()
+	if issue.LastSlackMention != mentionsString || nowFunc().Sub(issue.LastSlackMentionTime) > mentionMutingThreshold {
+		issue.LastSlackMentionTime = nowFunc().UTC()
 		issue.LastSlackMention = mentionsString
 	} else {
 		issue.LastAlert.Text = slackMentionRegex.ReplaceAllString(issue.LastAlert.Text, "*$1*")

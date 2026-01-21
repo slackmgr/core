@@ -736,7 +736,7 @@ func getViewStateCheckboxSelectedValues(view slack.View) map[string][]string {
 }
 
 // getInteractionAndLoggerFromEvent casts the event data to interaction callback, and creates a log entry with suitable fields
-func getInteractionAndLoggerFromEvent(evt *socketmode.Event, logger common.Logger) (slack.InteractionCallback, common.Logger, error) { //nolint:ireturn
+func getInteractionAndLoggerFromEvent(evt *socketmode.Event, logger common.Logger) (slack.InteractionCallback, common.Logger, error) {
 	interaction, ok := evt.Data.(slack.InteractionCallback)
 	if !ok {
 		return slack.InteractionCallback{}, logger, fmt.Errorf("failed to cast InteractionCallback")

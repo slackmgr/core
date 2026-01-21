@@ -38,6 +38,7 @@ linters:
         - empty
         - stdlib
         - generic
+        - github.com/peteraglen/slack-manager-common.Logger
   exclusions:
     generated: lax
     presets:
@@ -50,10 +51,13 @@ linters:
           - gochecknoglobals
           - gosec
           - revive
+          - paralleltest
         path: _test\.go
       - linters:
           - asasalint
           - goconst
+          - intrange
+          - modernize
         path: (.+)_test\.go
     paths:
       - testdata

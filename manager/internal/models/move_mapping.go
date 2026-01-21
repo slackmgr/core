@@ -7,6 +7,9 @@ import (
 	"github.com/peteraglen/slack-manager/internal"
 )
 
+// moveMappingNowFunc returns the current time. It can be overridden in tests for deterministic behavior.
+var moveMappingNowFunc = time.Now //nolint:gochecknoglobals // Required for testing time-dependent code
+
 // MoveMapping represents information about an issue moved between Slack channels.
 type MoveMapping struct {
 	ID                string          `json:"id"`
@@ -21,7 +24,7 @@ type MoveMapping struct {
 func NewMoveMapping(correlationID, originalChannelID, targetChannelID string, reason MoveIssueReason) *MoveMapping {
 	return &MoveMapping{
 		ID:                internal.Hash(originalChannelID, correlationID),
-		Timestamp:         time.Now().UTC(),
+		Timestamp:         moveMappingNowFunc().UTC(),
 		CorrelationID:     correlationID,
 		OriginalChannelID: originalChannelID,
 		TargetChannelID:   targetChannelID,

@@ -9,6 +9,9 @@ import (
 	commonlib "github.com/peteraglen/slack-manager-common"
 )
 
+// commandNowFunc returns the current time. It can be overridden in tests for deterministic behavior.
+var commandNowFunc = time.Now //nolint:gochecknoglobals // Required for testing time-dependent code
+
 // CommandAction represents the type of action a user has initiated within Slack.
 type CommandAction string
 
@@ -74,7 +77,7 @@ func NewCommandFromQueueItem(queueItem *commonlib.FifoQueueItem) (InFlightMessag
 // NewCommand creates a new Command instance with the provided parameters.
 func NewCommand(slackChannelID, ts, reaction, userID, userRealName string, action CommandAction, parameters map[string]any) *Command {
 	return &Command{
-		Timestamp:      time.Now().UTC(),
+		Timestamp:      commandNowFunc().UTC(),
 		SlackChannelID: slackChannelID,
 		SlackPostID:    ts,
 		Reaction:       reaction,

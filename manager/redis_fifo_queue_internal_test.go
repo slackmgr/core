@@ -25,12 +25,10 @@ func (m *mockLogger) Infof(_ string, _ ...any)  {}
 func (m *mockLogger) Error(_ string)            {}
 func (m *mockLogger) Errorf(_ string, _ ...any) {}
 
-//nolint:ireturn // mock implementation returns interface
 func (m *mockLogger) WithField(_ string, _ any) common.Logger {
 	return m
 }
 
-//nolint:ireturn // mock implementation returns interface
 func (m *mockLogger) WithFields(_ map[string]any) common.Logger {
 	return m
 }
