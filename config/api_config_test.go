@@ -43,6 +43,7 @@ func TestAPIConfig_Validate(t *testing.T) {
 			modify:      func(c *config.APIConfig) {},
 			expectError: "",
 		},
+		// RestPort validation
 		{
 			name: "empty rest port",
 			modify: func(c *config.APIConfig) {
@@ -51,40 +52,64 @@ func TestAPIConfig_Validate(t *testing.T) {
 			expectError: "rest port is required",
 		},
 		{
+			name: "rest port is not a number",
+			modify: func(c *config.APIConfig) {
+				c.RestPort = "abc"
+			},
+			expectError: "rest port must be a valid number",
+		},
+		{
+			name: "rest port is zero",
+			modify: func(c *config.APIConfig) {
+				c.RestPort = "0"
+			},
+			expectError: "rest port must be between 1 and 65535",
+		},
+		{
+			name: "rest port exceeds maximum",
+			modify: func(c *config.APIConfig) {
+				c.RestPort = "65536"
+			},
+			expectError: "rest port must be between 1 and 65535",
+		},
+		// EncryptionKey validation
+		{
 			name: "empty encryption key",
 			modify: func(c *config.APIConfig) {
 				c.EncryptionKey = ""
 			},
-			expectError: "the encryption key must be a 32 character alphanumeric string",
+			expectError: "encryption key must be a 32 character alphanumeric string",
 		},
 		{
 			name: "encryption key too short",
 			modify: func(c *config.APIConfig) {
 				c.EncryptionKey = "abc123"
 			},
-			expectError: "the encryption key must be a 32 character alphanumeric string",
+			expectError: "encryption key must be a 32 character alphanumeric string",
 		},
 		{
 			name: "encryption key too long",
 			modify: func(c *config.APIConfig) {
 				c.EncryptionKey = "abcdefghijklmnopqrstuvwxyz1234567890"
 			},
-			expectError: "the encryption key must be a 32 character alphanumeric string",
+			expectError: "encryption key must be a 32 character alphanumeric string",
 		},
 		{
 			name: "encryption key with special characters",
 			modify: func(c *config.APIConfig) {
 				c.EncryptionKey = "abcdefghijklmnopqrstuvwxyz12345!"
 			},
-			expectError: "the encryption key must be a 32 character alphanumeric string",
+			expectError: "encryption key must be a 32 character alphanumeric string",
 		},
+		// CacheKeyPrefix validation
 		{
-			name: "nil slack client config",
+			name: "empty cache key prefix",
 			modify: func(c *config.APIConfig) {
-				c.SlackClient = nil
+				c.CacheKeyPrefix = ""
 			},
-			expectError: "slack client config is required",
+			expectError: "cache key prefix is required",
 		},
+		// MaxUsersInAlertChannel validation
 		{
 			name: "max users in alert channel is zero",
 			modify: func(c *config.APIConfig) {
@@ -105,6 +130,85 @@ func TestAPIConfig_Validate(t *testing.T) {
 				c.MaxUsersInAlertChannel = 10001
 			},
 			expectError: "max users in alert channel must be between 1 and 10000",
+		},
+		// RateLimitPerAlertChannel validation
+		{
+			name: "nil rate limit config",
+			modify: func(c *config.APIConfig) {
+				c.RateLimitPerAlertChannel = nil
+			},
+			expectError: "rate limit config is required",
+		},
+		{
+			name: "alerts per second is zero",
+			modify: func(c *config.APIConfig) {
+				c.RateLimitPerAlertChannel.AlertsPerSecond = 0
+			},
+			expectError: "rate limit config is invalid: alerts per second must be between 0.001 and 1000",
+		},
+		{
+			name: "alerts per second is negative",
+			modify: func(c *config.APIConfig) {
+				c.RateLimitPerAlertChannel.AlertsPerSecond = -1
+			},
+			expectError: "rate limit config is invalid: alerts per second must be between 0.001 and 1000",
+		},
+		{
+			name: "alerts per second exceeds maximum",
+			modify: func(c *config.APIConfig) {
+				c.RateLimitPerAlertChannel.AlertsPerSecond = 1001
+			},
+			expectError: "rate limit config is invalid: alerts per second must be between 0.001 and 1000",
+		},
+		{
+			name: "allowed burst is zero",
+			modify: func(c *config.APIConfig) {
+				c.RateLimitPerAlertChannel.AllowedBurst = 0
+			},
+			expectError: "rate limit config is invalid: allowed burst must be between 1 and 10000",
+		},
+		{
+			name: "allowed burst is negative",
+			modify: func(c *config.APIConfig) {
+				c.RateLimitPerAlertChannel.AllowedBurst = -1
+			},
+			expectError: "rate limit config is invalid: allowed burst must be between 1 and 10000",
+		},
+		{
+			name: "allowed burst exceeds maximum",
+			modify: func(c *config.APIConfig) {
+				c.RateLimitPerAlertChannel.AllowedBurst = 10001
+			},
+			expectError: "rate limit config is invalid: allowed burst must be between 1 and 10000",
+		},
+		{
+			name: "max request wait time is zero",
+			modify: func(c *config.APIConfig) {
+				c.RateLimitPerAlertChannel.MaxRequestWaitTime = 0
+			},
+			expectError: "rate limit config is invalid: max request wait time must be between 1s and 5m0s",
+		},
+		{
+			name: "max request wait time is too short",
+			modify: func(c *config.APIConfig) {
+				c.RateLimitPerAlertChannel.MaxRequestWaitTime = 500 * time.Millisecond
+			},
+			expectError: "rate limit config is invalid: max request wait time must be between 1s and 5m0s",
+		},
+		{
+			name: "max request wait time exceeds maximum",
+			modify: func(c *config.APIConfig) {
+				c.RateLimitPerAlertChannel.MaxRequestWaitTime = 6 * time.Minute
+			},
+			expectError: "rate limit config is invalid: max request wait time must be between 1s and 5m0s",
+		},
+		// SlackClient validation
+		{
+			name: "nil slack client config",
+			modify: func(c *config.APIConfig) {
+				c.SlackClient = nil
+			},
+			expectError: "slack client config is required",
 		},
 		{
 			name: "invalid slack client config - missing app token",
@@ -145,20 +249,37 @@ func TestAPIConfig_Validate(t *testing.T) {
 func TestAPIConfig_Validate_BoundaryValues(t *testing.T) {
 	t.Parallel()
 
+	// RestPort boundaries
+	t.Run("rest port at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.RestPort = "1"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("rest port at upper bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.RestPort = "65535"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	// MaxUsersInAlertChannel boundaries
 	t.Run("max users at lower bound", func(t *testing.T) {
 		t.Parallel()
 		cfg := validAPIConfig()
-		cfg.MaxUsersInAlertChannel = 1
+		cfg.MaxUsersInAlertChannel = config.MinMaxUsersInAlertChannel
 		assert.NoError(t, cfg.Validate())
 	})
 
 	t.Run("max users at upper bound", func(t *testing.T) {
 		t.Parallel()
 		cfg := validAPIConfig()
-		cfg.MaxUsersInAlertChannel = 10000
+		cfg.MaxUsersInAlertChannel = config.MaxMaxUsersInAlertChannel
 		assert.NoError(t, cfg.Validate())
 	})
 
+	// EncryptionKey boundaries
 	t.Run("encryption key exactly 32 alphanumeric chars", func(t *testing.T) {
 		t.Parallel()
 		cfg := validAPIConfig()
@@ -177,6 +298,51 @@ func TestAPIConfig_Validate_BoundaryValues(t *testing.T) {
 		t.Parallel()
 		cfg := validAPIConfig()
 		cfg.EncryptionKey = "AbCdEfGhIjKlMnOpQrStUvWxYz123456"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	// AlertsPerSecond boundaries
+	t.Run("alerts per second at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.RateLimitPerAlertChannel.AlertsPerSecond = config.MinAlertsPerSecond
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("alerts per second at upper bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.RateLimitPerAlertChannel.AlertsPerSecond = config.MaxAlertsPerSecond
+		assert.NoError(t, cfg.Validate())
+	})
+
+	// AllowedBurst boundaries
+	t.Run("allowed burst at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.RateLimitPerAlertChannel.AllowedBurst = config.MinAllowedBurst
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("allowed burst at upper bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.RateLimitPerAlertChannel.AllowedBurst = config.MaxAllowedBurst
+		assert.NoError(t, cfg.Validate())
+	})
+
+	// MaxRequestWaitTime boundaries
+	t.Run("max request wait time at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.RateLimitPerAlertChannel.MaxRequestWaitTime = config.MinMaxRequestWaitTime
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("max request wait time at upper bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.RateLimitPerAlertChannel.MaxRequestWaitTime = config.MaxMaxRequestWaitTime
 		assert.NoError(t, cfg.Validate())
 	})
 }
