@@ -158,10 +158,10 @@ func (c *interactiveController) defaultInteractiveHandler(_ context.Context, evt
 // It opens a modal view with options to move the issue, IF the user is allowed to perform this action AND the issue state allows it.
 // https://api.slack.com/interactivity/shortcuts/using#message_shortcuts
 func (c *interactiveController) handleMoveIssueRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
-	userIsGlobalAdmin := c.managerSettings.Settings.UserIsGlobalAdmin(interaction.User.ID)
+	userIsGlobalAdmin := c.managerSettings.GetSettings().UserIsGlobalAdmin(interaction.User.ID)
 
 	if !userIsGlobalAdmin {
-		msg := fmt.Sprintf("Sorry, but this feature is currently only available to %s global admins.", c.managerSettings.Settings.AppFriendlyName)
+		msg := fmt.Sprintf("Sorry, but this feature is currently only available to %s global admins.", c.managerSettings.GetSettings().AppFriendlyName)
 		if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", msg); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
@@ -175,7 +175,7 @@ func (c *interactiveController) handleMoveIssueRequest(ctx context.Context, inte
 	}
 
 	if !managedChannel {
-		msg := fmt.Sprintf("Sorry, but you can only move messages in channels managed by %s.", c.managerSettings.Settings.AppFriendlyName)
+		msg := fmt.Sprintf("Sorry, but you can only move messages in channels managed by %s.", c.managerSettings.GetSettings().AppFriendlyName)
 		if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", msg); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
@@ -211,7 +211,7 @@ func (c *interactiveController) handleMoveIssueRequest(ctx context.Context, inte
 		return
 	}
 
-	blocks, err := views.MoveIssueModal(c.managerSettings.Settings)
+	blocks, err := views.MoveIssueModal(c.managerSettings.GetSettings())
 	if err != nil {
 		logger.Errorf("Failed to generate view: %s", err)
 		return
@@ -259,7 +259,7 @@ func (c *interactiveController) moveIssueViewSubmission(ctx context.Context, evt
 
 	// Receiving channel is not a managed alert channel - send ack with error message
 	if !isAlertChannel {
-		errMsg := "The channel must be managed by " + c.managerSettings.Settings.AppFriendlyName
+		errMsg := "The channel must be managed by " + c.managerSettings.GetSettings().AppFriendlyName
 		ackWithFieldErrorMsg(evt, clt, "select_channel", errMsg)
 		return
 	}
@@ -302,7 +302,7 @@ func (c *interactiveController) moveIssueViewSubmission(ctx context.Context, evt
 // handleCreateIssueRequest handles a request to create a new issue in the current channel. It is triggered by a global shortcut.
 // It opens a modal view with options to create the issue.
 func (c *interactiveController) handleCreateIssueRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
-	blocks, err := views.CreateIssueModal(c.managerSettings.Settings)
+	blocks, err := views.CreateIssueModal(c.managerSettings.GetSettings())
 	if err != nil {
 		logger.Errorf("Failed to generate view: %s", err)
 		return
@@ -343,7 +343,7 @@ func (c *interactiveController) createIssueViewSubmission(ctx context.Context, e
 
 	// Receiving channel is not managed - send ack with error message
 	if !isAlertChannel {
-		errMsg := "The channel must be managed by " + c.managerSettings.Settings.AppFriendlyName
+		errMsg := "The channel must be managed by " + c.managerSettings.GetSettings().AppFriendlyName
 		ackWithFieldErrorMsg(evt, clt, "select_channel", errMsg)
 		return
 	}
@@ -355,10 +355,10 @@ func (c *interactiveController) createIssueViewSubmission(ctx context.Context, e
 		return
 	}
 
-	isAdminInTargetChannel := c.managerSettings.Settings.UserIsChannelAdmin(ctx, targetChannelID, userInfo.ID, c.apiClient.UserIsInGroup)
+	isAdminInTargetChannel := c.managerSettings.GetSettings().UserIsChannelAdmin(ctx, targetChannelID, userInfo.ID, c.apiClient.UserIsInGroup)
 
 	if !isAdminInTargetChannel {
-		ackWithFieldErrorMsg(evt, clt, "select_channel", fmt.Sprintf("You need to be %s admin in the selected channel", c.managerSettings.Settings.AppFriendlyName))
+		ackWithFieldErrorMsg(evt, clt, "select_channel", fmt.Sprintf("You need to be %s admin in the selected channel", c.managerSettings.GetSettings().AppFriendlyName))
 		return
 	}
 
@@ -447,7 +447,7 @@ func (c *interactiveController) handleViewIssueDetailsRequest(ctx context.Contex
 	}
 
 	if !isAlertChannel {
-		msg := fmt.Sprintf("Sorry, but you can only view issue details in channels managed by %s.", c.managerSettings.Settings.AppFriendlyName)
+		msg := fmt.Sprintf("Sorry, but you can only view issue details in channels managed by %s.", c.managerSettings.GetSettings().AppFriendlyName)
 		if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", msg); err != nil {
 			logger.Errorf("Failed to send interactive response: %s", err)
 		}
@@ -562,10 +562,10 @@ func (c *interactiveController) handleWebhookRequest(ctx context.Context, intera
 
 func (c *interactiveController) verifyWebhookAccess(ctx context.Context, interaction slack.InteractionCallback, webhook *common.Webhook, logger common.Logger) bool {
 	if webhook.AccessLevel == common.WebhookAccessLevelGlobalAdmins || webhook.AccessLevel == "" {
-		userIsGlobalAdmin := c.managerSettings.Settings.UserIsGlobalAdmin(interaction.User.ID)
+		userIsGlobalAdmin := c.managerSettings.GetSettings().UserIsGlobalAdmin(interaction.User.ID)
 
 		if !userIsGlobalAdmin {
-			msg := fmt.Sprintf("Sorry, but this webhook is available only to %s global admins.", c.managerSettings.Settings.AppFriendlyName)
+			msg := fmt.Sprintf("Sorry, but this webhook is available only to %s global admins.", c.managerSettings.GetSettings().AppFriendlyName)
 			if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", msg); err != nil {
 				logger.Errorf("Failed to send interactive response: %s", err)
 			}
@@ -576,7 +576,7 @@ func (c *interactiveController) verifyWebhookAccess(ctx context.Context, interac
 	}
 
 	if webhook.AccessLevel == common.WebhookAccessLevelChannelAdmins {
-		userIsChannelAdmin := c.managerSettings.Settings.UserIsChannelAdmin(ctx, interaction.Channel.ID, interaction.User.ID, c.apiClient.UserIsInGroup)
+		userIsChannelAdmin := c.managerSettings.GetSettings().UserIsChannelAdmin(ctx, interaction.Channel.ID, interaction.User.ID, c.apiClient.UserIsInGroup)
 
 		if !userIsChannelAdmin {
 			if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", "Sorry, but this webhook is available only to channel admins and above."); err != nil {

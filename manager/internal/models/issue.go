@@ -15,49 +15,68 @@ var (
 	slackMentionEveryoneRegex = regexp.MustCompile(`(?i)<[@!]everyone>`)
 )
 
+const (
+	// fireAndForgetArchiveDelay is the delay before archiving fire-and-forget issues (issues without follow-up).
+	// This short delay helps handle alert spam situations where multiple alerts arrive in quick succession.
+	fireAndForgetArchiveDelay = 30 * time.Second
+
+	// mentionMutingThreshold is the minimum time that must pass before the same Slack mentions
+	// are allowed to trigger notifications again. This prevents mention spam.
+	mentionMutingThreshold = time.Hour
+)
+
 // Issue represents one or more alerts with the same correlation ID (in the same Slack channel).
 // Issues are created when the first alert with a given correlation ID is received, and updated when new alerts arrive with the same correlation ID.
 // Issues can be resolved, archived, and have a connected Slack post.
 type Issue struct {
-	ID                        string          `json:"id"`
-	CorrelationID             string          `json:"correlationId"`
-	Created                   time.Time       `json:"created"`
-	FirstAlert                *Alert          `json:"firstAlert"`
-	LastAlert                 *Alert          `json:"lastAlert"`
-	AlertCount                int             `json:"alertCount"`
-	LastAlertReceived         time.Time       `json:"lastAlertReceived"`
-	LastSlackMention          string          `json:"lastSlackMention"`
-	LastSlackMentionTime      time.Time       `json:"lastSlackMentionTime"`
-	AutoResolvePeriod         time.Duration   `json:"autoResolvePeriod"`
-	ArchiveDelay              time.Duration   `json:"archiveDelay"`
-	ArchiveTime               time.Time       `json:"archiveTime"`
-	Archived                  bool            `json:"archived"`
-	ResolveTime               time.Time       `json:"resolveTime"`
-	SlackPostID               string          `json:"slackPostId"`
-	SlackPostCreated          time.Time       `json:"slackPostCreated"`
-	SlackPostUpdated          time.Time       `json:"slackPostUpdated"`
-	SlackPostHeader           string          `json:"slackPostHeader"`
-	SlackPostText             string          `json:"slackPostText"`
-	SlackPostLastAction       SlackAction     `json:"slackPostLastAction"`
-	SlackPostNeedsUpdate      bool            `json:"slackPostNeedsUpdate"`
-	SlackPostNeedsDelete      bool            `json:"slackPostNeedsDelete"`
-	SlackAlertSentAtLeastOnce bool            `json:"slackAlertSentAtLeastOnce"`
-	SlackPostDelayedUntil     time.Time       `json:"slackPostDelayedUntil"`
-	IsEmojiTerminated         bool            `json:"slackPostEmojiTerminated"`
-	IsEmojiResolved           bool            `json:"slackPostEmojiResolved"`
-	IsEmojiInvestigated       bool            `json:"slackPostEmojiInvestigated"`
-	IsEmojiMuted              bool            `json:"slackPostEmojiMuted"`
-	IsEmojiButtonsActivated   bool            `json:"slackPostEmojiButtonsActivated"`
-	IsMoved                   bool            `json:"isMoved"`
-	TerminatedByUser          string          `json:"terminatedByUser"`
-	ResolvedByUser            string          `json:"resolvedByUser"`
-	InvestigatedByUser        string          `json:"investigatedByUser"`
-	InvestigatedSince         time.Time       `json:"investigatedSince"`
-	MutedByUser               string          `json:"mutedByUser"`
-	MutedSince                time.Time       `json:"mutedSince"`
-	MoveReason                MoveIssueReason `json:"moveReason"`
-	MovedByUser               string          `json:"movedByUser"`
-	IsEscalated               bool            `json:"isEscalated"`
+	ID            string    `json:"id"`
+	CorrelationID string    `json:"correlationId"`
+	Created       time.Time `json:"created"`
+
+	// FirstAlert is the first alert that created this issue. This field is retained for debugging
+	// purposes only and is not used in any business logic.
+	FirstAlert *Alert `json:"firstAlert"`
+
+	// LastAlert is the most recent alert for this issue. All issue state is derived from this alert.
+	// This field must never be nil after issue creation or deserialization.
+	LastAlert                 *Alert        `json:"lastAlert"`
+	AlertCount                int           `json:"alertCount"`
+	LastAlertReceived         time.Time     `json:"lastAlertReceived"`
+	LastSlackMention          string        `json:"lastSlackMention"`
+	LastSlackMentionTime      time.Time     `json:"lastSlackMentionTime"`
+	AutoResolvePeriod         time.Duration `json:"autoResolvePeriod"`
+	ArchiveDelay              time.Duration `json:"archiveDelay"`
+	ArchiveTime               time.Time     `json:"archiveTime"`
+	Archived                  bool          `json:"archived"`
+	ResolveTime               time.Time     `json:"resolveTime"`
+	SlackPostID               string        `json:"slackPostId"`
+	SlackPostCreated          time.Time     `json:"slackPostCreated"`
+	SlackPostUpdated          time.Time     `json:"slackPostUpdated"`
+	SlackPostHeader           string        `json:"slackPostHeader"`
+	SlackPostText             string        `json:"slackPostText"`
+	SlackPostLastAction       SlackAction   `json:"slackPostLastAction"`
+	SlackPostNeedsUpdate      bool          `json:"slackPostNeedsUpdate"`
+	SlackPostNeedsDelete      bool          `json:"slackPostNeedsDelete"`
+	SlackAlertSentAtLeastOnce bool          `json:"slackAlertSentAtLeastOnce"`
+	SlackPostDelayedUntil     time.Time     `json:"slackPostDelayedUntil"`
+
+	// The following IsEmoji* fields use "slackPostEmoji*" JSON tags for backward compatibility
+	// with existing serialized data and external API consumers.
+	IsEmojiTerminated       bool            `json:"slackPostEmojiTerminated"`
+	IsEmojiResolved         bool            `json:"slackPostEmojiResolved"`
+	IsEmojiInvestigated     bool            `json:"slackPostEmojiInvestigated"`
+	IsEmojiMuted            bool            `json:"slackPostEmojiMuted"`
+	IsEmojiButtonsActivated bool            `json:"slackPostEmojiButtonsActivated"`
+	IsMoved                 bool            `json:"isMoved"`
+	TerminatedByUser        string          `json:"terminatedByUser"`
+	ResolvedByUser          string          `json:"resolvedByUser"`
+	InvestigatedByUser      string          `json:"investigatedByUser"`
+	InvestigatedSince       time.Time       `json:"investigatedSince"`
+	MutedByUser             string          `json:"mutedByUser"`
+	MutedSince              time.Time       `json:"mutedSince"`
+	MoveReason              MoveIssueReason `json:"moveReason"`
+	MovedByUser             string          `json:"movedByUser"`
+	IsEscalated             bool            `json:"isEscalated"`
 
 	// cachedJSONBody is used to store the raw JSON body of the issue, after marshalling.
 	// This is used to avoid marshalling in both the database cache middleware and the database driver.
@@ -66,8 +85,13 @@ type Issue struct {
 	cachedJSONBody json.RawMessage `json:"-"`
 }
 
-// NewIssue creates a new Issue from an Alert
+// NewIssue creates a new Issue from an Alert.
+// Returns nil if the provided alert is nil.
 func NewIssue(alert *Alert, logger common.Logger) *Issue {
+	if alert == nil {
+		return nil
+	}
+
 	now := time.Now().UTC()
 
 	issue := Issue{
@@ -142,6 +166,13 @@ func (issue *Issue) FollowUpEnabled() bool {
 // Alerts that are older than the previous alert are ignored.
 // Alerts with status Resolved are ignored if the issue is already resolved.
 // This method is only relevant for issues that have follow-up enabled. For issues without follow-up, all new alerts are ignored.
+//
+// Note: This method may mutate the provided alert's Severity field when escalation is active
+// and the current severity is higher than the incoming alert's severity.
+//
+// The SlackPostDelayedUntil is calculated from issue.Created (not current time) by design,
+// ensuring the issue doesn't appear until the original delay period has elapsed,
+// regardless of how many alerts are added to the issue.
 func (issue *Issue) AddAlert(alert *Alert, logger common.Logger) bool {
 	if !alert.Timestamp.After(issue.LastAlert.Timestamp) {
 		return false
@@ -164,7 +195,7 @@ func (issue *Issue) AddAlert(alert *Alert, logger common.Logger) bool {
 	}
 
 	issue.LastAlert = alert
-	issue.LastAlertReceived = time.Now()
+	issue.LastAlertReceived = time.Now().UTC()
 	issue.AlertCount++
 	issue.AutoResolvePeriod = time.Duration(alert.AutoResolveSeconds) * time.Second
 	issue.ArchiveDelay = time.Duration(alert.ArchivingDelaySeconds) * time.Second
@@ -283,7 +314,7 @@ func (issue *Issue) RegisterResolveRequest(user string) {
 
 	issue.IsEmojiResolved = true
 	issue.ResolvedByUser = user
-	issue.ResolveTime = time.Now()
+	issue.ResolveTime = time.Now().UTC()
 	issue.SlackPostNeedsUpdate = true
 
 	issue.setArchivingTime()
@@ -309,7 +340,7 @@ func (issue *Issue) RegisterInvestigateRequest(user string) {
 
 	issue.IsEmojiInvestigated = true
 	issue.InvestigatedByUser = user
-	issue.InvestigatedSince = time.Now()
+	issue.InvestigatedSince = time.Now().UTC()
 	issue.SlackPostNeedsUpdate = true
 }
 
@@ -331,7 +362,7 @@ func (issue *Issue) RegisterMuteRequest(user string) {
 
 	issue.IsEmojiMuted = true
 	issue.MutedByUser = user
-	issue.MutedSince = time.Now()
+	issue.MutedSince = time.Now().UTC()
 	issue.SlackPostNeedsUpdate = true
 }
 
@@ -596,13 +627,13 @@ func (issue *Issue) ResetCachedJSONBody() {
 func (issue *Issue) setArchivingTime() {
 	// Manually terminated issues are archived immediately
 	if issue.IsEmojiTerminated {
-		issue.ArchiveTime = time.Now()
+		issue.ArchiveTime = time.Now().UTC()
 		return
 	}
 
 	// Fire-and-forget issues are archived after a small delay (to account for alert spam situations)
 	if !issue.LastAlert.IssueFollowUpEnabled {
-		issue.ArchiveTime = issue.LastAlertReceived.Add(30 * time.Second)
+		issue.ArchiveTime = issue.LastAlertReceived.Add(fireAndForgetArchiveDelay)
 		return
 	}
 
@@ -647,14 +678,14 @@ func (issue *Issue) sanitizeSlackMentions(skipMuting bool) {
 
 	// If skipMuting is true, we keep the mentions regardless of previous mention actions
 	if skipMuting {
-		issue.LastSlackMentionTime = time.Now()
+		issue.LastSlackMentionTime = time.Now().UTC()
 		issue.LastSlackMention = mentionsString
 		return
 	}
 
-	// Allow mentions if the mention string has changed OR at least 60 minutes have passed since the last mention
-	if issue.LastSlackMention != mentionsString || time.Since(issue.LastSlackMentionTime) > time.Hour {
-		issue.LastSlackMentionTime = time.Now()
+	// Allow mentions if the mention string has changed OR the muting threshold has passed since the last mention
+	if issue.LastSlackMention != mentionsString || time.Since(issue.LastSlackMentionTime) > mentionMutingThreshold {
+		issue.LastSlackMentionTime = time.Now().UTC()
 		issue.LastSlackMention = mentionsString
 	} else {
 		issue.LastAlert.Text = slackMentionRegex.ReplaceAllString(issue.LastAlert.Text, "*$1*")

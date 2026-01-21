@@ -21,7 +21,7 @@ type MoveMapping struct {
 func NewMoveMapping(correlationID, originalChannelID, targetChannelID string, reason MoveIssueReason) *MoveMapping {
 	return &MoveMapping{
 		ID:                internal.Hash(originalChannelID, correlationID),
-		Timestamp:         time.Now(),
+		Timestamp:         time.Now().UTC(),
 		CorrelationID:     correlationID,
 		OriginalChannelID: originalChannelID,
 		TargetChannelID:   targetChannelID,
@@ -44,6 +44,8 @@ func (m *MoveMapping) GetCorrelationID() string {
 	return m.CorrelationID
 }
 
+// MarshalJSON implements the json.Marshaler interface, which is required
+// by the common.MoveMapping interface.
 func (m *MoveMapping) MarshalJSON() ([]byte, error) {
 	type Alias MoveMapping
 

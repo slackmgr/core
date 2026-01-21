@@ -59,7 +59,7 @@ func New(db common.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore 
 		logger:          logger,
 		metrics:         metrics,
 		cfg:             cfg,
-		managerSettings: &models.ManagerSettingsWrapper{Settings: managerSettings},
+		managerSettings: models.NewManagerSettingsWrapper(managerSettings),
 	}
 }
 
@@ -96,7 +96,7 @@ func (m *Manager) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to validate configuration: %w", err)
 	}
 
-	if err := m.managerSettings.Settings.InitAndValidate(); err != nil {
+	if err := m.managerSettings.GetSettings().InitAndValidate(); err != nil {
 		return fmt.Errorf("failed to initialize channel settings: %w", err)
 	}
 
@@ -151,7 +151,7 @@ func (m *Manager) UpdateSettings(settings *config.ManagerSettings) error {
 		return fmt.Errorf("failed to initialize updated manager settings (the existing settings will continue to be used): %w", err)
 	}
 
-	m.managerSettings.Settings = settings
+	m.managerSettings.SetSettings(settings)
 
 	m.logger.Infof("Manager settings updated")
 

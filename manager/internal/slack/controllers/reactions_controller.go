@@ -46,7 +46,7 @@ func (c *reactionsController) reactionAdded(ctx context.Context, evt *socketmode
 		return
 	}
 
-	reaction := c.managerSettings.Settings.MapSlackPostReaction(reactionAddedEvent.Reaction)
+	reaction := c.managerSettings.GetSettings().MapSlackPostReaction(reactionAddedEvent.Reaction)
 
 	c.logger.Debugf("Registered added reaction '%s', mapped to '%s'", reactionAddedEvent.Reaction, reaction)
 
@@ -81,7 +81,7 @@ func (c *reactionsController) reactionRemoved(ctx context.Context, evt *socketmo
 		return
 	}
 
-	reaction := c.managerSettings.Settings.MapSlackPostReaction(reactionRemovedEvent.Reaction)
+	reaction := c.managerSettings.GetSettings().MapSlackPostReaction(reactionRemovedEvent.Reaction)
 
 	c.logger.Debugf("Registered removed reaction '%s', mapped to '%s'", reactionRemovedEvent.Reaction, reaction)
 
@@ -172,7 +172,7 @@ func (c *reactionsController) getUserInfo(ctx context.Context, channel, userID s
 	logger.Info("User reaction to message in managed channel")
 
 	if requireChannelAdmin {
-		userIsChannelAdmin := c.managerSettings.Settings.UserIsChannelAdmin(ctx, channel, userInfo.ID, c.apiClient.UserIsInGroup)
+		userIsChannelAdmin := c.managerSettings.GetSettings().UserIsChannelAdmin(ctx, channel, userInfo.ID, c.apiClient.UserIsInGroup)
 
 		if !userIsChannelAdmin {
 			logger.Info("User is not admin in channel")
@@ -191,7 +191,7 @@ func (c *reactionsController) postNotAdminAlert(ctx context.Context, channel, us
 		return
 	}
 
-	blocks, err := views.NotAdminView(userRealName, c.managerSettings.Settings)
+	blocks, err := views.NotAdminView(userRealName, c.managerSettings.GetSettings())
 	if err != nil {
 		logger.Errorf("Failed to generate view: %s", err)
 		return

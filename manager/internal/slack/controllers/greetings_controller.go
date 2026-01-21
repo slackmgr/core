@@ -54,7 +54,7 @@ func (c *greetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 		logger.Info("User joined un-managed channel")
 	}
 
-	infoChannelConfig, isInfoChannel := c.managerSettings.Settings.GetInfoChannelConfig(joinedEvent.Channel)
+	infoChannelConfig, isInfoChannel := c.managerSettings.GetSettings().GetInfoChannelConfig(joinedEvent.Channel)
 
 	if isInfoChannel {
 		blocks, err := views.InfoChannelView(infoChannelConfig.TemplatePath, userInfo.RealName)
@@ -71,9 +71,9 @@ func (c *greetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 
 		logger.WithField("reason", "Greeting message in info channel").Info("Post ephemeral message")
 	} else if isAlertChannel {
-		userIsChannelAdmin := c.managerSettings.Settings.UserIsChannelAdmin(ctx, joinedEvent.Channel, userInfo.ID, c.apiClient.UserIsInGroup)
+		userIsChannelAdmin := c.managerSettings.GetSettings().UserIsChannelAdmin(ctx, joinedEvent.Channel, userInfo.ID, c.apiClient.UserIsInGroup)
 
-		blocks, err := views.GreetingView(userInfo.RealName, userIsChannelAdmin, c.managerSettings.Settings)
+		blocks, err := views.GreetingView(userInfo.RealName, userIsChannelAdmin, c.managerSettings.GetSettings())
 		if err != nil {
 			logger.Errorf("Failed to generate view: %s", err)
 			return

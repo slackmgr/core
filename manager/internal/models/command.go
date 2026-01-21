@@ -56,7 +56,7 @@ type WebhookCommandParams struct {
 // It unmarshals the JSON body of the queue item into a Command struct.
 func NewCommandFromQueueItem(queueItem *commonlib.FifoQueueItem) (InFlightMessage, error) { //nolint:ireturn
 	if len(queueItem.Body) == 0 {
-		return nil, errors.New("alert body is empty")
+		return nil, errors.New("command body is empty")
 	}
 
 	var cmd Command

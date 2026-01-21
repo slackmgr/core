@@ -74,6 +74,11 @@ func (c *coordinator) FindIssueBySlackPost(ctx context.Context, channelID string
 		return nil
 	}
 
+	if issue.LastAlert == nil {
+		c.logger.Errorf("Issue has nil LastAlert after unmarshal")
+		return nil
+	}
+
 	// Sanity check
 	if issue.LastAlert.SlackChannelID != channelID {
 		c.logger.Errorf("Issue found in database is not associated with the current channel")

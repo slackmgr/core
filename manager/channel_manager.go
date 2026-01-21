@@ -89,7 +89,7 @@ func (c *channelManager) run(ctx context.Context) {
 	processorIsRunning := true
 
 	for {
-		interval := c.managerSettings.Settings.IssueProcessingInterval(c.channelID)
+		interval := c.managerSettings.GetSettings().IssueProcessingInterval(c.channelID)
 
 		select {
 		case <-ctx.Done():
@@ -232,6 +232,10 @@ func (c *channelManager) findIssueBySlackPost(ctx context.Context, slackPostID s
 		return nil, fmt.Errorf("failed to unmarshal issue body: %w", err)
 	}
 
+	if issue.LastAlert == nil {
+		return nil, errors.New("issue has nil LastAlert after unmarshal")
+	}
+
 	// Sanity check
 	if issue.LastAlert.SlackChannelID != c.channelID {
 		return nil, errors.New("issue found in database is not associated with the current channel")
@@ -262,7 +266,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	defer c.releaseLock(lock)
 	c.metrics.Inc(alertsTotal, c.channelID)
 
-	alert.SetDefaultValues(c.managerSettings.Settings)
+	alert.SetDefaultValues(c.managerSettings.GetSettings())
 	alert.SlackChannelName = c.slackClient.GetChannelName(ctx, c.channelID)
 
 	if err := alert.Validate(); err != nil {
@@ -285,6 +289,10 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 
 		if err := json.Unmarshal(issueBody, issue); err != nil {
 			return fmt.Errorf("failed to unmarshal issue body: %w", err)
+		}
+
+		if issue.LastAlert == nil {
+			return errors.New("issue has nil LastAlert after unmarshal")
 		}
 
 		if err := c.addAlertToExistingIssue(ctx, issue, alert); err != nil {
@@ -444,6 +452,10 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 
 		if err := json.Unmarshal(body, issue); err != nil {
 			return 0, fmt.Errorf("failed to unmarshal issue body: %w", err)
+		}
+
+		if issue.LastAlert == nil {
+			return 0, errors.New("issue has nil LastAlert after unmarshal")
 		}
 
 		issues[issue.ID] = issue

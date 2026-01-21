@@ -192,7 +192,7 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 	})
 
 	// Reordering is allowed when the channel config allows it AND the number of active issues in the channel is small enough
-	allowIssueReordering := c.managerSettings.Settings.OrderIssuesBySeverity(channelID, openIssueCount)
+	allowIssueReordering := c.managerSettings.GetSettings().OrderIssuesBySeverity(channelID, openIssueCount)
 	atLeastOnePostDeleted := false
 
 	sem := semaphore.NewWeighted(int64(c.cfg.SlackClient.Concurrency))
@@ -372,7 +372,7 @@ func (c *Client) DeletePost(ctx context.Context, channelID, ts string) error {
 }
 
 func (c *Client) IsAlertChannel(ctx context.Context, channelID string) (bool, string, error) {
-	if c.managerSettings.Settings.IsInfoChannel(channelID) {
+	if c.managerSettings.GetSettings().IsInfoChannel(channelID) {
 		return false, "channel is defined as 'info channel' (no alerts allowed)", nil
 	}
 
@@ -600,7 +600,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 			blocks = append(blocks, slack.NewActionBlock("issue_actions", webhookButtons...))
 		}
 
-		if c.managerSettings.Settings.AlwaysShowOptionButtons || issue.IsEmojiButtonsActivated {
+		if c.managerSettings.GetSettings().AlwaysShowOptionButtons || issue.IsEmojiButtonsActivated {
 			optionButtons := getIssueOptionButtons(issue)
 
 			if len(optionButtons) > 0 {
@@ -614,7 +614,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 
-	if c.managerSettings.Settings.ShowIssueCorrelationIDInSlackPost {
+	if c.managerSettings.GetSettings().ShowIssueCorrelationIDInSlackPost {
 		text := "Correlation ID: " + issue.CorrelationID
 		fields := []slack.MixedElement{
 			slack.NewTextBlockObject("plain_text", text, false, false),
@@ -733,31 +733,31 @@ func getIssueOptionButtons(issue *models.Issue) []slack.BlockElement {
 func (c *Client) getStatusEmoji(issue *models.Issue, action models.SlackAction, method postUpdateMethod) string {
 	if action == models.ActionResolve {
 		if issue.IsResolvedAsInconclusive() {
-			return c.managerSettings.Settings.IssueStatus.InconclusiveEmoji
+			return c.managerSettings.GetSettings().IssueStatus.InconclusiveEmoji
 		}
-		return c.managerSettings.Settings.IssueStatus.ResolvedEmoji
+		return c.managerSettings.GetSettings().IssueStatus.ResolvedEmoji
 	}
 
 	switch issue.LastAlert.Severity {
 	case common.AlertPanic:
 		if issue.IsEmojiMuted || method == postUpdateMethodUpdateDeleted {
-			return c.managerSettings.Settings.IssueStatus.MutePanicEmoji
+			return c.managerSettings.GetSettings().IssueStatus.MutePanicEmoji
 		}
-		return c.managerSettings.Settings.IssueStatus.PanicEmoji
+		return c.managerSettings.GetSettings().IssueStatus.PanicEmoji
 	case common.AlertError:
 		if issue.IsEmojiMuted || method == postUpdateMethodUpdateDeleted {
-			return c.managerSettings.Settings.IssueStatus.MuteErrorEmoji
+			return c.managerSettings.GetSettings().IssueStatus.MuteErrorEmoji
 		}
-		return c.managerSettings.Settings.IssueStatus.ErrorEmoji
+		return c.managerSettings.GetSettings().IssueStatus.ErrorEmoji
 	case common.AlertWarning:
 		if issue.IsEmojiMuted || method == postUpdateMethodUpdateDeleted {
-			return c.managerSettings.Settings.IssueStatus.MuteWarningEmoji
+			return c.managerSettings.GetSettings().IssueStatus.MuteWarningEmoji
 		}
-		return c.managerSettings.Settings.IssueStatus.WarningEmoji
+		return c.managerSettings.GetSettings().IssueStatus.WarningEmoji
 	case common.AlertResolved:
-		return c.managerSettings.Settings.IssueStatus.ResolvedEmoji
+		return c.managerSettings.GetSettings().IssueStatus.ResolvedEmoji
 	case common.AlertInfo:
-		return c.managerSettings.Settings.IssueStatus.InfoEmoji
+		return c.managerSettings.GetSettings().IssueStatus.InfoEmoji
 	default:
 		c.logger.WithFields(issue.LogFields()).Errorf("Unknown alert severity %s", issue.LastAlert.Severity)
 		return ""
@@ -837,7 +837,7 @@ func getTextBlocks(alertText, statusEmoji string, method postUpdateMethod) []sla
 
 func (c *Client) throttleIssue(issue *models.Issue, action models.SlackAction, issuesInChannel int) bool {
 	// Don't throttle if total number of open issues in channel is less than the configured minimum
-	if issuesInChannel < c.managerSettings.Settings.MinIssueCountForThrottle {
+	if issuesInChannel < c.managerSettings.GetSettings().MinIssueCountForThrottle {
 		return false
 	}
 
@@ -868,7 +868,7 @@ func (c *Client) throttleIssue(issue *models.Issue, action models.SlackAction, i
 	limit := time.Duration(2*issue.AlertCount) * time.Second
 
 	// Limit is never more than the configured upper limit
-	upperLimitInSettings := time.Second * time.Duration(c.managerSettings.Settings.MaxThrottleDurationSeconds)
+	upperLimitInSettings := time.Second * time.Duration(c.managerSettings.GetSettings().MaxThrottleDurationSeconds)
 	if limit > upperLimitInSettings {
 		limit = upperLimitInSettings
 	}
