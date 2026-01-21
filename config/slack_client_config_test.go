@@ -146,14 +146,14 @@ func TestSlackClientConfig_Validate(t *testing.T) {
 			modify: func(c *config.SlackClientConfig) {
 				c.HTTPTimeoutSeconds = 0
 			},
-			expectError: "http timeout must be greater than 0",
+			expectError: "http timeout must be between 1 and 300 seconds",
 		},
 		{
 			name: "negative http timeout",
 			modify: func(c *config.SlackClientConfig) {
 				c.HTTPTimeoutSeconds = -1
 			},
-			expectError: "http timeout must be greater than 0",
+			expectError: "http timeout must be between 1 and 300 seconds",
 		},
 	}
 
@@ -207,6 +207,201 @@ func TestSlackClientConfig_Validate_Order(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Equal(t, "bot token is empty", err.Error())
+	})
+}
+
+func TestSlackClientConfig_Validate_BoundaryValues(t *testing.T) {
+	t.Parallel()
+
+	// Concurrency boundaries
+	t.Run("concurrency at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.Concurrency = config.MinConcurrency
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("concurrency at upper bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.Concurrency = config.MaxConcurrency
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("concurrency below minimum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.Concurrency = config.MinConcurrency - 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "concurrency must be between 1 and 50", err.Error())
+	})
+
+	t.Run("concurrency above maximum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.Concurrency = config.MaxConcurrency + 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "concurrency must be between 1 and 50", err.Error())
+	})
+
+	// MaxAttemptsForRateLimitError boundaries
+	t.Run("max attempts for rate limit at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxAttemptsForRateLimitError = config.MinMaxAttempts
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("max attempts for rate limit at upper bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxAttemptsForRateLimitError = config.MaxMaxAttempts
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("max attempts for rate limit below minimum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxAttemptsForRateLimitError = config.MinMaxAttempts - 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "max attempts for rate limit error must be between 1 and 100", err.Error())
+	})
+
+	t.Run("max attempts for rate limit above maximum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxAttemptsForRateLimitError = config.MaxMaxAttempts + 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "max attempts for rate limit error must be between 1 and 100", err.Error())
+	})
+
+	// MaxAttemptsForTransientError boundaries
+	t.Run("max attempts for transient at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxAttemptsForTransientError = config.MinMaxAttempts
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("max attempts for transient above maximum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxAttemptsForTransientError = config.MaxMaxAttempts + 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "max attempts for transient error must be between 1 and 100", err.Error())
+	})
+
+	// MaxAttemptsForFatalError boundaries
+	t.Run("max attempts for fatal at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxAttemptsForFatalError = config.MinMaxAttempts
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("max attempts for fatal above maximum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxAttemptsForFatalError = config.MaxMaxAttempts + 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "max attempts for fatal error must be between 1 and 100", err.Error())
+	})
+
+	// MaxRateLimitErrorWaitTimeSeconds boundaries
+	t.Run("max rate limit wait time at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxRateLimitErrorWaitTimeSeconds = config.MinWaitTimeSeconds
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("max rate limit wait time at upper bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxRateLimitErrorWaitTimeSeconds = config.MaxWaitTimeSeconds
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("max rate limit wait time below minimum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxRateLimitErrorWaitTimeSeconds = config.MinWaitTimeSeconds - 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "max rate limit error wait time must be between 1 and 600 seconds", err.Error())
+	})
+
+	t.Run("max rate limit wait time above maximum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxRateLimitErrorWaitTimeSeconds = config.MaxWaitTimeSeconds + 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "max rate limit error wait time must be between 1 and 600 seconds", err.Error())
+	})
+
+	// MaxTransientErrorWaitTimeSeconds boundaries
+	t.Run("max transient wait time at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxTransientErrorWaitTimeSeconds = config.MinWaitTimeSeconds
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("max transient wait time above maximum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxTransientErrorWaitTimeSeconds = config.MaxWaitTimeSeconds + 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "max transient error wait time must be between 1 and 600 seconds", err.Error())
+	})
+
+	// MaxFatalErrorWaitTimeSeconds boundaries
+	t.Run("max fatal wait time at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxFatalErrorWaitTimeSeconds = config.MinWaitTimeSeconds
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("max fatal wait time above maximum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.MaxFatalErrorWaitTimeSeconds = config.MaxWaitTimeSeconds + 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "max fatal error wait time must be between 1 and 600 seconds", err.Error())
+	})
+
+	// HTTPTimeoutSeconds boundaries
+	t.Run("http timeout at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.HTTPTimeoutSeconds = config.MinHTTPTimeoutSeconds
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("http timeout at upper bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.HTTPTimeoutSeconds = config.MaxHTTPTimeoutSeconds
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("http timeout above maximum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validSlackClientConfig()
+		cfg.HTTPTimeoutSeconds = config.MaxHTTPTimeoutSeconds + 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "http timeout must be between 1 and 300 seconds", err.Error())
 	})
 }
 

@@ -39,36 +39,45 @@ func TestManagerConfig_Validate(t *testing.T) {
 			modify: func(c *config.ManagerConfig) {
 				c.EncryptionKey = ""
 			},
-			expectError: "the encryption key must be a 32 character alphanumeric string",
+			expectError: "encryption key must be a 32 character alphanumeric string",
 		},
 		{
 			name: "encryption key too short",
 			modify: func(c *config.ManagerConfig) {
 				c.EncryptionKey = "abc123"
 			},
-			expectError: "the encryption key must be a 32 character alphanumeric string",
+			expectError: "encryption key must be a 32 character alphanumeric string",
 		},
 		{
 			name: "encryption key too long",
 			modify: func(c *config.ManagerConfig) {
 				c.EncryptionKey = "abcdefghijklmnopqrstuvwxyz1234567890"
 			},
-			expectError: "the encryption key must be a 32 character alphanumeric string",
+			expectError: "encryption key must be a 32 character alphanumeric string",
 		},
 		{
 			name: "encryption key with special characters",
 			modify: func(c *config.ManagerConfig) {
 				c.EncryptionKey = "abcdefghijklmnopqrstuvwxyz12345!"
 			},
-			expectError: "the encryption key must be a 32 character alphanumeric string",
+			expectError: "encryption key must be a 32 character alphanumeric string",
 		},
 		{
 			name: "encryption key with spaces",
 			modify: func(c *config.ManagerConfig) {
 				c.EncryptionKey = "abcdefghijklmnopqrstuvwxyz12345 "
 			},
-			expectError: "the encryption key must be a 32 character alphanumeric string",
+			expectError: "encryption key must be a 32 character alphanumeric string",
 		},
+		// CacheKeyPrefix validation
+		{
+			name: "empty cache key prefix",
+			modify: func(c *config.ManagerConfig) {
+				c.CacheKeyPrefix = ""
+			},
+			expectError: "cache key prefix is required",
+		},
+		// Location validation
 		{
 			name: "nil location",
 			modify: func(c *config.ManagerConfig) {
@@ -103,14 +112,14 @@ func TestManagerConfig_Validate(t *testing.T) {
 			modify: func(c *config.ManagerConfig) {
 				c.CoordinatorDrainTimeout = 1 * time.Second
 			},
-			expectError: "coordinator drain timeout must be at least 2s",
+			expectError: "coordinator drain timeout must be between 2s and 5m0s",
 		},
 		{
 			name: "channel manager drain timeout too short",
 			modify: func(c *config.ManagerConfig) {
 				c.ChannelManagerDrainTimeout = 1 * time.Second
 			},
-			expectError: "channel manager drain timeout must be at least 2s",
+			expectError: "channel manager drain timeout must be between 2s and 5m0s",
 		},
 		{
 			name: "drain timeouts at minimum are valid",
@@ -228,7 +237,7 @@ func TestManagerConfig_Validate_Order(t *testing.T) {
 		err := cfg.Validate()
 
 		require.Error(t, err)
-		assert.Equal(t, "the encryption key must be a 32 character alphanumeric string", err.Error())
+		assert.Equal(t, "encryption key must be a 32 character alphanumeric string", err.Error())
 	})
 
 	t.Run("location checked before slack client", func(t *testing.T) {
@@ -260,13 +269,6 @@ func TestManagerConfig_Validate_Order(t *testing.T) {
 func TestManagerConfig_OptionalFields(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty cache key prefix is valid", func(t *testing.T) {
-		t.Parallel()
-		cfg := validManagerConfig()
-		cfg.CacheKeyPrefix = ""
-		assert.NoError(t, cfg.Validate())
-	})
-
 	t.Run("skip database cache true is valid", func(t *testing.T) {
 		t.Parallel()
 		cfg := validManagerConfig()
@@ -279,6 +281,58 @@ func TestManagerConfig_OptionalFields(t *testing.T) {
 		cfg := validManagerConfig()
 		cfg.SkipDatabaseCache = false
 		assert.NoError(t, cfg.Validate())
+	})
+}
+
+func TestManagerConfig_Validate_BoundaryValues(t *testing.T) {
+	t.Parallel()
+
+	// CoordinatorDrainTimeout boundaries
+	t.Run("coordinator drain timeout at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.CoordinatorDrainTimeout = config.MinDrainTimeout
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("coordinator drain timeout at upper bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.CoordinatorDrainTimeout = config.MaxDrainTimeout
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("coordinator drain timeout exceeds maximum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.CoordinatorDrainTimeout = config.MaxDrainTimeout + 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "coordinator drain timeout must be between 2s and 5m0s", err.Error())
+	})
+
+	// ChannelManagerDrainTimeout boundaries
+	t.Run("channel manager drain timeout at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.ChannelManagerDrainTimeout = config.MinDrainTimeout
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("channel manager drain timeout at upper bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.ChannelManagerDrainTimeout = config.MaxDrainTimeout
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("channel manager drain timeout exceeds maximum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.ChannelManagerDrainTimeout = config.MaxDrainTimeout + 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "channel manager drain timeout must be between 2s and 5m0s", err.Error())
 	})
 }
 
