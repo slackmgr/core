@@ -448,37 +448,6 @@ func TestManagerConfig_Validate_BoundaryValues(t *testing.T) {
 	})
 }
 
-func TestManagerConfig_SetDefaults(t *testing.T) {
-	t.Parallel()
-
-	t.Run("sets defaults for zero values", func(t *testing.T) {
-		t.Parallel()
-		cfg := &config.ManagerConfig{}
-		cfg.SetDefaults()
-
-		assert.Equal(t, config.DefaultCoordinatorDrainTimeout, cfg.CoordinatorDrainTimeout)
-		assert.Equal(t, config.DefaultChannelManagerDrainTimeout, cfg.ChannelManagerDrainTimeout)
-		assert.Equal(t, config.DefaultSocketModeMaxWorkers, cfg.SocketModeMaxWorkers)
-		assert.Equal(t, config.DefaultSocketModeDrainTimeout, cfg.SocketModeDrainTimeout)
-	})
-
-	t.Run("does not override non-zero values", func(t *testing.T) {
-		t.Parallel()
-		cfg := &config.ManagerConfig{
-			CoordinatorDrainTimeout:    10 * time.Second,
-			ChannelManagerDrainTimeout: 8 * time.Second,
-			SocketModeMaxWorkers:       200,
-			SocketModeDrainTimeout:     15 * time.Second,
-		}
-		cfg.SetDefaults()
-
-		assert.Equal(t, 10*time.Second, cfg.CoordinatorDrainTimeout)
-		assert.Equal(t, 8*time.Second, cfg.ChannelManagerDrainTimeout)
-		assert.Equal(t, int64(200), cfg.SocketModeMaxWorkers)
-		assert.Equal(t, 15*time.Second, cfg.SocketModeDrainTimeout)
-	})
-}
-
 func validManagerConfig() *config.ManagerConfig {
 	cfg := config.NewDefaultManagerConfig()
 	cfg.EncryptionKey = "abcdefghijklmnopqrstuvwxyz123456"

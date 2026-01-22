@@ -247,7 +247,7 @@ func (c *APIConfig) Validate() error {
 		return errors.New("rate limit config is required")
 	}
 
-	if err := c.RateLimitPerAlertChannel.Validate(); err != nil {
+	if err := c.RateLimitPerAlertChannel.validate(); err != nil {
 		return fmt.Errorf("rate limit config is invalid: %w", err)
 	}
 
@@ -257,29 +257,6 @@ func (c *APIConfig) Validate() error {
 
 	if err := c.SlackClient.Validate(); err != nil {
 		return fmt.Errorf("slack client config is invalid: %w", err)
-	}
-
-	return nil
-}
-
-// Validate checks that all rate limit configuration values are within acceptable ranges.
-// Returns a descriptive error for the first validation failure, or nil if valid.
-//
-// Validation ensures:
-//   - AlertsPerSecond is between 0.001 and 1000 (allowing very slow to very fast rates)
-//   - AllowedBurst is between 1 and 10,000 (at least one alert must be allowed)
-//   - MaxRequestWaitTime is between 1 second and 5 minutes (practical timeout range)
-func (c *RateLimitConfig) Validate() error {
-	if c.AlertsPerSecond < MinAlertsPerSecond || c.AlertsPerSecond > MaxAlertsPerSecond {
-		return fmt.Errorf("alerts per second must be between %v and %v", MinAlertsPerSecond, MaxAlertsPerSecond)
-	}
-
-	if c.AllowedBurst < MinAllowedBurst || c.AllowedBurst > MaxAllowedBurst {
-		return fmt.Errorf("allowed burst must be between %d and %d", MinAllowedBurst, MaxAllowedBurst)
-	}
-
-	if c.MaxRequestWaitTime < MinMaxRequestWaitTime || c.MaxRequestWaitTime > MaxMaxRequestWaitTime {
-		return fmt.Errorf("max request wait time must be between %v and %v", MinMaxRequestWaitTime, MaxMaxRequestWaitTime)
 	}
 
 	return nil
@@ -299,6 +276,29 @@ func (c *APIConfig) validateRestPort() error {
 
 	if port < MinRestPort || port > MaxRestPort {
 		return fmt.Errorf("rest port must be between %d and %d", MinRestPort, MaxRestPort)
+	}
+
+	return nil
+}
+
+// validate checks that all rate limit configuration values are within acceptable ranges.
+// Returns a descriptive error for the first validation failure, or nil if valid.
+//
+// Validation ensures:
+//   - AlertsPerSecond is between 0.001 and 1000 (allowing very slow to very fast rates)
+//   - AllowedBurst is between 1 and 10,000 (at least one alert must be allowed)
+//   - MaxRequestWaitTime is between 1 second and 5 minutes (practical timeout range)
+func (c *RateLimitConfig) validate() error {
+	if c.AlertsPerSecond < MinAlertsPerSecond || c.AlertsPerSecond > MaxAlertsPerSecond {
+		return fmt.Errorf("alerts per second must be between %v and %v", MinAlertsPerSecond, MaxAlertsPerSecond)
+	}
+
+	if c.AllowedBurst < MinAllowedBurst || c.AllowedBurst > MaxAllowedBurst {
+		return fmt.Errorf("allowed burst must be between %d and %d", MinAllowedBurst, MaxAllowedBurst)
+	}
+
+	if c.MaxRequestWaitTime < MinMaxRequestWaitTime || c.MaxRequestWaitTime > MaxMaxRequestWaitTime {
+		return fmt.Errorf("max request wait time must be between %v and %v", MinMaxRequestWaitTime, MaxMaxRequestWaitTime)
 	}
 
 	return nil

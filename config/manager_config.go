@@ -205,36 +205,6 @@ func NewDefaultManagerConfig() *ManagerConfig {
 	}
 }
 
-// SetDefaults sets default values for any fields that have zero values.
-// This is useful when the config is loaded from a file or environment variables
-// where some fields may not be specified.
-//
-// Fields that receive defaults:
-//   - CoordinatorDrainTimeout: 5 seconds
-//   - ChannelManagerDrainTimeout: 3 seconds
-//   - SocketModeMaxWorkers: 100
-//   - SocketModeDrainTimeout: 5 seconds
-//
-// This method does not set defaults for required fields like EncryptionKey
-// or SlackClient tokens, as those must be explicitly configured.
-func (c *ManagerConfig) SetDefaults() {
-	if c.CoordinatorDrainTimeout == 0 {
-		c.CoordinatorDrainTimeout = DefaultCoordinatorDrainTimeout
-	}
-
-	if c.ChannelManagerDrainTimeout == 0 {
-		c.ChannelManagerDrainTimeout = DefaultChannelManagerDrainTimeout
-	}
-
-	if c.SocketModeMaxWorkers == 0 {
-		c.SocketModeMaxWorkers = DefaultSocketModeMaxWorkers
-	}
-
-	if c.SocketModeDrainTimeout == 0 {
-		c.SocketModeDrainTimeout = DefaultSocketModeDrainTimeout
-	}
-}
-
 // Validate checks that all required fields are present and all values are within
 // acceptable ranges. It returns a descriptive error for the first validation failure
 // encountered, or nil if the configuration is valid.
