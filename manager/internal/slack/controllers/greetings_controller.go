@@ -19,7 +19,7 @@ type greetingsController struct {
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func (c *greetingsController) memberJoinedChannel(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *greetingsController) memberJoinedChannel(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
 	ack(evt, clt)
 
 	apiEvent, _ := evt.Data.(slackevents.EventsAPIEvent)
@@ -95,7 +95,7 @@ func (c *greetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 	}
 }
 
-func (c *greetingsController) memberLeftChannel(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *greetingsController) memberLeftChannel(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
 	ack(evt, clt)
 
 	apiEvent, _ := evt.Data.(slackevents.EventsAPIEvent)

@@ -116,27 +116,6 @@ func (c *Client) RunSocketMode(ctx context.Context) error {
 
 	handler := controllers.NewSocketModeHandler(c, socketModeClient, c.commandQueue, c.issueFinder, c.cacheStore, c.cfg, c.managerSettings, c.logger)
 
-	// Internal slack client events
-	handler.RegisterInternalEventsController()
-
-	// Interactive actions
-	handler.RegisterInteractiveController()
-
-	// Slash commands actions
-	handler.RegisterSlashCommandsController()
-
-	// Post reactions (emojis)
-	handler.RegisterReactionsController()
-
-	// Greeting situations (joined channel etc)
-	handler.RegisterGreetingsController()
-
-	// Events API
-	handler.RegisterEventsAPIController()
-
-	// Default controller (fallback when nothing else matches)
-	handler.RegisterDefaultController()
-
 	return handler.RunEventLoop(ctx)
 }
 

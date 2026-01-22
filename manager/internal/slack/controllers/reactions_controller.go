@@ -30,7 +30,7 @@ type reactionsController struct {
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func (c *reactionsController) reactionAdded(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *reactionsController) reactionAdded(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
 	ack(evt, clt)
 
 	apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
@@ -65,7 +65,7 @@ func (c *reactionsController) reactionAdded(ctx context.Context, evt *socketmode
 	}
 }
 
-func (c *reactionsController) reactionRemoved(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *reactionsController) reactionRemoved(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
 	ack(evt, clt)
 
 	apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)

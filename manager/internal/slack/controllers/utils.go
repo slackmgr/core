@@ -10,19 +10,19 @@ import (
 	"github.com/slack-go/slack/socketmode"
 )
 
-func ack(evt *socketmode.Event, clt *socketmode.Client) {
+func ack(evt *socketmode.Event, clt SocketModeClient) {
 	if evt.Request != nil {
 		clt.Ack(*evt.Request)
 	}
 }
 
-func ackWithPayload(evt *socketmode.Event, clt *socketmode.Client, payload any) {
+func ackWithPayload(evt *socketmode.Event, clt SocketModeClient, payload any) {
 	if evt.Request != nil {
 		clt.Ack(*evt.Request, payload)
 	}
 }
 
-func ackWithFieldErrorMsg(evt *socketmode.Event, clt *socketmode.Client, fieldName, errMsg string) {
+func ackWithFieldErrorMsg(evt *socketmode.Event, clt SocketModeClient, fieldName, errMsg string) {
 	errors := map[string]string{fieldName: errMsg}
 	ackWithPayload(evt, clt, slack.NewErrorsViewSubmissionResponse(errors))
 }

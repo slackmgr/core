@@ -11,12 +11,20 @@ import (
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+	"golang.org/x/sync/errgroup"
 )
+
+// SocketModeClient defines the interface for the SocketMode client used by the handlers.
+type SocketModeClient interface {
+	Ack(req socketmode.Request, payload ...any)
+	RunContext(ctx context.Context) error
+	Events() chan socketmode.Event
+}
 
 // SocketModeHandler handles Slack Socket Mode events and interactions.
 type SocketModeHandler struct {
 	apiClient        SlackAPIClient
-	socketModeClient *socketmode.Client
+	socketModeClient SocketModeClient
 	commandQueue     FifoQueueProducer
 	issueFinder      IssueFinder
 	cacheStore       store.StoreInterface
@@ -33,10 +41,10 @@ type SocketModeHandler struct {
 }
 
 // SocketModeHandlerFunc defines a function to handle socketmode events.
-type SocketModeHandlerFunc func(context.Context, *socketmode.Event, *socketmode.Client)
+type SocketModeHandlerFunc func(context.Context, *socketmode.Event, SocketModeClient)
 
 // NewSocketModeHandler creates a new SocketModeHandler.
-func NewSocketModeHandler(apiClient SlackAPIClient, socketModeClient *socketmode.Client, commandQueue FifoQueueProducer, issueFinder IssueFinder,
+func NewSocketModeHandler(apiClient SlackAPIClient, socketModeClient SocketModeClient, commandQueue FifoQueueProducer, issueFinder IssueFinder,
 	cacheStore store.StoreInterface, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper, logger common.Logger,
 ) *SocketModeHandler {
 	eventMap := make(map[socketmode.EventType][]SocketModeHandlerFunc)
@@ -45,7 +53,7 @@ func NewSocketModeHandler(apiClient SlackAPIClient, socketModeClient *socketmode
 	eventAPIMap := make(map[string][]SocketModeHandlerFunc)
 	slackCommandMap := make(map[string][]SocketModeHandlerFunc)
 
-	return &SocketModeHandler{
+	handler := &SocketModeHandler{
 		apiClient:                      apiClient,
 		socketModeClient:               socketModeClient,
 		commandQueue:                   commandQueue,
@@ -60,9 +68,50 @@ func NewSocketModeHandler(apiClient SlackAPIClient, socketModeClient *socketmode
 		interactionBlockActionEventMap: interactionBlockActionEventMap,
 		slashCommandMap:                slackCommandMap,
 	}
+
+	// Internal slack client events
+	handler.registerInternalEventsController()
+
+	// Interactive actions
+	handler.registerInteractiveController()
+
+	// Slash commands actions
+	handler.registerSlashCommandsController()
+
+	// Post reactions (emojis)
+	handler.registerReactionsController()
+
+	// Greeting situations (joined channel etc)
+	handler.registerGreetingsController()
+
+	// Events API
+	handler.registerEventsAPIController()
+
+	// Default controller (fallback when nothing else matches)
+	handler.registerDefaultController()
+
+	return handler
 }
 
-func (r *SocketModeHandler) RegisterDefaultController() {
+// RunEventLoop starts the Socket Mode event loop. It blocks until the context is cancelled or an error occurs.
+func (r *SocketModeHandler) RunEventLoop(ctx context.Context) error {
+	errg, ctx := errgroup.WithContext(ctx)
+
+	// RunContext is a blocking function that connects the Slack Socket Mode API and handles all incoming
+	// requests and outgoing responses.
+	errg.Go(func() error {
+		return r.socketModeClient.RunContext(ctx)
+	})
+
+	// Run the event loop, which listens for incoming events and dispatches them to the appropriate handlers.
+	errg.Go(func() error {
+		return r.runEventLoop(ctx)
+	})
+
+	return errg.Wait()
+}
+
+func (r *SocketModeHandler) registerDefaultController() {
 	c := &defaultController{
 		logger: r.logger,
 	}
@@ -70,7 +119,7 @@ func (r *SocketModeHandler) RegisterDefaultController() {
 	r.handleDefault(c.handle)
 }
 
-func (r *SocketModeHandler) RegisterInternalEventsController() {
+func (r *SocketModeHandler) registerInternalEventsController() {
 	c := &internalEventsController{
 		logger: r.logger,
 	}
@@ -90,7 +139,7 @@ func (r *SocketModeHandler) RegisterInternalEventsController() {
 	r.handle(socketmode.EventTypeDisconnect, c.handleEventTypeDisconnect)
 }
 
-func (r *SocketModeHandler) RegisterInteractiveController() {
+func (r *SocketModeHandler) registerInteractiveController() {
 	c := &interactiveController{
 		apiClient:       r.apiClient,
 		commandQueue:    r.commandQueue,
@@ -116,7 +165,7 @@ func (r *SocketModeHandler) RegisterInteractiveController() {
 	r.handle(socketmode.EventTypeInteractive, c.defaultInteractiveHandler)
 }
 
-func (r *SocketModeHandler) RegisterSlashCommandsController() {
+func (r *SocketModeHandler) registerSlashCommandsController() {
 	c := &slashCommandsController{
 		logger: r.logger,
 	}
@@ -124,7 +173,7 @@ func (r *SocketModeHandler) RegisterSlashCommandsController() {
 	r.handle(socketmode.EventTypeSlashCommand, c.handleEventTypeSlashCommands)
 }
 
-func (r *SocketModeHandler) RegisterReactionsController() {
+func (r *SocketModeHandler) registerReactionsController() {
 	cacheKeyPrefix := r.cfg.CacheKeyPrefix + "reactions-controller:"
 	cache := internal.NewCache(r.cacheStore, cacheKeyPrefix, r.logger)
 
@@ -141,7 +190,7 @@ func (r *SocketModeHandler) RegisterReactionsController() {
 	r.handleEventsAPI(string(slackevents.ReactionRemoved), c.reactionRemoved)
 }
 
-func (r *SocketModeHandler) RegisterGreetingsController() {
+func (r *SocketModeHandler) registerGreetingsController() {
 	c := &greetingsController{
 		apiClient:       r.apiClient,
 		logger:          r.logger,
@@ -153,18 +202,12 @@ func (r *SocketModeHandler) RegisterGreetingsController() {
 	r.handleEventsAPI(string(slackevents.MemberLeftChannel), c.memberLeftChannel)
 }
 
-func (r *SocketModeHandler) RegisterEventsAPIController() {
+func (r *SocketModeHandler) registerEventsAPIController() {
 	c := &eventsAPIController{
 		logger: r.logger,
 	}
 
 	r.handle(socketmode.EventTypeEventsAPI, c.handleEventTypeEventsAPI)
-}
-
-// RunEventLoop receives the event via the socket.
-func (r *SocketModeHandler) RunEventLoop(ctx context.Context) error {
-	go r.runEventLoop(ctx)
-	return r.socketModeClient.RunContext(ctx)
 }
 
 // handle registers a middleware function to use to handle an socketmode event.
@@ -194,9 +237,14 @@ func (r *SocketModeHandler) handleDefault(f SocketModeHandlerFunc) {
 	r.defaultHandlerFunc = f
 }
 
-func (r *SocketModeHandler) runEventLoop(ctx context.Context) {
-	for evt := range r.socketModeClient.Events {
-		r.dispatcher(ctx, evt)
+func (r *SocketModeHandler) runEventLoop(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case evt := <-r.socketModeClient.Events():
+			r.dispatcher(ctx, evt)
+		}
 	}
 }
 

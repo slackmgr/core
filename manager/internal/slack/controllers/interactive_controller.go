@@ -45,7 +45,7 @@ type interactiveController struct {
 }
 
 // globalShortcutHandler handles all incoming interaction messages of type 'shortcut'
-func (c *interactiveController) globalShortcutHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *interactiveController) globalShortcutHandler(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
 	// No need to customize the ack in this context, so we send it immediately
 	ack(evt, clt)
 
@@ -64,7 +64,7 @@ func (c *interactiveController) globalShortcutHandler(ctx context.Context, evt *
 }
 
 // messageActionHandler handles all incoming interaction messages of type 'message_action'
-func (c *interactiveController) messageActionHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *interactiveController) messageActionHandler(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
 	// No need to customize the ack in this context, so we send it immediately
 	ack(evt, clt)
 
@@ -85,7 +85,7 @@ func (c *interactiveController) messageActionHandler(ctx context.Context, evt *s
 }
 
 // viewSubmissionHandler handles all incoming interaction messages of type 'view_submission'
-func (c *interactiveController) viewSubmissionHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *interactiveController) viewSubmissionHandler(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
 	interaction, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
 	if err != nil {
 		ack(evt, clt)
@@ -109,7 +109,7 @@ func (c *interactiveController) viewSubmissionHandler(ctx context.Context, evt *
 }
 
 // blockActionsHandler handles all incoming interaction messages of type 'block_actions'
-func (c *interactiveController) blockActionsHandler(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *interactiveController) blockActionsHandler(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
 	// No need to customize the ack in this context, so we send it immediately
 	ack(evt, clt)
 
@@ -142,7 +142,7 @@ func (c *interactiveController) blockActionsHandler(ctx context.Context, evt *so
 }
 
 // defaultInteractiveHandler handles all incoming interaction messages not matched by any of the explicit handlers
-func (c *interactiveController) defaultInteractiveHandler(_ context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *interactiveController) defaultInteractiveHandler(_ context.Context, evt *socketmode.Event, clt SocketModeClient) {
 	ack(evt, clt)
 
 	_, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
@@ -236,7 +236,7 @@ func (c *interactiveController) handleMoveIssueRequest(ctx context.Context, inte
 
 // moveIssueViewSubmission handles the callback from the modal move issue dialog (created by handleMoveIssueRequest).
 // It dispatches an async command with info about the move request, IF the Slack App integration is in the receiving channel.
-func (c *interactiveController) moveIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) moveIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt SocketModeClient, interaction slack.InteractionCallback, logger common.Logger) {
 	targetChannelID, err := getSelectedValue(interaction, "select_channel", "select_channel_input")
 	if err != nil {
 		ack(evt, clt)
@@ -326,7 +326,7 @@ func (c *interactiveController) handleCreateIssueRequest(ctx context.Context, in
 
 // createIssueViewSubmission handles the callback from the modal create issue dialog (created by handleCreateIssueRequest).
 // It dispatches an async command with info about the create request, IF the Slack App integration is in the receiving channel.
-func (c *interactiveController) createIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) createIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt SocketModeClient, interaction slack.InteractionCallback, logger common.Logger) {
 	targetChannelID, err := getSelectedValue(interaction, "select_channel", "select_channel_input")
 	if err != nil {
 		ack(evt, clt)
@@ -591,7 +591,7 @@ func (c *interactiveController) verifyWebhookAccess(ctx context.Context, interac
 
 // webhookViewSubmission handles the callback from the modal confirm webhook dialog (created by handleWebhookRequest).
 // It dispatches an async command with info about the webhook.
-func (c *interactiveController) webhookViewSubmission(ctx context.Context, evt *socketmode.Event, clt *socketmode.Client, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) webhookViewSubmission(ctx context.Context, evt *socketmode.Event, clt SocketModeClient, interaction slack.InteractionCallback, logger common.Logger) {
 	// Fetch info about the user
 	userInfo, err := c.apiClient.GetUserInfo(ctx, interaction.User.ID)
 	if err != nil {

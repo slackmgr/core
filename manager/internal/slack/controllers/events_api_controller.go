@@ -12,7 +12,7 @@ type eventsAPIController struct {
 	logger common.Logger
 }
 
-func (c *eventsAPIController) handleEventTypeEventsAPI(_ context.Context, evt *socketmode.Event, clt *socketmode.Client) {
+func (c *eventsAPIController) handleEventTypeEventsAPI(_ context.Context, evt *socketmode.Event, clt SocketModeClient) {
 	ack(evt, clt)
 
 	apiEvent, _ := evt.Data.(slackevents.EventsAPIEvent)
