@@ -426,7 +426,7 @@ func (q *RedisFifoQueue) refreshStreams(ctx context.Context) error {
 
 		successfulStreams = append(successfulStreams, streamKey)
 
-		q.logger.WithField("stream_key", streamKey).Debug("Discovered new stream")
+		q.logger.WithField("stream_key", streamKey).Info("Discovered new Redis stream")
 	}
 
 	// Update known streams map (brief write lock).
@@ -522,16 +522,16 @@ func (q *RedisFifoQueue) cleanupStaleStreams(ctx context.Context) ([]string, err
 				return nil, err
 			}
 
-			logger.Errorf("Failed to cleanup stale stream: %v", err)
+			logger.Errorf("Failed to cleanup stale Redis stream: %v", err)
 
 			continue
 		}
 
 		if deleted {
 			cleanedUp = append(cleanedUp, streamKey)
-			logger.Info("Cleaned up stale stream")
+			logger.Info("Cleaned up stale Redis stream")
 		} else {
-			logger.Debug("Stream was updated since stale check, skipping cleanup")
+			logger.Debug("Redis stream was updated since stale check, skipping cleanup")
 		}
 	}
 
@@ -569,7 +569,7 @@ func (q *RedisFifoQueue) readMessagesWithLocking(ctx context.Context, sinkCh cha
 			}
 
 			if errors.Is(err, ErrChannelLockUnavailable) {
-				logger.Debug("Stream locked by another consumer, skipping")
+				logger.Debug("Redis stream locked by another consumer, skipping")
 			} else {
 				logger.Errorf("Failed to obtain lock: %v", err)
 			}
@@ -624,7 +624,7 @@ func (q *RedisFifoQueue) readOneMessageFromStream(ctx context.Context, streamKey
 	}
 
 	if claimed != nil {
-		q.logger.WithField("message_id", claimed.ID).WithField("stream_key", streamKey).Debug("Claimed pending message before reading new")
+		q.logger.WithField("message_id", claimed.ID).WithField("stream_key", streamKey).Debug("Claimed pending message from Redis stream before reading new")
 
 		if err := q.processMessageWithLock(ctx, streamKey, channelID, *claimed, lock, sinkCh); err != nil {
 			return false, err
@@ -729,7 +729,7 @@ func (q *RedisFifoQueue) processMessageWithLock(ctx context.Context, streamKey, 
 			// For Redis Streams, nack means we don't ack.
 			// The message remains pending and will be reclaimed after claimMinIdleTime.
 			// We do however need to release the channel lock.
-			q.logger.WithField("message_id", msg.ID).WithField("stream_key", streamKey).Debug("Message nacked, will be reclaimed")
+			q.logger.WithField("message_id", msg.ID).WithField("stream_key", streamKey).Debug("Redis stream message nacked, will be reclaimed")
 			q.releaseLock(lock)
 		})
 	}
@@ -752,14 +752,12 @@ func (q *RedisFifoQueue) processMessageWithLock(ctx context.Context, streamKey, 
 	// on how long we can block.
 	select {
 	case sinkCh <- item:
-		q.logger.WithField("message_id", msg.ID).WithField("channel_id", channelID).Debug("Message received from Redis stream")
+		return nil
 	case <-ctx.Done():
 		// Context cancelled before we could send. Release lock and return error.
 		q.releaseLock(lock)
 		return ctx.Err()
 	}
-
-	return nil
 }
 
 // releaseLock releases a channel lock.
@@ -772,8 +770,6 @@ func (q *RedisFifoQueue) releaseLock(lock ChannelLock) {
 
 	if err := lock.Release(); err != nil {
 		q.logger.WithField("lock_key", key).Errorf("Failed to release lock: %v", err)
-	} else {
-		q.logger.WithField("lock_key", key).Debug("Lock released")
 	}
 }
 
@@ -788,7 +784,7 @@ func (q *RedisFifoQueue) ackMessage(ctx context.Context, streamKey, messageID st
 		return
 	}
 
-	logger.Debug("Message acknowledged")
+	logger.Debug("Redis stream message acknowledged")
 }
 
 // streamKey returns the Redis key for a channel's stream.
