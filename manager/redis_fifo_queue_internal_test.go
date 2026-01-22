@@ -861,7 +861,7 @@ func TestRedisFifoQueue_Send_NotInitialized(t *testing.T) {
 	err := queue.Send(context.Background(), "C12345", "dedup-1", `{"test": "body"}`)
 
 	require.Error(t, err)
-	assert.Equal(t, "redis FIFO queue not initialized", err.Error())
+	assert.Equal(t, "redis FIFO queue producer not initialized", err.Error())
 }
 
 func TestRedisFifoQueue_Send_EmptyChannelID(t *testing.T) {

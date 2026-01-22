@@ -75,6 +75,20 @@ var cleanupStaleStreamScript = redis.NewScript(`
 	return 1
 `)
 
+// RedisFifoQueueProducer is a lightweight write-only queue producer.
+// Use this when the service only needs to send messages (e.g., API server in a separate service).
+// For full queue functionality including Receive(), use RedisFifoQueue instead.
+//
+// This producer has minimal overhead: no consumer groups, no distributed locks,
+// no in-process notification mechanism. It simply writes messages to Redis streams.
+type RedisFifoQueueProducer struct {
+	client      redis.UniversalClient
+	opts        *RedisFifoQueueOptions
+	name        string
+	logger      common.Logger
+	initialized bool
+}
+
 // RedisFifoQueue implements the FifoQueue interface using Redis Streams.
 // It uses one stream per Slack channel to ensure message ordering within a channel,
 // mimicking the behavior of SQS FIFO message groups.
@@ -88,14 +102,13 @@ var cleanupStaleStreamScript = redis.NewScript(`
 // read from that stream until the lock is released (after ack/nack). This ensures
 // that messages for a single channel are processed strictly in order, even across
 // multiple instances.
+//
+// For write-only usage (e.g., API server), consider using RedisFifoQueueProducer instead.
 type RedisFifoQueue struct {
-	client       redis.UniversalClient
+	*RedisFifoQueueProducer // Embedded for Send() and Name()
+
 	locker       ChannelLocker
-	name         string
 	consumerName string
-	opts         *RedisFifoQueueOptions
-	logger       common.Logger
-	initialized  bool
 
 	// knownStreams tracks streams known to this instance for immediate notification.
 	// When Send() adds a message to a stream, it updates this map so the receiver
@@ -110,11 +123,11 @@ type RedisFifoQueue struct {
 	notifyCh chan struct{}
 }
 
-// NewRedisFifoQueue creates a new RedisFifoQueue instance.
+// NewRedisFifoQueueProducer creates a new lightweight write-only queue producer.
+// Use this when the service only needs to send messages and doesn't need to receive.
 // The client should be a configured Redis client (can be a single node, sentinel, or cluster client).
-// The locker is used to ensure strict per-channel ordering across multiple instances.
 // The name is used as part of the Redis key prefix and for identification.
-func NewRedisFifoQueue(client redis.UniversalClient, locker ChannelLocker, name string, logger common.Logger, opts ...RedisFifoQueueOption) *RedisFifoQueue {
+func NewRedisFifoQueueProducer(client redis.UniversalClient, name string, logger common.Logger, opts ...RedisFifoQueueOption) *RedisFifoQueueProducer {
 	options := newRedisFifoQueueOptions()
 
 	for _, o := range opts {
@@ -122,16 +135,58 @@ func NewRedisFifoQueue(client redis.UniversalClient, locker ChannelLocker, name 
 	}
 
 	logger = logger.
-		WithField("component", "redis-fifo-queue").
+		WithField("component", "redis-fifo-queue-producer").
 		WithField("queue_name", name)
 
-	return &RedisFifoQueue{
+	return &RedisFifoQueueProducer{
 		client: client,
-		locker: locker,
 		name:   name,
 		opts:   options,
 		logger: logger,
 	}
+}
+
+// NewRedisFifoQueue creates a new RedisFifoQueue instance with full send and receive capabilities.
+// The client should be a configured Redis client (can be a single node, sentinel, or cluster client).
+// The locker is used to ensure strict per-channel ordering across multiple instances.
+// The name is used as part of the Redis key prefix and for identification.
+//
+// For write-only usage (e.g., API server), consider using NewRedisFifoQueueProducer instead.
+func NewRedisFifoQueue(client redis.UniversalClient, locker ChannelLocker, name string, logger common.Logger, opts ...RedisFifoQueueOption) *RedisFifoQueue {
+	producer := NewRedisFifoQueueProducer(client, name, logger, opts...)
+
+	// Update logger component for full queue
+	producer.logger = producer.logger.WithField("component", "redis-fifo-queue")
+
+	return &RedisFifoQueue{
+		RedisFifoQueueProducer: producer,
+		locker:                 locker,
+	}
+}
+
+// Init initializes the RedisFifoQueueProducer.
+// It validates options and marks the producer as ready for use.
+func (p *RedisFifoQueueProducer) Init() (*RedisFifoQueueProducer, error) {
+	if p.initialized {
+		return p, nil
+	}
+
+	if p.name == "" {
+		return nil, errors.New("queue name cannot be empty")
+	}
+
+	if strings.ContainsAny(p.name, ": \t\n") {
+		return nil, errors.New("queue name cannot contain colons, spaces, or whitespace")
+	}
+
+	if err := p.opts.validate(); err != nil {
+		return nil, fmt.Errorf("invalid Redis FIFO queue options: %w", err)
+	}
+
+	p.initialized = true
+	p.logger.Info("Redis FIFO queue producer initialized")
+
+	return p, nil
 }
 
 // Init initializes the RedisFifoQueue.
@@ -141,20 +196,13 @@ func (q *RedisFifoQueue) Init() (*RedisFifoQueue, error) {
 		return q, nil
 	}
 
-	if q.name == "" {
-		return nil, errors.New("queue name cannot be empty")
-	}
-
-	if strings.ContainsAny(q.name, ": \t\n") {
-		return nil, errors.New("queue name cannot contain colons, spaces, or whitespace")
-	}
-
 	if q.locker == nil {
 		return nil, errors.New("locker cannot be nil")
 	}
 
-	if err := q.opts.validate(); err != nil {
-		return nil, fmt.Errorf("invalid Redis FIFO queue options: %w", err)
+	// Initialize the embedded producer first
+	if _, err := q.RedisFifoQueueProducer.Init(); err != nil {
+		return nil, err
 	}
 
 	// Generate a unique consumer name for this instance.
@@ -172,14 +220,12 @@ func (q *RedisFifoQueue) Init() (*RedisFifoQueue, error) {
 	q.knownStreams = make(map[string]bool)
 	q.notifyCh = make(chan struct{}, 1) // Buffered to allow one pending notification.
 
-	q.initialized = true
-
 	return q, nil
 }
 
 // Name returns the name of the queue.
-func (q *RedisFifoQueue) Name() string {
-	return q.name
+func (p *RedisFifoQueueProducer) Name() string {
+	return p.name
 }
 
 // Send sends a message to the queue.
@@ -187,9 +233,9 @@ func (q *RedisFifoQueue) Name() string {
 // Note: The dedupID parameter is accepted for interface compatibility but is not used for deduplication.
 // Redis Streams does not natively support message deduplication like SQS FIFO queues.
 // Deduplication should be handled at the application level if needed.
-func (q *RedisFifoQueue) Send(ctx context.Context, slackChannelID, _, body string) error {
-	if !q.initialized {
-		return errors.New("redis FIFO queue not initialized")
+func (p *RedisFifoQueueProducer) Send(ctx context.Context, slackChannelID, _, body string) error {
+	if !p.initialized {
+		return errors.New("redis FIFO queue producer not initialized")
 	}
 
 	if slackChannelID == "" {
@@ -200,14 +246,32 @@ func (q *RedisFifoQueue) Send(ctx context.Context, slackChannelID, _, body strin
 		return errors.New("body cannot be empty")
 	}
 
-	streamKey := q.streamKey(slackChannelID)
+	streamKey := p.streamKey(slackChannelID)
 
 	// Atomically add message to stream, update index, and record activity.
 	// Using a Lua script ensures consistency: all operations succeed together or none do.
-	messageID, err := q.sendMessageAtomic(ctx, streamKey, slackChannelID, body)
+	messageID, err := p.sendMessageAtomic(ctx, streamKey, slackChannelID, body)
 	if err != nil {
 		return fmt.Errorf("failed to add message to Redis stream %s: %w", streamKey, err)
 	}
+
+	p.logger.WithField("message_id", messageID).WithField("channel_id", slackChannelID).Debug("Message sent to Redis stream")
+
+	return nil
+}
+
+// Send sends a message to the queue with additional support for in-process receivers.
+// This overrides the embedded producer's Send to add:
+// - Consumer group creation for new streams (enables immediate consumption)
+// - Local stream tracking for fast discovery by in-process receiver
+// - Notification to wake up in-process receiver immediately
+func (q *RedisFifoQueue) Send(ctx context.Context, slackChannelID, dedupID, body string) error {
+	// Use embedded producer's send for the atomic Redis operations
+	if err := q.RedisFifoQueueProducer.Send(ctx, slackChannelID, dedupID, body); err != nil {
+		return err
+	}
+
+	streamKey := q.streamKey(slackChannelID)
 
 	// Update local known streams for immediate discovery by in-process receiver.
 	q.knownStreamsMu.Lock()
@@ -229,8 +293,6 @@ func (q *RedisFifoQueue) Send(ctx context.Context, slackChannelID, _, body strin
 	default:
 		// Notification already pending, receiver will wake up anyway.
 	}
-
-	q.logger.WithField("message_id", messageID).WithField("channel_id", slackChannelID).Debug("Message sent to Redis stream")
 
 	return nil
 }
@@ -384,17 +446,17 @@ func (q *RedisFifoQueue) refreshStreams(ctx context.Context) error {
 // sendMessageAtomic atomically adds a message to a stream, adds the stream to the index,
 // and updates the activity timestamp. Returns the message ID.
 // This ensures consistency: all three operations succeed together or none do.
-func (q *RedisFifoQueue) sendMessageAtomic(ctx context.Context, streamKey, channelID, body string) (string, error) {
-	keys := []string{streamKey, q.streamsIndexKey(), q.streamActivityKey()}
+func (p *RedisFifoQueueProducer) sendMessageAtomic(ctx context.Context, streamKey, channelID, body string) (string, error) {
+	keys := []string{streamKey, p.streamsIndexKey(), p.streamActivityKey()}
 
 	args := []any{
-		q.opts.maxStreamLength,
+		p.opts.maxStreamLength,
 		channelID,
 		body,
 		time.Now().Unix(),
 	}
 
-	result, err := sendMessageScript.Run(ctx, q.client, keys, args...).Text()
+	result, err := sendMessageScript.Run(ctx, p.client, keys, args...).Text()
 	if err != nil {
 		return "", fmt.Errorf("failed to send message atomically: %w", err)
 	}
@@ -731,14 +793,20 @@ func (q *RedisFifoQueue) ackMessage(ctx context.Context, streamKey, messageID st
 
 // streamKey returns the Redis key for a channel's stream.
 // The queue name is included to prevent collisions between different queue instances.
-func (q *RedisFifoQueue) streamKey(slackChannelID string) string {
-	return fmt.Sprintf("%s:%s:stream:%s", q.opts.keyPrefix, q.name, slackChannelID)
+func (p *RedisFifoQueueProducer) streamKey(slackChannelID string) string {
+	return fmt.Sprintf("%s:%s:stream:%s", p.opts.keyPrefix, p.name, slackChannelID)
 }
 
 // streamsIndexKey returns the Redis key for the streams index set.
 // The queue name is included to prevent collisions between different queue instances.
-func (q *RedisFifoQueue) streamsIndexKey() string {
-	return fmt.Sprintf("%s:%s:streams", q.opts.keyPrefix, q.name)
+func (p *RedisFifoQueueProducer) streamsIndexKey() string {
+	return fmt.Sprintf("%s:%s:streams", p.opts.keyPrefix, p.name)
+}
+
+// streamActivityKey returns the Redis key for the sorted set tracking stream activity.
+// The queue name is included to prevent collisions between different queue instances.
+func (p *RedisFifoQueueProducer) streamActivityKey() string {
+	return fmt.Sprintf("%s:%s:stream-activity", p.opts.keyPrefix, p.name)
 }
 
 // lockKey returns the key used for locking a channel's stream.
@@ -751,10 +819,4 @@ func (q *RedisFifoQueue) lockKey(channelID string) string {
 func (q *RedisFifoQueue) channelIDFromStreamKey(streamKey string) string {
 	prefix := fmt.Sprintf("%s:%s:stream:", q.opts.keyPrefix, q.name)
 	return strings.TrimPrefix(streamKey, prefix)
-}
-
-// streamActivityKey returns the Redis key for the sorted set tracking stream activity.
-// The queue name is included to prevent collisions between different queue instances.
-func (q *RedisFifoQueue) streamActivityKey() string {
-	return fmt.Sprintf("%s:%s:stream-activity", q.opts.keyPrefix, q.name)
 }
