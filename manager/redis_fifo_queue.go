@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"sync"
@@ -19,6 +20,60 @@ import (
 // of the caller's context state - acknowledgment is a commitment, not a cancellable request.
 // This should be shorter than the drain timeouts (default 3-5s) since these are simple Redis operations.
 const ackNackTimeout = 2 * time.Second
+
+// sendMessageScript atomically adds a message to a stream, adds the stream to the index,
+// and updates the activity timestamp. Returns the message ID.
+// This ensures consistency: if any operation succeeds, all operations succeed.
+//
+//nolint:gochecknoglobals // Lua script is immutable and shared across all instances for Redis script caching.
+var sendMessageScript = redis.NewScript(`
+	local streamKey = KEYS[1]
+	local indexKey = KEYS[2]
+	local activityKey = KEYS[3]
+	local maxLen = tonumber(ARGV[1])
+	local channelId = ARGV[2]
+	local body = ARGV[3]
+	local activityTime = tonumber(ARGV[4])
+
+	-- Add message to stream with approximate trimming
+	local messageId = redis.call('XADD', streamKey, 'MAXLEN', '~', maxLen, '*',
+		'channel_id', channelId,
+		'body', body)
+
+	-- Add stream to index set
+	redis.call('SADD', indexKey, streamKey)
+
+	-- Update activity timestamp
+	redis.call('ZADD', activityKey, activityTime, streamKey)
+
+	return messageId
+`)
+
+// cleanupStaleStreamScript atomically checks if a stream is still stale and deletes it.
+// Returns 1 if the stream was deleted, 0 if it was updated since the stale check.
+// This prevents the TOCTOU race where a message could be sent between checking
+// staleness and deletion.
+//
+//nolint:gochecknoglobals // Lua script is immutable and shared across all instances for Redis script caching.
+var cleanupStaleStreamScript = redis.NewScript(`
+	local streamKey = KEYS[1]
+	local indexKey = KEYS[2]
+	local activityKey = KEYS[3]
+	local cutoff = tonumber(ARGV[1])
+
+	-- Check current activity score
+	local score = redis.call('ZSCORE', activityKey, streamKey)
+	if score ~= false and tonumber(score) > cutoff then
+		-- Stream was updated since stale check, do not delete
+		return 0
+	end
+
+	-- Still stale (or not in activity set), delete atomically
+	redis.call('DEL', streamKey)
+	redis.call('SREM', indexKey, streamKey)
+	redis.call('ZREM', activityKey, streamKey)
+	return 1
+`)
 
 // RedisFifoQueue implements the FifoQueue interface using Redis Streams.
 // It uses one stream per Slack channel to ensure message ordering within a channel,
@@ -41,6 +96,18 @@ type RedisFifoQueue struct {
 	opts         *RedisFifoQueueOptions
 	logger       common.Logger
 	initialized  bool
+
+	// knownStreams tracks streams known to this instance for immediate notification.
+	// When Send() adds a message to a stream, it updates this map so the receiver
+	// can discover new streams immediately without waiting for the refresh interval.
+	// Protected by knownStreamsMu.
+	knownStreams   map[string]bool
+	knownStreamsMu sync.RWMutex
+
+	// notifyCh signals the receiver to check for new messages immediately.
+	// Non-blocking sends are used to avoid blocking the sender.
+	// This enables immediate message processing for in-process sends.
+	notifyCh chan struct{}
 }
 
 // NewRedisFifoQueue creates a new RedisFifoQueue instance.
@@ -100,6 +167,10 @@ func (q *RedisFifoQueue) Init() (*RedisFifoQueue, error) {
 	q.consumerName = fmt.Sprintf("%s-%s", hostname, ksuid.New().String())
 	q.logger = q.logger.WithField("consumer_name", q.consumerName)
 
+	// Initialize in-process notification mechanism.
+	q.knownStreams = make(map[string]bool)
+	q.notifyCh = make(chan struct{}, 1) // Buffered to allow one pending notification.
+
 	q.initialized = true
 
 	return q, nil
@@ -132,37 +203,32 @@ func (q *RedisFifoQueue) Send(ctx context.Context, slackChannelID, dedupID, body
 
 	streamKey := q.streamKey(slackChannelID)
 
-	// Add message to the stream.
-	// MAXLEN ~ provides approximate trimming for memory management.
-	args := &redis.XAddArgs{
-		Stream: streamKey,
-		MaxLen: q.opts.maxStreamLength,
-		Approx: true,
-		Values: map[string]any{
-			"channel_id": slackChannelID,
-			"body":       body,
-			"timestamp":  time.Now().UnixMilli(),
-		},
-	}
-
-	messageID, err := q.client.XAdd(ctx, args).Result()
+	// Atomically add message to stream, update index, and record activity.
+	// Using a Lua script ensures consistency: all operations succeed together or none do.
+	messageID, err := q.sendMessageAtomic(ctx, streamKey, slackChannelID, body)
 	if err != nil {
 		return fmt.Errorf("failed to add message to Redis stream %s: %w", streamKey, err)
 	}
 
-	// Track this stream in the index set for discovery.
-	if err := q.client.SAdd(ctx, q.streamsIndexKey(), streamKey).Err(); err != nil {
-		// Log but don't fail - the message was added successfully.
-		q.logger.WithField("stream_key", streamKey).Errorf("Failed to add stream to index: %v", err)
+	// Update local known streams for immediate discovery by in-process receiver.
+	q.knownStreamsMu.Lock()
+	isNew := !q.knownStreams[streamKey]
+	q.knownStreams[streamKey] = true
+	q.knownStreamsMu.Unlock()
+
+	// If this is a new stream, ensure consumer group exists so receiver can read immediately.
+	if isNew {
+		err := q.client.XGroupCreateMkStream(ctx, streamKey, q.opts.consumerGroup, "0").Err()
+		if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+			q.logger.WithField("stream_key", streamKey).Errorf("Failed to create consumer group in Send: %v", err)
+		}
 	}
 
-	// Record activity timestamp for this stream (used for stale stream cleanup).
-	if err := q.client.ZAdd(ctx, q.streamActivityKey(), redis.Z{
-		Score:  float64(time.Now().Unix()),
-		Member: streamKey,
-	}).Err(); err != nil {
-		// Log but don't fail - the message was added successfully.
-		q.logger.WithField("stream_key", streamKey).Errorf("Failed to record stream activity: %v", err)
+	// Signal receiver to check for messages (non-blocking).
+	select {
+	case q.notifyCh <- struct{}{}:
+	default:
+		// Notification already pending, receiver will wake up anyway.
 	}
 
 	q.logger.WithField("message_id", messageID).WithField("channel_id", slackChannelID).Debug("Message sent to Redis stream")
@@ -172,6 +238,8 @@ func (q *RedisFifoQueue) Send(ctx context.Context, slackChannelID, dedupID, body
 
 // Receive receives messages from the queue until the context is cancelled.
 // Messages are sent to the provided channel, which is closed when Receive returns.
+// The receiver uses the shared knownStreams map which is updated by Send() for
+// immediate discovery of new streams created by in-process senders.
 func (q *RedisFifoQueue) Receive(ctx context.Context, sinkCh chan<- *common.FifoQueueItem) error {
 	defer close(sinkCh)
 
@@ -179,11 +247,8 @@ func (q *RedisFifoQueue) Receive(ctx context.Context, sinkCh chan<- *common.Fifo
 		return errors.New("redis FIFO queue not initialized")
 	}
 
-	// Track known streams and their state.
-	knownStreams := make(map[string]bool)
-
-	// Refresh streams on startup.
-	if err := q.refreshStreams(ctx, knownStreams); err != nil {
+	// Refresh streams on startup (populates shared knownStreams).
+	if err := q.refreshStreams(ctx); err != nil {
 		return fmt.Errorf("failed to refresh streams on startup: %w", err)
 	}
 
@@ -195,11 +260,20 @@ func (q *RedisFifoQueue) Receive(ctx context.Context, sinkCh chan<- *common.Fifo
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-streamRefreshTicker.C:
-			if err := q.refreshStreams(ctx, knownStreams); err != nil {
+			if err := q.refreshStreams(ctx); err != nil {
 				q.logger.Errorf("Failed to refresh streams: %v", err)
 			}
+		case <-q.notifyCh:
+			// Notification received from in-process Send(), try to read immediately.
+			_, err := q.readMessagesWithLocking(ctx, sinkCh)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return ctx.Err()
+				}
+				q.logger.Errorf("Error reading messages: %v", err)
+			}
 		default:
-			messagesRead, err := q.readMessagesWithLocking(ctx, knownStreams, sinkCh)
+			messagesRead, err := q.readMessagesWithLocking(ctx, sinkCh)
 			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return ctx.Err()
@@ -209,10 +283,12 @@ func (q *RedisFifoQueue) Receive(ctx context.Context, sinkCh chan<- *common.Fifo
 			}
 
 			// If no messages were read from any stream (or there was an error), wait briefly before trying again.
+			// Also listen on notifyCh to wake up immediately when a message is sent in-process.
 			if !messagesRead {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
+				case <-q.notifyCh: // Woken up by in-process Send(), continue loop immediately.
 				case <-time.After(q.opts.pollInterval):
 				}
 			}
@@ -222,7 +298,8 @@ func (q *RedisFifoQueue) Receive(ctx context.Context, sinkCh chan<- *common.Fifo
 
 // refreshStreams updates the list of known streams from the index set.
 // It also ensures the consumer group exists for each stream, and cleans up stale streams.
-func (q *RedisFifoQueue) refreshStreams(ctx context.Context, knownStreams map[string]bool) error {
+// This function uses the shared knownStreams map protected by knownStreamsMu.
+func (q *RedisFifoQueue) refreshStreams(ctx context.Context) error {
 	// Clean up stale streams first (if cleanup is enabled).
 	staleStreams, err := q.cleanupStaleStreams(ctx)
 	if err != nil {
@@ -230,9 +307,13 @@ func (q *RedisFifoQueue) refreshStreams(ctx context.Context, knownStreams map[st
 		// Continue anyway - cleanup failure shouldn't prevent normal operation.
 	}
 
-	// Remove stale streams from local map.
-	for _, streamKey := range staleStreams {
-		delete(knownStreams, streamKey)
+	// Remove stale streams from shared map.
+	if len(staleStreams) > 0 {
+		q.knownStreamsMu.Lock()
+		for _, streamKey := range staleStreams {
+			delete(q.knownStreams, streamKey)
+		}
+		q.knownStreamsMu.Unlock()
 	}
 
 	streams, err := q.client.SMembers(ctx, q.streamsIndexKey()).Result()
@@ -240,11 +321,25 @@ func (q *RedisFifoQueue) refreshStreams(ctx context.Context, knownStreams map[st
 		return fmt.Errorf("failed to get streams from index: %w", err)
 	}
 
-	for _, streamKey := range streams {
-		if knownStreams[streamKey] {
-			continue
-		}
+	// Get snapshot of current known streams (read lock only).
+	// This minimizes lock contention with Send() which needs a write lock.
+	q.knownStreamsMu.RLock()
+	currentKnown := make(map[string]bool, len(q.knownStreams))
+	maps.Copy(currentKnown, q.knownStreams)
+	q.knownStreamsMu.RUnlock()
 
+	// Find streams that need consumer group creation (no lock held).
+	var newStreams []string
+	for _, streamKey := range streams {
+		if !currentKnown[streamKey] {
+			newStreams = append(newStreams, streamKey)
+		}
+	}
+
+	// Create consumer groups without holding the lock.
+	// This allows Send() to update knownStreams during potentially slow Redis operations.
+	successfulStreams := make([]string, 0, len(newStreams))
+	for _, streamKey := range newStreams {
 		// Ensure consumer group exists for this stream.
 		// Use MKSTREAM to create the stream if it doesn't exist.
 		// Start from "0" to read all existing messages.
@@ -253,12 +348,56 @@ func (q *RedisFifoQueue) refreshStreams(ctx context.Context, knownStreams map[st
 			q.logger.WithField("stream_key", streamKey).Errorf("Failed to create consumer group: %v", err)
 			continue
 		}
-
-		knownStreams[streamKey] = true
+		successfulStreams = append(successfulStreams, streamKey)
 		q.logger.WithField("stream_key", streamKey).Debug("Discovered new stream")
 	}
 
+	// Update known streams map (brief write lock).
+	if len(successfulStreams) > 0 {
+		q.knownStreamsMu.Lock()
+		for _, streamKey := range successfulStreams {
+			q.knownStreams[streamKey] = true
+		}
+		q.knownStreamsMu.Unlock()
+	}
+
 	return nil
+}
+
+// sendMessageAtomic atomically adds a message to a stream, adds the stream to the index,
+// and updates the activity timestamp. Returns the message ID.
+// This ensures consistency: all three operations succeed together or none do.
+func (q *RedisFifoQueue) sendMessageAtomic(ctx context.Context, streamKey, channelID, body string) (string, error) {
+	keys := []string{streamKey, q.streamsIndexKey(), q.streamActivityKey()}
+
+	args := []any{
+		q.opts.maxStreamLength,
+		channelID,
+		body,
+		time.Now().Unix(),
+	}
+
+	result, err := sendMessageScript.Run(ctx, q.client, keys, args...).Text()
+	if err != nil {
+		return "", fmt.Errorf("failed to send message atomically: %w", err)
+	}
+
+	return result, nil
+}
+
+// cleanupStaleStreamAtomic atomically checks if a stream is still stale and deletes it.
+// Returns true if the stream was deleted, false if it was updated since the stale check.
+// This prevents the TOCTOU race where a message could be sent between checking staleness and deletion.
+func (q *RedisFifoQueue) cleanupStaleStreamAtomic(ctx context.Context, streamKey string, cutoff int64) (bool, error) {
+	keys := []string{streamKey, q.streamsIndexKey(), q.streamActivityKey()}
+	args := []any{cutoff}
+
+	result, err := cleanupStaleStreamScript.Run(ctx, q.client, keys, args...).Int()
+	if err != nil {
+		return false, err
+	}
+
+	return result == 1, nil
 }
 
 // cleanupStaleStreams removes streams that have been inactive for longer than streamInactivityTimeout.
@@ -289,24 +428,22 @@ func (q *RedisFifoQueue) cleanupStaleStreams(ctx context.Context) ([]string, err
 	for _, streamKey := range staleStreams {
 		logger := q.logger.WithField("stream_key", streamKey)
 
-		// Delete the stream from Redis.
-		if err := q.client.Del(ctx, streamKey).Err(); err != nil {
-			logger.Errorf("Failed to delete stale stream: %v", err)
+		// Atomically check if stream is still stale and delete it.
+		// This prevents the TOCTOU race: if Send() updated the activity timestamp
+		// after ZRangeByScore but before deletion, the script will detect this
+		// and skip the deletion.
+		deleted, err := q.cleanupStaleStreamAtomic(ctx, streamKey, cutoff)
+		if err != nil {
+			logger.Errorf("Failed to cleanup stale stream: %v", err)
 			continue
 		}
 
-		// Remove from the streams index set.
-		if err := q.client.SRem(ctx, q.streamsIndexKey(), streamKey).Err(); err != nil {
-			logger.Errorf("Failed to remove stale stream from index: %v", err)
+		if deleted {
+			cleanedUp = append(cleanedUp, streamKey)
+			logger.Info("Cleaned up stale stream")
+		} else {
+			logger.Debug("Stream was updated since stale check, skipping cleanup")
 		}
-
-		// Remove from the activity sorted set.
-		if err := q.client.ZRem(ctx, q.streamActivityKey(), streamKey).Err(); err != nil {
-			logger.Errorf("Failed to remove stale stream from activity set: %v", err)
-		}
-
-		cleanedUp = append(cleanedUp, streamKey)
-		logger.Info("Cleaned up stale stream")
 	}
 
 	return cleanedUp, nil
@@ -316,7 +453,10 @@ func (q *RedisFifoQueue) cleanupStaleStreams(ctx context.Context) ([]string, err
 // This ensures strict per-channel ordering: while a message from a stream is being processed,
 // no other consumer can read from that stream.
 // Returns true if at least one message was read.
-func (q *RedisFifoQueue) readMessagesWithLocking(ctx context.Context, knownStreams map[string]bool, sinkCh chan<- *common.FifoQueueItem) (bool, error) {
+// Uses the shared knownStreams via getKnownStreams() for safe concurrent access.
+func (q *RedisFifoQueue) readMessagesWithLocking(ctx context.Context, sinkCh chan<- *common.FifoQueueItem) (bool, error) {
+	knownStreams := q.getKnownStreams()
+
 	if len(knownStreams) == 0 {
 		return false, nil
 	}
@@ -369,6 +509,17 @@ func (q *RedisFifoQueue) readMessagesWithLocking(ctx context.Context, knownStrea
 	}
 
 	return messagesRead, nil
+}
+
+// getKnownStreams returns a snapshot of known streams for safe iteration.
+// This allows iteration without holding the lock for the entire duration.
+func (q *RedisFifoQueue) getKnownStreams() map[string]bool {
+	q.knownStreamsMu.RLock()
+	defer q.knownStreamsMu.RUnlock()
+
+	snapshot := make(map[string]bool, len(q.knownStreams))
+	maps.Copy(snapshot, q.knownStreams)
+	return snapshot
 }
 
 // readOneMessageFromStream reads a single message from the specified stream.
@@ -473,9 +624,9 @@ func (q *RedisFifoQueue) processMessageWithLock(ctx context.Context, streamKey, 
 
 	ack := func() { //nolint:contextcheck // Deliberately uses context.Background() - ack must complete regardless of caller's context
 		once.Do(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), ackNackTimeout)
+			ackCtx, cancel := context.WithTimeout(context.Background(), ackNackTimeout)
 			defer cancel()
-			q.ackMessage(ctx, streamKey, msg.ID)
+			q.ackMessage(ackCtx, streamKey, msg.ID)
 			q.releaseLock(lock)
 		})
 	}
@@ -499,6 +650,13 @@ func (q *RedisFifoQueue) processMessageWithLock(ctx context.Context, streamKey, 
 		Nack:             nack,
 	}
 
+	// Send to the sink channel. Note: We intentionally hold the channel lock while
+	// sending to sinkCh. If sinkCh is full, we block here with the lock held.
+	// This is by design to ensure strict per-channel ordering: while we're waiting
+	// to deliver this message, no other consumer can read the next message from
+	// this channel. This prevents out-of-order processing when the downstream
+	// consumer is slow. The lock timeout (opts.lockTTL) provides an upper bound
+	// on how long we can block.
 	select {
 	case sinkCh <- item:
 		q.logger.WithField("message_id", msg.ID).WithField("channel_id", channelID).Debug("Message received from Redis stream")

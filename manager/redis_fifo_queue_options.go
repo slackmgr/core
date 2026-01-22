@@ -20,7 +20,7 @@ type RedisFifoQueueOptions struct {
 	consumerGroup string
 
 	// pollInterval is how long to wait between polling cycles when no messages are available.
-	// Default: 5 seconds
+	// Default: 2 seconds
 	pollInterval time.Duration
 
 	// maxStreamLength is the approximate maximum length of each stream.
@@ -56,7 +56,7 @@ func newRedisFifoQueueOptions() *RedisFifoQueueOptions {
 	return &RedisFifoQueueOptions{
 		keyPrefix:               "slack-manager:queue",
 		consumerGroup:           "slack-manager",
-		pollInterval:            5 * time.Second,
+		pollInterval:            2 * time.Second,
 		maxStreamLength:         10000,
 		streamRefreshInterval:   30 * time.Second,
 		claimMinIdleTime:        120 * time.Second,
