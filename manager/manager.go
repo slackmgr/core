@@ -157,3 +157,11 @@ func (m *Manager) UpdateSettings(settings *config.ManagerSettings) error {
 
 	return nil
 }
+
+func isCtxCanceledErr(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}

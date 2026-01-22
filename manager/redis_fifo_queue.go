@@ -160,6 +160,7 @@ func (q *RedisFifoQueue) Init() (*RedisFifoQueue, error) {
 	// Generate a unique consumer name for this instance.
 	// This allows multiple instances to consume from the same consumer group.
 	hostname, _ := os.Hostname()
+
 	if hostname == "" {
 		hostname = "unknown"
 	}
@@ -186,9 +187,7 @@ func (q *RedisFifoQueue) Name() string {
 // Note: The dedupID parameter is accepted for interface compatibility but is not used for deduplication.
 // Redis Streams does not natively support message deduplication like SQS FIFO queues.
 // Deduplication should be handled at the application level if needed.
-func (q *RedisFifoQueue) Send(ctx context.Context, slackChannelID, dedupID, body string) error {
-	_ = dedupID // Unused - Redis Streams does not support native deduplication.
-
+func (q *RedisFifoQueue) Send(ctx context.Context, slackChannelID, _, body string) error {
 	if !q.initialized {
 		return errors.New("redis FIFO queue not initialized")
 	}
@@ -219,7 +218,7 @@ func (q *RedisFifoQueue) Send(ctx context.Context, slackChannelID, dedupID, body
 	// If this is a new stream, ensure consumer group exists so receiver can read immediately.
 	if isNew {
 		err := q.client.XGroupCreateMkStream(ctx, streamKey, q.opts.consumerGroup, "0").Err()
-		if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+		if err != nil && !isCtxCanceledErr(err) && !strings.Contains(err.Error(), "BUSYGROUP") {
 			q.logger.WithField("stream_key", streamKey).Errorf("Failed to create consumer group in Send: %v", err)
 		}
 	}
@@ -256,41 +255,39 @@ func (q *RedisFifoQueue) Receive(ctx context.Context, sinkCh chan<- *common.Fifo
 	defer streamRefreshTicker.Stop()
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-streamRefreshTicker.C:
-			if err := q.refreshStreams(ctx); err != nil {
+			if err := q.refreshStreams(ctx); err != nil && !isCtxCanceledErr(err) {
 				q.logger.Errorf("Failed to refresh streams: %v", err)
 			}
 		case <-q.notifyCh:
 			// Notification received from in-process Send(), try to read immediately.
-			_, err := q.readMessagesWithLocking(ctx, sinkCh)
-			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return ctx.Err()
-				}
+			if _, err := q.readMessagesWithLocking(ctx, sinkCh); err != nil && !isCtxCanceledErr(err) {
 				q.logger.Errorf("Error reading messages: %v", err)
 			}
 		default:
 			messagesRead, err := q.readMessagesWithLocking(ctx, sinkCh)
-			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return ctx.Err()
-				}
-
+			if err != nil && !isCtxCanceledErr(err) {
 				q.logger.Errorf("Error reading messages: %v", err)
+			}
+
+			if messagesRead {
+				continue
 			}
 
 			// If no messages were read from any stream (or there was an error), wait briefly before trying again.
 			// Also listen on notifyCh to wake up immediately when a message is sent in-process.
-			if !messagesRead {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-q.notifyCh: // Woken up by in-process Send(), continue loop immediately.
-				case <-time.After(q.opts.pollInterval):
-				}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-q.notifyCh: // Woken up by in-process Send(), continue loop immediately.
+			case <-time.After(q.opts.pollInterval):
 			}
 		}
 	}
@@ -301,18 +298,24 @@ func (q *RedisFifoQueue) Receive(ctx context.Context, sinkCh chan<- *common.Fifo
 // This function uses the shared knownStreams map protected by knownStreamsMu.
 func (q *RedisFifoQueue) refreshStreams(ctx context.Context) error {
 	// Clean up stale streams first (if cleanup is enabled).
+	// In case of error, log and continue. Cleanup is not critical for normal operation.
 	staleStreams, err := q.cleanupStaleStreams(ctx)
 	if err != nil {
+		if isCtxCanceledErr(err) {
+			return err
+		}
+
 		q.logger.Errorf("Failed to cleanup stale streams: %v", err)
-		// Continue anyway - cleanup failure shouldn't prevent normal operation.
 	}
 
 	// Remove stale streams from shared map.
 	if len(staleStreams) > 0 {
 		q.knownStreamsMu.Lock()
+
 		for _, streamKey := range staleStreams {
 			delete(q.knownStreams, streamKey)
 		}
+
 		q.knownStreamsMu.Unlock()
 	}
 
@@ -324,12 +327,15 @@ func (q *RedisFifoQueue) refreshStreams(ctx context.Context) error {
 	// Get snapshot of current known streams (read lock only).
 	// This minimizes lock contention with Send() which needs a write lock.
 	q.knownStreamsMu.RLock()
+
 	currentKnown := make(map[string]bool, len(q.knownStreams))
 	maps.Copy(currentKnown, q.knownStreams)
+
 	q.knownStreamsMu.RUnlock()
 
 	// Find streams that need consumer group creation (no lock held).
 	var newStreams []string
+
 	for _, streamKey := range streams {
 		if !currentKnown[streamKey] {
 			newStreams = append(newStreams, streamKey)
@@ -339,25 +345,36 @@ func (q *RedisFifoQueue) refreshStreams(ctx context.Context) error {
 	// Create consumer groups without holding the lock.
 	// This allows Send() to update knownStreams during potentially slow Redis operations.
 	successfulStreams := make([]string, 0, len(newStreams))
+
 	for _, streamKey := range newStreams {
 		// Ensure consumer group exists for this stream.
 		// Use MKSTREAM to create the stream if it doesn't exist.
 		// Start from "0" to read all existing messages.
 		err := q.client.XGroupCreateMkStream(ctx, streamKey, q.opts.consumerGroup, "0").Err()
-		if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
-			q.logger.WithField("stream_key", streamKey).Errorf("Failed to create consumer group: %v", err)
-			continue
+		if err != nil {
+			if isCtxCanceledErr(err) {
+				return err
+			}
+
+			if !strings.Contains(err.Error(), "BUSYGROUP") {
+				q.logger.WithField("stream_key", streamKey).Errorf("Failed to create consumer group in refreshStreams: %v", err)
+				continue
+			}
 		}
+
 		successfulStreams = append(successfulStreams, streamKey)
+
 		q.logger.WithField("stream_key", streamKey).Debug("Discovered new stream")
 	}
 
 	// Update known streams map (brief write lock).
 	if len(successfulStreams) > 0 {
 		q.knownStreamsMu.Lock()
+
 		for _, streamKey := range successfulStreams {
 			q.knownStreams[streamKey] = true
 		}
+
 		q.knownStreamsMu.Unlock()
 	}
 
@@ -404,17 +421,18 @@ func (q *RedisFifoQueue) cleanupStaleStreamAtomic(ctx context.Context, streamKey
 // Returns the list of stream keys that were cleaned up.
 func (q *RedisFifoQueue) cleanupStaleStreams(ctx context.Context) ([]string, error) {
 	if q.opts.streamInactivityTimeout == 0 {
-		// Cleanup is disabled.
 		return nil, nil
 	}
 
 	cutoff := time.Now().Add(-q.opts.streamInactivityTimeout).Unix()
 
 	// Find streams with activity older than cutoff.
-	staleStreams, err := q.client.ZRangeByScore(ctx, q.streamActivityKey(), &redis.ZRangeBy{
+	opt := &redis.ZRangeBy{
 		Min: "-inf",
 		Max: fmt.Sprintf("%d", cutoff),
-	}).Result()
+	}
+
+	staleStreams, err := q.client.ZRangeByScore(ctx, q.streamActivityKey(), opt).Result()
 	if err != nil {
 		return nil, fmt.Errorf("failed to find stale streams: %w", err)
 	}
@@ -426,6 +444,10 @@ func (q *RedisFifoQueue) cleanupStaleStreams(ctx context.Context) ([]string, err
 	cleanedUp := make([]string, 0, len(staleStreams))
 
 	for _, streamKey := range staleStreams {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		logger := q.logger.WithField("stream_key", streamKey)
 
 		// Atomically check if stream is still stale and delete it.
@@ -434,7 +456,12 @@ func (q *RedisFifoQueue) cleanupStaleStreams(ctx context.Context) ([]string, err
 		// and skip the deletion.
 		deleted, err := q.cleanupStaleStreamAtomic(ctx, streamKey, cutoff)
 		if err != nil {
+			if isCtxCanceledErr(err) {
+				return nil, err
+			}
+
 			logger.Errorf("Failed to cleanup stale stream: %v", err)
+
 			continue
 		}
 
@@ -464,11 +491,8 @@ func (q *RedisFifoQueue) readMessagesWithLocking(ctx context.Context, sinkCh cha
 	messagesRead := false
 
 	for streamKey := range knownStreams {
-		// Check for context cancellation at the start of each iteration.
-		select {
-		case <-ctx.Done():
-			return messagesRead, ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return false, err
 		}
 
 		channelID := q.channelIDFromStreamKey(streamKey)
@@ -478,16 +502,16 @@ func (q *RedisFifoQueue) readMessagesWithLocking(ctx context.Context, sinkCh cha
 		// Use a short maxWait (0) to avoid blocking - if the lock is held, skip to the next stream.
 		lock, err := q.locker.Obtain(ctx, q.lockKey(channelID), q.opts.lockTTL, 0)
 		if err != nil {
+			if isCtxCanceledErr(err) {
+				return false, err
+			}
+
 			if errors.Is(err, ErrChannelLockUnavailable) {
-				// Another consumer is processing this stream, skip it.
 				logger.Debug("Stream locked by another consumer, skipping")
-				continue
+			} else {
+				logger.Errorf("Failed to obtain lock: %v", err)
 			}
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return messagesRead, ctx.Err()
-			}
-			// Unexpected error obtaining lock.
-			logger.Errorf("Failed to obtain lock: %v", err)
+
 			continue
 		}
 
@@ -519,6 +543,7 @@ func (q *RedisFifoQueue) getKnownStreams() map[string]bool {
 
 	snapshot := make(map[string]bool, len(q.knownStreams))
 	maps.Copy(snapshot, q.knownStreams)
+
 	return snapshot
 }
 
@@ -538,9 +563,11 @@ func (q *RedisFifoQueue) readOneMessageFromStream(ctx context.Context, streamKey
 
 	if claimed != nil {
 		q.logger.WithField("message_id", claimed.ID).WithField("stream_key", streamKey).Debug("Claimed pending message before reading new")
+
 		if err := q.processMessageWithLock(ctx, streamKey, channelID, *claimed, lock, sinkCh); err != nil {
 			return false, err
 		}
+
 		return true, nil
 	}
 
@@ -556,18 +583,20 @@ func (q *RedisFifoQueue) readOneMessageFromStream(ctx context.Context, streamKey
 	results, err := q.client.XReadGroup(ctx, args).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			// No messages available in this stream.
 			return false, nil
 		}
+
 		return false, fmt.Errorf("failed to read from stream %s: %w", streamKey, err)
 	}
 
 	// Process the message (there should be at most one stream with at most one message).
 	if len(results) > 0 && len(results[0].Messages) > 0 {
 		msg := results[0].Messages[0]
+
 		if err := q.processMessageWithLock(ctx, streamKey, channelID, msg, lock, sinkCh); err != nil {
 			return false, err
 		}
+
 		return true, nil
 	}
 
@@ -577,20 +606,22 @@ func (q *RedisFifoQueue) readOneMessageFromStream(ctx context.Context, streamKey
 // tryClaimPendingMessage attempts to claim a pending message from the stream.
 // Returns nil if no pending messages are available or claimable.
 func (q *RedisFifoQueue) tryClaimPendingMessage(ctx context.Context, streamKey string) (*redis.XMessage, error) {
-	// Use XAUTOCLAIM to atomically find and claim a pending message in a single round trip.
-	claimed, _, err := q.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+	args := &redis.XAutoClaimArgs{
 		Stream:   streamKey,
 		Group:    q.opts.consumerGroup,
 		Consumer: q.consumerName,
 		MinIdle:  q.opts.claimMinIdleTime,
 		Start:    "0-0",
 		Count:    1,
-	}).Result()
+	}
+
+	// Use XAUTOCLAIM to atomically find and claim a pending message in a single round trip.
+	claimed, _, err := q.client.XAutoClaim(ctx, args).Result()
 	if err != nil {
 		if strings.Contains(err.Error(), "NOGROUP") {
-			// Group doesn't exist yet, that's fine.
 			return nil, nil
 		}
+
 		return nil, fmt.Errorf("failed to auto-claim pending message: %w", err)
 	}
 
@@ -685,13 +716,13 @@ func (q *RedisFifoQueue) releaseLock(lock ChannelLock) {
 }
 
 // ackMessage acknowledges a message, removing it from the pending list.
+// This method should always be called with context.Background() or a non-cancellable context
+// since acknowledgment is a commitment that must complete.
 func (q *RedisFifoQueue) ackMessage(ctx context.Context, streamKey, messageID string) {
 	logger := q.logger.WithField("message_id", messageID).WithField("stream_key", streamKey)
 
 	if err := q.client.XAck(ctx, streamKey, q.opts.consumerGroup, messageID).Err(); err != nil {
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			logger.Errorf("Failed to acknowledge message: %v", err)
-		}
+		logger.Errorf("Failed to acknowledge message: %v", err)
 		return
 	}
 
