@@ -36,6 +36,26 @@ const (
 	// buffers than the coordinator. This is intentionally shorter than the coordinator
 	// timeout to allow for sequential draining if needed.
 	DefaultChannelManagerDrainTimeout = 3 * time.Second
+
+	// MinSocketModeMaxWorkers is the minimum allowed value for concurrent socket mode handlers.
+	// At least 10 workers ensures the system can handle basic event processing even under
+	// constrained resource environments.
+	MinSocketModeMaxWorkers = int64(10)
+
+	// MaxSocketModeMaxWorkers is the maximum allowed value for concurrent socket mode handlers.
+	// 1000 workers is a reasonable upper bound that prevents excessive goroutine spawning
+	// while still allowing high-throughput event processing.
+	MaxSocketModeMaxWorkers = int64(1000)
+
+	// DefaultSocketModeMaxWorkers is the default number of concurrent socket mode handlers.
+	// 100 workers provides a good balance between throughput and resource usage for
+	// typical Slack workspaces.
+	DefaultSocketModeMaxWorkers = int64(100)
+
+	// DefaultSocketModeDrainTimeout is the default drain timeout for socket mode handlers.
+	// 5 seconds provides enough time for most handlers to complete their work (Slack API
+	// calls, queue writes) during graceful shutdown.
+	DefaultSocketModeDrainTimeout = 5 * time.Second
 )
 
 // ManagerConfig holds configuration for the Slack Manager service.
@@ -133,6 +153,31 @@ type ManagerConfig struct {
 	//
 	// Default: 3 seconds. Must be between 2 seconds and 5 minutes.
 	ChannelManagerDrainTimeout time.Duration `json:"channelManagerDrainTimeout" yaml:"channelManagerDrainTimeout"`
+
+	// SocketModeMaxWorkers limits the number of concurrent socket mode event handlers.
+	// This prevents goroutine explosion under high load by using a semaphore to limit
+	// the number of handlers that can run simultaneously.
+	//
+	// Each Slack event (reactions, interactions, slash commands, etc.) is processed
+	// by a separate goroutine. Without this limit, a burst of events could spawn
+	// thousands of goroutines, exhausting system resources.
+	//
+	// Default: 100. Must be between 10 and 1000.
+	SocketModeMaxWorkers int64 `json:"socketModeMaxWorkers" yaml:"socketModeMaxWorkers"`
+
+	// SocketModeDrainTimeout is the maximum time to wait for in-flight socket mode
+	// handlers to complete during graceful shutdown.
+	//
+	// During graceful shutdown, the socket mode handler:
+	//  1. Stops accepting new events from the Slack socket
+	//  2. Waits for all in-flight handlers to complete their work
+	//  3. If timeout is exceeded, logs a warning and proceeds with shutdown
+	//
+	// Handlers that don't complete within this timeout may have their work interrupted.
+	// For critical operations (like queue writes), handlers should complete quickly.
+	//
+	// Default: 5 seconds. Must be between 2 seconds and 5 minutes.
+	SocketModeDrainTimeout time.Duration `json:"socketModeDrainTimeout" yaml:"socketModeDrainTimeout"`
 }
 
 // NewDefaultManagerConfig returns a ManagerConfig populated with sensible default values.
@@ -142,6 +187,8 @@ type ManagerConfig struct {
 //   - UTC timezone for consistent timestamp handling
 //   - Coordinator drain timeout of 5 seconds
 //   - Channel manager drain timeout of 3 seconds
+//   - Socket mode max workers of 100
+//   - Socket mode drain timeout of 5 seconds
 //   - Database cache enabled (SkipDatabaseCache = false)
 //
 // The EncryptionKey is intentionally left empty and must be set before use.
@@ -153,6 +200,8 @@ func NewDefaultManagerConfig() *ManagerConfig {
 		SlackClient:                NewDefaultSlackClientConfig(),
 		CoordinatorDrainTimeout:    DefaultCoordinatorDrainTimeout,
 		ChannelManagerDrainTimeout: DefaultChannelManagerDrainTimeout,
+		SocketModeMaxWorkers:       DefaultSocketModeMaxWorkers,
+		SocketModeDrainTimeout:     DefaultSocketModeDrainTimeout,
 	}
 }
 
@@ -163,6 +212,8 @@ func NewDefaultManagerConfig() *ManagerConfig {
 // Fields that receive defaults:
 //   - CoordinatorDrainTimeout: 5 seconds
 //   - ChannelManagerDrainTimeout: 3 seconds
+//   - SocketModeMaxWorkers: 100
+//   - SocketModeDrainTimeout: 5 seconds
 //
 // This method does not set defaults for required fields like EncryptionKey
 // or SlackClient tokens, as those must be explicitly configured.
@@ -173,6 +224,14 @@ func (c *ManagerConfig) SetDefaults() {
 
 	if c.ChannelManagerDrainTimeout == 0 {
 		c.ChannelManagerDrainTimeout = DefaultChannelManagerDrainTimeout
+	}
+
+	if c.SocketModeMaxWorkers == 0 {
+		c.SocketModeMaxWorkers = DefaultSocketModeMaxWorkers
+	}
+
+	if c.SocketModeDrainTimeout == 0 {
+		c.SocketModeDrainTimeout = DefaultSocketModeDrainTimeout
 	}
 }
 
@@ -187,6 +246,8 @@ func (c *ManagerConfig) SetDefaults() {
 //   - SlackClient: must not be nil, and must pass its own validation
 //   - CoordinatorDrainTimeout: must be between 2 seconds and 5 minutes
 //   - ChannelManagerDrainTimeout: must be between 2 seconds and 5 minutes
+//   - SocketModeMaxWorkers: must be between 10 and 1000
+//   - SocketModeDrainTimeout: must be between 2 seconds and 5 minutes
 func (c *ManagerConfig) Validate() error {
 	if !encryptionKeyRegex.MatchString(c.EncryptionKey) {
 		return fmt.Errorf("encryption key must be a %d character alphanumeric string", EncryptionKeyLength)
@@ -214,6 +275,14 @@ func (c *ManagerConfig) Validate() error {
 
 	if c.ChannelManagerDrainTimeout < MinDrainTimeout || c.ChannelManagerDrainTimeout > MaxDrainTimeout {
 		return fmt.Errorf("channel manager drain timeout must be between %v and %v", MinDrainTimeout, MaxDrainTimeout)
+	}
+
+	if c.SocketModeMaxWorkers < MinSocketModeMaxWorkers || c.SocketModeMaxWorkers > MaxSocketModeMaxWorkers {
+		return fmt.Errorf("socket mode max workers must be between %d and %d", MinSocketModeMaxWorkers, MaxSocketModeMaxWorkers)
+	}
+
+	if c.SocketModeDrainTimeout < MinDrainTimeout || c.SocketModeDrainTimeout > MaxDrainTimeout {
+		return fmt.Errorf("socket mode drain timeout must be between %v and %v", MinDrainTimeout, MaxDrainTimeout)
 	}
 
 	return nil

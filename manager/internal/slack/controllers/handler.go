@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"sync"
 
 	"github.com/eko/gocache/lib/v4/store"
 	common "github.com/peteraglen/slack-manager-common"
@@ -12,6 +13,7 @@ import (
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 // SocketModeClient defines the interface for the SocketMode client used by the handlers.
@@ -38,6 +40,11 @@ type SocketModeHandler struct {
 	eventAPIMap                    map[string][]SocketModeHandlerFunc
 	slashCommandMap                map[string][]SocketModeHandlerFunc
 	defaultHandlerFunc             SocketModeHandlerFunc
+
+	// sem limits the number of concurrent event handlers to prevent goroutine explosion.
+	sem *semaphore.Weighted
+	// wg tracks in-flight handlers for graceful shutdown.
+	wg sync.WaitGroup
 }
 
 // SocketModeHandlerFunc defines a function to handle socketmode events.
@@ -67,6 +74,7 @@ func NewSocketModeHandler(apiClient SlackAPIClient, socketModeClient SocketModeC
 		interactionEventMap:            interactionEventMap,
 		interactionBlockActionEventMap: interactionBlockActionEventMap,
 		slashCommandMap:                slackCommandMap,
+		sem:                            semaphore.NewWeighted(cfg.SocketModeMaxWorkers),
 	}
 
 	// Internal slack client events
@@ -94,6 +102,7 @@ func NewSocketModeHandler(apiClient SlackAPIClient, socketModeClient SocketModeC
 }
 
 // RunEventLoop starts the Socket Mode event loop. It blocks until the context is cancelled or an error occurs.
+// During graceful shutdown, it waits for all in-flight handlers to complete up to the configured drain timeout.
 func (r *SocketModeHandler) RunEventLoop(ctx context.Context) error {
 	errg, ctx := errgroup.WithContext(ctx)
 
@@ -108,7 +117,31 @@ func (r *SocketModeHandler) RunEventLoop(ctx context.Context) error {
 		return r.runEventLoop(ctx)
 	})
 
-	return errg.Wait()
+	err := errg.Wait()
+
+	// Wait for in-flight handlers to complete with timeout
+	r.drainHandlers()
+
+	return err
+}
+
+// drainHandlers waits for all in-flight handlers to complete, up to the configured drain timeout.
+func (r *SocketModeHandler) drainHandlers() {
+	drainCtx, cancel := context.WithTimeout(context.Background(), r.cfg.SocketModeDrainTimeout)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		r.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		r.logger.Debug("All socket mode handlers completed gracefully")
+	case <-drainCtx.Done():
+		r.logger.WithField("timeout", r.cfg.SocketModeDrainTimeout).Info("Socket mode drain timeout exceeded, some handlers may not have completed")
+	}
 }
 
 func (r *SocketModeHandler) registerDefaultController() {
@@ -237,12 +270,38 @@ func (r *SocketModeHandler) handleDefault(f SocketModeHandlerFunc) {
 	r.defaultHandlerFunc = f
 }
 
+// dispatchHandler safely spawns a handler goroutine with concurrency limiting and panic recovery.
+// It acquires a semaphore slot before spawning the goroutine and releases it when the handler completes.
+// The handler is tracked by the waitgroup for graceful shutdown.
+func (r *SocketModeHandler) dispatchHandler(ctx context.Context, evt *socketmode.Event, f SocketModeHandlerFunc) {
+	// Try to acquire semaphore slot, respecting context cancellation
+	if err := r.sem.Acquire(ctx, 1); err != nil {
+		// Context cancelled, don't start new work
+		return
+	}
+
+	r.wg.Go(func() {
+		defer r.sem.Release(1)
+		defer func() {
+			if rec := recover(); rec != nil {
+				r.logger.Errorf("Panic in socket mode handler: %v", rec)
+			}
+		}()
+
+		f(ctx, evt, r.socketModeClient)
+	})
+}
+
 func (r *SocketModeHandler) runEventLoop(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case evt := <-r.socketModeClient.Events():
+		case evt, ok := <-r.socketModeClient.Events():
+			if !ok {
+				// Channel closed, socket mode client shut down
+				return nil
+			}
 			r.dispatcher(ctx, evt)
 		}
 	}
@@ -264,7 +323,7 @@ func (r *SocketModeHandler) dispatcher(ctx context.Context, evt socketmode.Event
 	}
 
 	if !ishandled && r.defaultHandlerFunc != nil {
-		go r.defaultHandlerFunc(ctx, &evt, r.socketModeClient)
+		r.dispatchHandler(ctx, &evt, r.defaultHandlerFunc)
 	}
 }
 
@@ -272,7 +331,7 @@ func (r *SocketModeHandler) dispatcher(ctx context.Context, evt socketmode.Event
 func (r *SocketModeHandler) socketmodeDispatcher(ctx context.Context, evt *socketmode.Event) bool {
 	if handlers, ok := r.eventMap[evt.Type]; ok {
 		for _, f := range handlers {
-			go f(ctx, evt, r.socketModeClient)
+			r.dispatchHandler(ctx, evt, f)
 		}
 
 		return true
@@ -293,7 +352,7 @@ func (r *SocketModeHandler) interactionDispatcher(ctx context.Context, evt *sock
 
 	if handlers, ok := r.interactionEventMap[interaction.Type]; ok {
 		for _, f := range handlers {
-			go f(ctx, evt, r.socketModeClient)
+			r.dispatchHandler(ctx, evt, f)
 		}
 
 		ishandled = true
@@ -304,7 +363,7 @@ func (r *SocketModeHandler) interactionDispatcher(ctx context.Context, evt *sock
 	for _, action := range blockActions {
 		if handlers, ok := r.interactionBlockActionEventMap[action.ActionID]; ok {
 			for _, f := range handlers {
-				go f(ctx, evt, r.socketModeClient)
+				r.dispatchHandler(ctx, evt, f)
 			}
 
 			ishandled = true
@@ -330,7 +389,7 @@ func (r *SocketModeHandler) eventAPIDispatcher(ctx context.Context, evt *socketm
 
 	if handlers, ok := r.eventAPIMap[eventsAPIEvent.InnerEvent.Type]; ok {
 		for _, f := range handlers {
-			go f(ctx, evt, r.socketModeClient)
+			r.dispatchHandler(ctx, evt, f)
 		}
 
 		ishandled = true
@@ -354,7 +413,7 @@ func (r *SocketModeHandler) slashCommandDispatcher(ctx context.Context, evt *soc
 
 	if handlers, ok := r.slashCommandMap[slashCommandEvent.Command]; ok {
 		for _, f := range handlers {
-			go f(ctx, evt, r.socketModeClient)
+			r.dispatchHandler(ctx, evt, f)
 		}
 
 		ishandled = true

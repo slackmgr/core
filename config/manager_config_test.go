@@ -19,6 +19,10 @@ func TestNewDefaultManagerConfig(t *testing.T) {
 	assert.False(t, cfg.SkipDatabaseCache)
 	assert.Equal(t, time.UTC, cfg.Location)
 	require.NotNil(t, cfg.SlackClient)
+	assert.Equal(t, config.DefaultCoordinatorDrainTimeout, cfg.CoordinatorDrainTimeout)
+	assert.Equal(t, config.DefaultChannelManagerDrainTimeout, cfg.ChannelManagerDrainTimeout)
+	assert.Equal(t, config.DefaultSocketModeMaxWorkers, cfg.SocketModeMaxWorkers)
+	assert.Equal(t, config.DefaultSocketModeDrainTimeout, cfg.SocketModeDrainTimeout)
 }
 
 func TestManagerConfig_Validate(t *testing.T) {
@@ -126,6 +130,57 @@ func TestManagerConfig_Validate(t *testing.T) {
 			modify: func(c *config.ManagerConfig) {
 				c.CoordinatorDrainTimeout = 2 * time.Second
 				c.ChannelManagerDrainTimeout = 2 * time.Second
+			},
+			expectError: "",
+		},
+		// SocketModeMaxWorkers validation
+		{
+			name: "socket mode max workers below minimum",
+			modify: func(c *config.ManagerConfig) {
+				c.SocketModeMaxWorkers = config.MinSocketModeMaxWorkers - 1
+			},
+			expectError: "socket mode max workers must be between 10 and 1000",
+		},
+		{
+			name: "socket mode max workers above maximum",
+			modify: func(c *config.ManagerConfig) {
+				c.SocketModeMaxWorkers = config.MaxSocketModeMaxWorkers + 1
+			},
+			expectError: "socket mode max workers must be between 10 and 1000",
+		},
+		{
+			name: "socket mode max workers at minimum is valid",
+			modify: func(c *config.ManagerConfig) {
+				c.SocketModeMaxWorkers = config.MinSocketModeMaxWorkers
+			},
+			expectError: "",
+		},
+		{
+			name: "socket mode max workers at maximum is valid",
+			modify: func(c *config.ManagerConfig) {
+				c.SocketModeMaxWorkers = config.MaxSocketModeMaxWorkers
+			},
+			expectError: "",
+		},
+		// SocketModeDrainTimeout validation
+		{
+			name: "socket mode drain timeout too short",
+			modify: func(c *config.ManagerConfig) {
+				c.SocketModeDrainTimeout = 1 * time.Second
+			},
+			expectError: "socket mode drain timeout must be between 2s and 5m0s",
+		},
+		{
+			name: "socket mode drain timeout too long",
+			modify: func(c *config.ManagerConfig) {
+				c.SocketModeDrainTimeout = config.MaxDrainTimeout + 1
+			},
+			expectError: "socket mode drain timeout must be between 2s and 5m0s",
+		},
+		{
+			name: "socket mode drain timeout at minimum is valid",
+			modify: func(c *config.ManagerConfig) {
+				c.SocketModeDrainTimeout = config.MinDrainTimeout
 			},
 			expectError: "",
 		},
@@ -333,6 +388,94 @@ func TestManagerConfig_Validate_BoundaryValues(t *testing.T) {
 		err := cfg.Validate()
 		require.Error(t, err)
 		assert.Equal(t, "channel manager drain timeout must be between 2s and 5m0s", err.Error())
+	})
+
+	// SocketModeMaxWorkers boundaries
+	t.Run("socket mode max workers at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.SocketModeMaxWorkers = config.MinSocketModeMaxWorkers
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("socket mode max workers at upper bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.SocketModeMaxWorkers = config.MaxSocketModeMaxWorkers
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("socket mode max workers below minimum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.SocketModeMaxWorkers = config.MinSocketModeMaxWorkers - 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "socket mode max workers must be between 10 and 1000", err.Error())
+	})
+
+	t.Run("socket mode max workers exceeds maximum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.SocketModeMaxWorkers = config.MaxSocketModeMaxWorkers + 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "socket mode max workers must be between 10 and 1000", err.Error())
+	})
+
+	// SocketModeDrainTimeout boundaries
+	t.Run("socket mode drain timeout at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.SocketModeDrainTimeout = config.MinDrainTimeout
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("socket mode drain timeout at upper bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.SocketModeDrainTimeout = config.MaxDrainTimeout
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("socket mode drain timeout exceeds maximum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.SocketModeDrainTimeout = config.MaxDrainTimeout + 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "socket mode drain timeout must be between 2s and 5m0s", err.Error())
+	})
+}
+
+func TestManagerConfig_SetDefaults(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sets defaults for zero values", func(t *testing.T) {
+		t.Parallel()
+		cfg := &config.ManagerConfig{}
+		cfg.SetDefaults()
+
+		assert.Equal(t, config.DefaultCoordinatorDrainTimeout, cfg.CoordinatorDrainTimeout)
+		assert.Equal(t, config.DefaultChannelManagerDrainTimeout, cfg.ChannelManagerDrainTimeout)
+		assert.Equal(t, config.DefaultSocketModeMaxWorkers, cfg.SocketModeMaxWorkers)
+		assert.Equal(t, config.DefaultSocketModeDrainTimeout, cfg.SocketModeDrainTimeout)
+	})
+
+	t.Run("does not override non-zero values", func(t *testing.T) {
+		t.Parallel()
+		cfg := &config.ManagerConfig{
+			CoordinatorDrainTimeout:    10 * time.Second,
+			ChannelManagerDrainTimeout: 8 * time.Second,
+			SocketModeMaxWorkers:       200,
+			SocketModeDrainTimeout:     15 * time.Second,
+		}
+		cfg.SetDefaults()
+
+		assert.Equal(t, 10*time.Second, cfg.CoordinatorDrainTimeout)
+		assert.Equal(t, 8*time.Second, cfg.ChannelManagerDrainTimeout)
+		assert.Equal(t, int64(200), cfg.SocketModeMaxWorkers)
+		assert.Equal(t, 15*time.Second, cfg.SocketModeDrainTimeout)
 	})
 }
 
