@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-02-19
+
+### Added
+- GitHub Actions CI workflow running `gosec`, `go vet`, `go test -race`, and `golangci-lint` on every push and pull request
+
+### Changed
+- Bump `go-resty/resty/v2` to v2.17.2
+- Bump `redis/go-redis/v9` to v9.18.0
+- Bump `bytedance/sonic` to v1.15.0 and `bytedance/sonic/loader` to v0.5.0; add `bytedance/gopkg` v0.1.3
+- Bump `gabriel-vasile/mimetype` to v1.4.13
+- Bump `go-playground/validator/v10` to v10.30.1
+- Bump `goccy/go-yaml` to v1.19.2
+- Bump `prometheus/common` to v0.67.5
+- Bump `quic-go/qpack` to v0.6.0 and `quic-go/quic-go` to v0.59.0
+- Bump `stretchr/objx` to v0.5.3
+- Bump `ugorji/go/codec` to v1.3.1
+- Bump `golang.org/x/arch` to v0.24.0, `golang.org/x/crypto` to v0.48.0, `golang.org/x/exp` to v0.0.0-20260218203240, `golang.org/x/net` to v0.50.0, `golang.org/x/sys` to v0.41.0, `golang.org/x/text` to v0.34.0
+- Increase `golangci-lint` CI timeout from 1m to 5m
+
 ## [0.2.0] - 2026-02-19
 
 ### Changed
@@ -101,7 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/slackmgr/core/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/slackmgr/core/compare/v0.1.8...v0.2.0
 [0.1.8]: https://github.com/slackmgr/core/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/slackmgr/core/compare/v0.1.6...v0.1.7
