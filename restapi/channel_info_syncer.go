@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/internal"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/types"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -28,7 +28,7 @@ type channelInfoSyncer struct {
 	channelInfoCache map[string]*ChannelInfo
 	managedChannels  atomic.Pointer[managedChannelsData]
 	cacheLock        *sync.RWMutex
-	logger           common.Logger
+	logger           types.Logger
 }
 
 // managedChannelsData holds the managed channels data for atomic swapping.
@@ -45,7 +45,7 @@ type ChannelInfo struct {
 	UserCount          int
 }
 
-func newChannelInfoSyncer(slackClient SlackClient, logger common.Logger) *channelInfoSyncer {
+func newChannelInfoSyncer(slackClient SlackClient, logger types.Logger) *channelInfoSyncer {
 	return &channelInfoSyncer{
 		slackClient:      slackClient,
 		channelsLastSeen: make(map[string]time.Time),

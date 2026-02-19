@@ -3,18 +3,18 @@ package controllers
 import (
 	"context"
 
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/manager/internal/models"
-	"github.com/peteraglen/slack-manager/manager/internal/slack/views"
 	slackapi "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/core/manager/internal/slack/views"
+	"github.com/slackmgr/types"
 )
 
 type greetingsController struct {
 	apiClient       SlackAPIClient
-	logger          common.Logger
+	logger          types.Logger
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 }

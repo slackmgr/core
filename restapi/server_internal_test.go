@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
 	"github.com/slack-go/slack"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -33,14 +33,14 @@ type mockLogger struct {
 	mock.Mock
 }
 
-func (m *mockLogger) Debug(msg string)                               {}
-func (m *mockLogger) Debugf(format string, args ...any)              {}
-func (m *mockLogger) Info(msg string)                                {}
-func (m *mockLogger) Infof(format string, args ...any)               {}
-func (m *mockLogger) Error(msg string)                               {}
-func (m *mockLogger) Errorf(format string, args ...any)              {}
-func (m *mockLogger) WithField(key string, value any) common.Logger  { return m }
-func (m *mockLogger) WithFields(fields map[string]any) common.Logger { return m }
+func (m *mockLogger) Debug(msg string)                              {}
+func (m *mockLogger) Debugf(format string, args ...any)             {}
+func (m *mockLogger) Info(msg string)                               {}
+func (m *mockLogger) Infof(format string, args ...any)              {}
+func (m *mockLogger) Error(msg string)                              {}
+func (m *mockLogger) Errorf(format string, args ...any)             {}
+func (m *mockLogger) WithField(key string, value any) types.Logger  { return m }
+func (m *mockLogger) WithFields(fields map[string]any) types.Logger { return m }
 
 type mockFifoQueueProducer struct {
 	mock.Mock
@@ -378,7 +378,7 @@ func TestServer_HandleAlerts_Success(t *testing.T) {
 		router := gin.New()
 		router.POST("/alert", server.handleAlerts)
 
-		alert := common.Alert{
+		alert := types.Alert{
 			SlackChannelID: "C123",
 			Header:         "Test Alert",
 		}
@@ -408,7 +408,7 @@ func TestServer_HandleAlerts_Success(t *testing.T) {
 		router := gin.New()
 		router.POST("/alert/:slackChannelId", server.handleAlerts)
 
-		alert := common.Alert{Header: "Test Alert"}
+		alert := types.Alert{Header: "Test Alert"}
 		body, _ := json.Marshal(alert)
 		req := httptest.NewRequest(http.MethodPost, "/alert/C456", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -436,7 +436,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 		router := gin.New()
 		router.POST("/alert", server.handleAlerts)
 
-		alert := common.Alert{SlackChannelID: "C123", Header: "Test"}
+		alert := types.Alert{SlackChannelID: "C123", Header: "Test"}
 		body, _ := json.Marshal(alert)
 		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -461,7 +461,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 		router := gin.New()
 		router.POST("/alert", server.handleAlerts)
 
-		alert := common.Alert{SlackChannelID: "C123", Header: "Test"}
+		alert := types.Alert{SlackChannelID: "C123", Header: "Test"}
 		body, _ := json.Marshal(alert)
 		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -486,7 +486,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 		router := gin.New()
 		router.POST("/alert", server.handleAlerts)
 
-		alert := common.Alert{SlackChannelID: "C123", Header: "Test"}
+		alert := types.Alert{SlackChannelID: "C123", Header: "Test"}
 		body, _ := json.Marshal(alert)
 		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -513,7 +513,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 		router := gin.New()
 		router.POST("/alert", server.handleAlerts)
 
-		alert := common.Alert{SlackChannelID: "C123", Header: "Test"}
+		alert := types.Alert{SlackChannelID: "C123", Header: "Test"}
 		body, _ := json.Marshal(alert)
 		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -545,7 +545,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 		router.POST("/alert", server.handleAlerts)
 
 		// Send 5 alerts which exceeds AllowedBurst of 3
-		alerts := []common.Alert{
+		alerts := []types.Alert{
 			{SlackChannelID: "C123", Header: "Alert 1"},
 			{SlackChannelID: "C123", Header: "Alert 2"},
 			{SlackChannelID: "C123", Header: "Alert 3"},
@@ -584,7 +584,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 		router := gin.New()
 		router.POST("/alert", server.handleAlerts)
 
-		alert := common.Alert{
+		alert := types.Alert{
 			SlackChannelID: "C123",
 			Header:         "Test Alert",
 		}
@@ -621,7 +621,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 		router.POST("/alert", server.handleAlerts)
 
 		// Send 5 alerts which is within AllowedBurst of 10
-		alerts := []common.Alert{
+		alerts := []types.Alert{
 			{SlackChannelID: "C123", Header: "Alert 1"},
 			{SlackChannelID: "C123", Header: "Alert 2"},
 			{SlackChannelID: "C123", Header: "Alert 3"},
@@ -668,7 +668,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 		router.POST("/alert", server.handleAlerts)
 
 		// Send alerts to two different channels
-		alerts := []common.Alert{
+		alerts := []types.Alert{
 			{SlackChannelID: "C111", Header: "Alert 1"},
 			{SlackChannelID: "C111", Header: "Alert 2"},
 			{SlackChannelID: "C222", Header: "Alert 3"},
@@ -777,7 +777,7 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 		server, _, channelInfo := newTestServer(t)
 		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
 
-		alert := &common.Alert{SlackChannelID: "C123"}
+		alert := &types.Alert{SlackChannelID: "C123"}
 		err := server.setSlackChannelID(nil, alert)
 
 		require.NoError(t, err)
@@ -790,7 +790,7 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 		server, _, channelInfo := newTestServer(t)
 		channelInfo.On("MapChannelNameToIDIfNeeded", "general").Return("C999888777")
 
-		alert := &common.Alert{SlackChannelID: "general"}
+		alert := &types.Alert{SlackChannelID: "general"}
 		err := server.setSlackChannelID(nil, alert)
 
 		require.NoError(t, err)
@@ -815,7 +815,7 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 		}
 		require.NoError(t, server.apiSettings.InitAndValidate(&mockLogger{}))
 
-		alert := &common.Alert{RouteKey: "production"}
+		alert := &types.Alert{RouteKey: "production"}
 		err := server.setSlackChannelID(nil, alert)
 
 		require.NoError(t, err)
@@ -840,7 +840,7 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 		}
 		require.NoError(t, server.apiSettings.InitAndValidate(&mockLogger{}))
 
-		alert := &common.Alert{RouteKey: "unknown-key"}
+		alert := &types.Alert{RouteKey: "unknown-key"}
 		err := server.setSlackChannelID(nil, alert)
 
 		require.NoError(t, err)
@@ -857,7 +857,7 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 		server.apiSettings = &config.APISettings{}
 		require.NoError(t, server.apiSettings.InitAndValidate(&mockLogger{}))
 
-		alert := &common.Alert{RouteKey: "unmapped-key", Type: "test"}
+		alert := &types.Alert{RouteKey: "unmapped-key", Type: "test"}
 		err := server.setSlackChannelID(nil, alert)
 
 		require.Error(t, err)
@@ -874,7 +874,7 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 		server.apiSettings = &config.APISettings{}
 		require.NoError(t, server.apiSettings.InitAndValidate(&mockLogger{}))
 
-		alert := &common.Alert{} // No SlackChannelID, no RouteKey
+		alert := &types.Alert{} // No SlackChannelID, no RouteKey
 		err := server.setSlackChannelID(nil, alert)
 
 		require.Error(t, err)
@@ -888,7 +888,7 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
 		channelInfo.On("MapChannelNameToIDIfNeeded", "C456").Return("C456")
 
-		alerts := []*common.Alert{
+		alerts := []*types.Alert{
 			{SlackChannelID: "C123"},
 			{SlackChannelID: "C456"},
 		}
@@ -1201,13 +1201,13 @@ func TestMapPrometheusAlert(t *testing.T) {
 
 		tests := []struct {
 			severity string
-			expected common.AlertSeverity
+			expected types.AlertSeverity
 		}{
-			{"critical", common.AlertError},
-			{"error", common.AlertError},
-			{"warning", common.AlertWarning},
-			{"info", common.AlertInfo},
-			{"", common.AlertError}, // default
+			{"critical", types.AlertError},
+			{"error", types.AlertError},
+			{"warning", types.AlertWarning},
+			{"info", types.AlertInfo},
+			{"", types.AlertError}, // default
 		}
 
 		for _, tt := range tests {
@@ -1396,7 +1396,7 @@ func TestDebugGetAlertFields(t *testing.T) {
 
 	t.Run("returns fields from alert", func(t *testing.T) {
 		t.Parallel()
-		alert := &common.Alert{
+		alert := &types.Alert{
 			CorrelationID: "corr-123",
 			Header:        "Test Header",
 			Text:          "Test Body",
@@ -1416,7 +1416,7 @@ func TestDebugGetAlertFields(t *testing.T) {
 			longHeader[i] = 'a'
 		}
 
-		alert := &common.Alert{Header: string(longHeader)}
+		alert := &types.Alert{Header: string(longHeader)}
 		result := debugGetAlertFields(alert)
 
 		assert.Len(t, result["Header"], 203) // 200 + "..."
@@ -1430,7 +1430,7 @@ func TestDebugGetAlertFields(t *testing.T) {
 			longBody[i] = 'b'
 		}
 
-		alert := &common.Alert{Text: string(longBody)}
+		alert := &types.Alert{Text: string(longBody)}
 		result := debugGetAlertFields(alert)
 
 		assert.Len(t, result["Body"], 1003) // 1000 + "..."
@@ -1723,7 +1723,7 @@ func TestServer_CreateClientErrorAlert(t *testing.T) {
 			"C123",
 		)
 
-		assert.Equal(t, common.AlertWarning, alert.Severity)
+		assert.Equal(t, types.AlertWarning, alert.Severity)
 		assert.Equal(t, "C-errors", alert.SlackChannelID)
 		assert.Contains(t, alert.Header, "400")
 	})
@@ -1741,7 +1741,7 @@ func TestServer_CreateClientErrorAlert(t *testing.T) {
 			"",
 		)
 
-		assert.Equal(t, common.AlertError, alert.Severity)
+		assert.Equal(t, types.AlertError, alert.Severity)
 		assert.Contains(t, alert.Text, "N/A") // empty target channel
 	})
 
@@ -1826,7 +1826,7 @@ func TestServer_QueueAlert(t *testing.T) {
 		server, queue, _ := newTestServer(t)
 		queue.On("Send", mock.Anything, "C123", mock.Anything, mock.Anything).Return(nil)
 
-		alert := &common.Alert{
+		alert := &types.Alert{
 			SlackChannelID: "C123",
 			Header:         "Test",
 		}
@@ -1843,7 +1843,7 @@ func TestServer_QueueAlert(t *testing.T) {
 		server, queue, _ := newTestServer(t)
 		queue.On("Send", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("queue error"))
 
-		alert := &common.Alert{
+		alert := &types.Alert{
 			SlackChannelID: "C123",
 			Header:         "Test",
 		}
@@ -1900,7 +1900,7 @@ func TestIgnoreAlert(t *testing.T) {
 	t.Run("returns false when no ignore terms", func(t *testing.T) {
 		t.Parallel()
 
-		alert := &common.Alert{
+		alert := &types.Alert{
 			Text: "Some error message",
 		}
 
@@ -1911,7 +1911,7 @@ func TestIgnoreAlert(t *testing.T) {
 	t.Run("returns false when text is empty", func(t *testing.T) {
 		t.Parallel()
 
-		alert := &common.Alert{
+		alert := &types.Alert{
 			IgnoreIfTextContains: []string{"error"},
 			Text:                 "",
 		}
@@ -1923,7 +1923,7 @@ func TestIgnoreAlert(t *testing.T) {
 	t.Run("returns true when ignore term found", func(t *testing.T) {
 		t.Parallel()
 
-		alert := &common.Alert{
+		alert := &types.Alert{
 			IgnoreIfTextContains: []string{"ignore-this"},
 			Text:                 "This message contains ignore-this text",
 		}
@@ -1936,7 +1936,7 @@ func TestIgnoreAlert(t *testing.T) {
 	t.Run("case insensitive matching", func(t *testing.T) {
 		t.Parallel()
 
-		alert := &common.Alert{
+		alert := &types.Alert{
 			IgnoreIfTextContains: []string{"ERROR"},
 			Text:                 "This has an error in it",
 		}
@@ -1948,7 +1948,7 @@ func TestIgnoreAlert(t *testing.T) {
 	t.Run("skips empty ignore terms", func(t *testing.T) {
 		t.Parallel()
 
-		alert := &common.Alert{
+		alert := &types.Alert{
 			IgnoreIfTextContains: []string{"", "  ", "specific-term"},
 			Text:                 "Text without that term",
 		}
@@ -1963,16 +1963,16 @@ func TestIgnoreAlert(t *testing.T) {
 type mockFifoQueueConsumer struct {
 	mock.Mock
 
-	items chan *common.FifoQueueItem
+	items chan *types.FifoQueueItem
 }
 
 func newMockFifoQueueConsumer() *mockFifoQueueConsumer {
 	return &mockFifoQueueConsumer{
-		items: make(chan *common.FifoQueueItem, 10),
+		items: make(chan *types.FifoQueueItem, 10),
 	}
 }
 
-func (m *mockFifoQueueConsumer) Receive(ctx context.Context, sinkCh chan<- *common.FifoQueueItem) error {
+func (m *mockFifoQueueConsumer) Receive(ctx context.Context, sinkCh chan<- *types.FifoQueueItem) error {
 	args := m.Called(ctx, sinkCh)
 
 	// Forward items from internal channel to sink channel
@@ -1991,7 +1991,7 @@ func (m *mockFifoQueueConsumer) Receive(ctx context.Context, sinkCh chan<- *comm
 	}
 }
 
-func (m *mockFifoQueueConsumer) SendItem(item *common.FifoQueueItem) {
+func (m *mockFifoQueueConsumer) SendItem(item *types.FifoQueueItem) {
 	m.items <- item
 }
 
@@ -2030,13 +2030,13 @@ func TestServer_RunRawAlertConsumer(t *testing.T) {
 		ackCalled := false
 		nackCalled := false
 
-		alert := common.Alert{
+		alert := types.Alert{
 			SlackChannelID: "C123",
 			Header:         "Test Alert",
 		}
 		alertJSON, _ := json.Marshal(alert)
 
-		item := &common.FifoQueueItem{
+		item := &types.FifoQueueItem{
 			MessageID:      "msg-1",
 			SlackChannelID: "C123",
 			Body:           string(alertJSON),
@@ -2069,7 +2069,7 @@ func TestServer_RunRawAlertConsumer(t *testing.T) {
 		ackCalled := false
 		nackCalled := false
 
-		item := &common.FifoQueueItem{
+		item := &types.FifoQueueItem{
 			MessageID:      "msg-1",
 			SlackChannelID: "C123",
 			Body:           "invalid json",
@@ -2106,13 +2106,13 @@ func TestServer_RunRawAlertConsumer(t *testing.T) {
 		ackCalled := false
 		nackCalled := false
 
-		alert := common.Alert{
+		alert := types.Alert{
 			SlackChannelID: "C123",
 			Header:         "Test Alert",
 		}
 		alertJSON, _ := json.Marshal(alert)
 
-		item := &common.FifoQueueItem{
+		item := &types.FifoQueueItem{
 			MessageID:      "msg-1",
 			SlackChannelID: "C123",
 			Body:           string(alertJSON),
@@ -2149,12 +2149,12 @@ func TestServer_RunRawAlertConsumer(t *testing.T) {
 		nackCalled := false
 
 		// Alert without SlackChannelID - will fail validation (non-retryable)
-		alert := common.Alert{
+		alert := types.Alert{
 			Header: "Test Alert",
 		}
 		alertJSON, _ := json.Marshal(alert)
 
-		item := &common.FifoQueueItem{
+		item := &types.FifoQueueItem{
 			MessageID:      "msg-1",
 			SlackChannelID: "",
 			Body:           string(alertJSON),
@@ -2184,7 +2184,7 @@ func TestServer_RunRawAlertConsumer(t *testing.T) {
 		consumer := newMockFifoQueueConsumer()
 		consumer.On("Receive", mock.Anything, mock.Anything).Return(nil)
 
-		item := &common.FifoQueueItem{
+		item := &types.FifoQueueItem{
 			MessageID:      "msg-1",
 			SlackChannelID: "C123",
 			Body:           "invalid json",
@@ -2227,13 +2227,13 @@ func TestServer_RunRawAlertConsumer(t *testing.T) {
 
 		go func() {
 			for i := range 3 {
-				alert := common.Alert{
+				alert := types.Alert{
 					SlackChannelID: "C123",
 					Header:         "Test Alert",
 				}
 				alertJSON, _ := json.Marshal(alert)
 
-				item := &common.FifoQueueItem{
+				item := &types.FifoQueueItem{
 					MessageID:      "msg-" + string(rune('1'+i)),
 					SlackChannelID: "C123",
 					Body:           string(alertJSON),

@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/peteraglen/slack-manager/manager/internal/models"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/core/manager/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"

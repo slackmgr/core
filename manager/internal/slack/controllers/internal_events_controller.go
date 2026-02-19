@@ -3,12 +3,12 @@ package controllers
 import (
 	"context"
 
-	common "github.com/peteraglen/slack-manager-common"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/types"
 )
 
 type internalEventsController struct {
-	logger common.Logger
+	logger types.Logger
 }
 
 func (c *internalEventsController) handleEventTypeClientInternal(_ context.Context, evt *socketmode.Event, _ SocketModeClient) {

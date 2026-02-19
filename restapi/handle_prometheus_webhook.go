@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/internal"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/types"
 )
 
 const True = "true"
@@ -56,8 +56,8 @@ func (s *Server) handlePrometheusWebhook(c *gin.Context) {
 	s.processAlerts(c, alerts, started)
 }
 
-func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*common.Alert {
-	alerts := make([]*common.Alert, 0, len(webhook.Alerts))
+func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*types.Alert {
+	alerts := make([]*types.Alert, 0, len(webhook.Alerts))
 
 	for _, promAlert := range webhook.Alerts {
 		// Ensure that all annotation and label keys exist in lower-case versions
@@ -99,17 +99,17 @@ func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*common.Alert 
 			severityString = "error"
 		}
 
-		severity := common.AlertSeverity(severityString)
+		severity := types.AlertSeverity(severityString)
 
 		// If the severity is invalid, log it and use the default value 'error'.
-		if !common.SeverityIsValid(severity) {
+		if !types.SeverityIsValid(severity) {
 			s.logger.Infof("Invalid severity '%s' in Prometheus alert, using default value 'error'", severity)
-			severity = common.AlertError
+			severity = types.AlertError
 		}
 
 		// If the alert is resolved, set the severity to 'resolved'.
 		if promAlert.Status == "resolved" {
-			severity = common.AlertResolved
+			severity = types.AlertResolved
 		}
 
 		// Override missing or invalid auto resolve period with default value of 1 hour
@@ -155,7 +155,7 @@ func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*common.Alert 
 			"groupKey":    webhook.GroupKey,
 		}
 
-		a := common.Alert{
+		a := types.Alert{
 			Timestamp:                 time.Now().UTC(),
 			CorrelationID:             correlationID,
 			Type:                      alertType,

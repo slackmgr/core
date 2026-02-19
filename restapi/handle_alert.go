@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/internal"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/types"
 )
 
 const NA = "N/A"
@@ -22,9 +22,9 @@ const NA = "N/A"
 //  1. A single alert, where all fields are at the root level
 //  2. Multiple alerts, where each alert is an object in an array
 type alertsInput struct {
-	common.Alert
+	types.Alert
 
-	Alerts []*common.Alert `json:"alerts"`
+	Alerts []*types.Alert `json:"alerts"`
 }
 
 func (s *Server) handleAlerts(c *gin.Context) {
@@ -57,7 +57,7 @@ func (s *Server) handleAlerts(c *gin.Context) {
 	s.processAlerts(c, alerts, started)
 }
 
-func (s *Server) processAlerts(c *gin.Context, alerts []*common.Alert, started time.Time) {
+func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started time.Time) {
 	if len(alerts) == 0 {
 		c.Status(http.StatusNoContent)
 		return
@@ -68,7 +68,7 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*common.Alert, started t
 		return
 	}
 
-	alertsByChannel := make(map[string][]*common.Alert)
+	alertsByChannel := make(map[string][]*types.Alert)
 	atLeastOneAlert := false
 
 	for _, alert := range alerts {
@@ -94,7 +94,7 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*common.Alert, started t
 		if ok {
 			alertsByChannel[channel] = append(channelAlerts, alert)
 		} else {
-			alertsByChannel[channel] = []*common.Alert{alert}
+			alertsByChannel[channel] = []*types.Alert{alert}
 		}
 	}
 
@@ -164,7 +164,7 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*common.Alert, started t
 // processQueuedAlert processes a single alert from the raw alert input queue (rather than from an API request).
 // It is similar to processAlerts, but skips for example rate limiting.
 // The function returns a processingError to indicate whether the error is retryable or not.
-func (s *Server) processQueuedAlert(ctx context.Context, alert *common.Alert) error {
+func (s *Server) processQueuedAlert(ctx context.Context, alert *types.Alert) error {
 	started := time.Now()
 
 	// Attempt to set the Slack channel ID (if not already set).
@@ -289,7 +289,7 @@ func (s *Server) validateChannelInfo(channel string, channelInfo *ChannelInfo) e
 //  4. If no route key is present, use the fallback mapping if it exists.
 //
 // If no channel ID can be determined for at least one of the alerts, an error is returned.
-func (s *Server) setSlackChannelID(c *gin.Context, alerts ...*common.Alert) error {
+func (s *Server) setSlackChannelID(c *gin.Context, alerts ...*types.Alert) error {
 	if len(alerts) == 0 {
 		return nil
 	}
@@ -337,7 +337,7 @@ func (s *Server) setSlackChannelID(c *gin.Context, alerts ...*common.Alert) erro
 	return nil
 }
 
-func (s *Server) logAlerts(text, reason string, started time.Time, alerts ...*common.Alert) {
+func (s *Server) logAlerts(text, reason string, started time.Time, alerts ...*types.Alert) {
 	d := fmt.Sprintf("%v", time.Since(started))
 
 	for _, alert := range alerts {
@@ -350,7 +350,7 @@ func (s *Server) logAlerts(text, reason string, started time.Time, alerts ...*co
 	}
 }
 
-func ignoreAlert(alert *common.Alert) (bool, string) {
+func ignoreAlert(alert *types.Alert) (bool, string) {
 	if alert == nil || len(alert.IgnoreIfTextContains) == 0 || alert.Text == "" {
 		return false, ""
 	}
@@ -370,8 +370,8 @@ func ignoreAlert(alert *common.Alert) (bool, string) {
 	return false, ""
 }
 
-func parseAlertInput(body []byte) ([]*common.Alert, error) {
-	var alerts []*common.Alert
+func parseAlertInput(body []byte) ([]*types.Alert, error) {
+	var alerts []*types.Alert
 
 	// Scenario 1: the input is an array of alerts, i.e. the root level is an array
 	if strings.HasPrefix(string(body), "[") {
@@ -398,5 +398,5 @@ func parseAlertInput(body []byte) ([]*common.Alert, error) {
 	}
 
 	// Nothing in the alerts array -> assume the input is a single alert, with all fields at the root level.
-	return []*common.Alert{&input.Alert}, nil
+	return []*types.Alert{&input.Alert}, nil
 }

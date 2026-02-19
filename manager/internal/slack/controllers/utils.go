@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/peteraglen/slack-manager/manager/internal/models"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/core/manager/internal/models"
 )
 
 func ack(evt *socketmode.Event, clt SocketModeClient) {

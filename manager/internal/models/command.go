@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	commonlib "github.com/peteraglen/slack-manager-common"
+	"github.com/slackmgr/types"
 )
 
 // commandNowFunc returns the current time. It can be overridden in tests for deterministic behavior.
@@ -57,7 +57,7 @@ type WebhookCommandParams struct {
 
 // NewCommandFromQueueItem creates a Command instance from a FIFO queue item.
 // It unmarshals the JSON body of the queue item into a Command struct.
-func NewCommandFromQueueItem(queueItem *commonlib.FifoQueueItem) (InFlightMessage, error) { //nolint:ireturn
+func NewCommandFromQueueItem(queueItem *types.FifoQueueItem) (InFlightMessage, error) { //nolint:ireturn
 	if len(queueItem.Body) == 0 {
 		return nil, errors.New("command body is empty")
 	}

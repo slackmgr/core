@@ -3,19 +3,19 @@ package manager
 import (
 	"context"
 
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/internal"
-	"github.com/peteraglen/slack-manager/manager/internal/models"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/types"
 	"golang.org/x/sync/errgroup"
 )
 
-func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.InFlightMessage, msgConstructor models.InFlightMsgConstructor, logger common.Logger) error {
+func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.InFlightMessage, msgConstructor models.InFlightMsgConstructor, logger types.Logger) error {
 	logger.WithField("queue_name", queue.Name()).Info("Queue consumer started")
 	defer logger.WithField("queue_name", queue.Name()).Info("Queue consumer exited")
 
 	defer close(sinkCh)
 
-	queueCh := make(chan *common.FifoQueueItem, 100)
+	queueCh := make(chan *types.FifoQueueItem, 100)
 
 	errg, ctx := errgroup.WithContext(ctx)
 

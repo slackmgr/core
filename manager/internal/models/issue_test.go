@@ -5,22 +5,22 @@ import (
 	"testing"
 	"time"
 
-	common "github.com/peteraglen/slack-manager-common"
+	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// mockLogger implements common.Logger for testing
+// mockLogger implements types.Logger for testing
 type mockLogger struct{}
 
-func (m *mockLogger) Debug(_ string)                            {}
-func (m *mockLogger) Debugf(_ string, _ ...any)                 {}
-func (m *mockLogger) Info(_ string)                             {}
-func (m *mockLogger) Infof(_ string, _ ...any)                  {}
-func (m *mockLogger) Error(_ string)                            {}
-func (m *mockLogger) Errorf(_ string, _ ...any)                 {}
-func (m *mockLogger) WithField(_ string, _ any) common.Logger   { return m }
-func (m *mockLogger) WithFields(_ map[string]any) common.Logger { return m }
+func (m *mockLogger) Debug(_ string)                           {}
+func (m *mockLogger) Debugf(_ string, _ ...any)                {}
+func (m *mockLogger) Info(_ string)                            {}
+func (m *mockLogger) Infof(_ string, _ ...any)                 {}
+func (m *mockLogger) Error(_ string)                           {}
+func (m *mockLogger) Errorf(_ string, _ ...any)                {}
+func (m *mockLogger) WithField(_ string, _ any) types.Logger   { return m }
+func (m *mockLogger) WithFields(_ map[string]any) types.Logger { return m }
 
 // setTestTime sets the nowFunc to return a fixed time for testing
 func setTestTime(t time.Time) func() {
@@ -32,10 +32,10 @@ func setTestTime(t time.Time) func() {
 // createTestAlert creates a basic alert for testing
 func createTestAlert() *Alert {
 	return &Alert{
-		Alert: common.Alert{
+		Alert: types.Alert{
 			SlackChannelID:        "C12345",
 			CorrelationID:         "test-correlation-id",
-			Severity:              common.AlertError,
+			Severity:              types.AlertError,
 			Header:                "Test Alert",
 			Text:                  "Test alert text",
 			Timestamp:             time.Now().UTC(),
@@ -88,7 +88,7 @@ func TestNewIssue(t *testing.T) {
 
 		alert := createTestAlert()
 		alert.Timestamp = fixedTime
-		alert.Severity = common.AlertError
+		alert.Severity = types.AlertError
 
 		issue := NewIssue(alert, logger)
 
@@ -104,7 +104,7 @@ func TestNewIssue(t *testing.T) {
 
 		alert := createTestAlert()
 		alert.Timestamp = fixedTime
-		alert.Severity = common.AlertResolved
+		alert.Severity = types.AlertResolved
 
 		issue := NewIssue(alert, logger)
 
@@ -114,7 +114,7 @@ func TestNewIssue(t *testing.T) {
 
 	t.Run("disables follow-up for info severity", func(t *testing.T) {
 		alert := createTestAlert()
-		alert.Severity = common.AlertInfo
+		alert.Severity = types.AlertInfo
 		alert.IssueFollowUpEnabled = true
 
 		issue := NewIssue(alert, logger)
@@ -144,7 +144,7 @@ func TestIssue_ChannelID(t *testing.T) {
 
 	issue := &Issue{
 		LastAlert: &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				SlackChannelID: "C12345",
 			},
 		},
@@ -196,7 +196,7 @@ func TestIssue_FollowUpEnabled(t *testing.T) {
 	t.Run("returns true when enabled", func(t *testing.T) {
 		t.Parallel()
 		issue := &Issue{
-			LastAlert: &Alert{Alert: common.Alert{IssueFollowUpEnabled: true}},
+			LastAlert: &Alert{Alert: types.Alert{IssueFollowUpEnabled: true}},
 		}
 		assert.True(t, issue.FollowUpEnabled())
 	})
@@ -204,7 +204,7 @@ func TestIssue_FollowUpEnabled(t *testing.T) {
 	t.Run("returns false when disabled", func(t *testing.T) {
 		t.Parallel()
 		issue := &Issue{
-			LastAlert: &Alert{Alert: common.Alert{IssueFollowUpEnabled: false}},
+			LastAlert: &Alert{Alert: types.Alert{IssueFollowUpEnabled: false}},
 		}
 		assert.False(t, issue.FollowUpEnabled())
 	})
@@ -218,7 +218,7 @@ func TestIssue_AddAlert(t *testing.T) {
 		issue := &Issue{
 			AlertCount: 1,
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					Timestamp:            now,
 					IssueFollowUpEnabled: true,
 				},
@@ -226,7 +226,7 @@ func TestIssue_AddAlert(t *testing.T) {
 		}
 
 		olderAlert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				Timestamp: now.Add(-time.Hour),
 			},
 		}
@@ -246,18 +246,18 @@ func TestIssue_AddAlert(t *testing.T) {
 			AlertCount:  1,
 			ResolveTime: fixedTime.Add(-time.Hour),
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					Timestamp:            fixedTime.Add(-2 * time.Hour),
-					Severity:             common.AlertResolved,
+					Severity:             types.AlertResolved,
 					IssueFollowUpEnabled: true,
 				},
 			},
 		}
 
 		newAlert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				Timestamp: fixedTime,
-				Severity:  common.AlertResolved,
+				Severity:  types.AlertResolved,
 			},
 		}
 
@@ -271,7 +271,7 @@ func TestIssue_AddAlert(t *testing.T) {
 		issue := &Issue{
 			AlertCount: 1,
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					Timestamp:            now,
 					IssueFollowUpEnabled: false,
 				},
@@ -279,7 +279,7 @@ func TestIssue_AddAlert(t *testing.T) {
 		}
 
 		newAlert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				Timestamp: now.Add(time.Hour),
 			},
 		}
@@ -298,7 +298,7 @@ func TestIssue_AddAlert(t *testing.T) {
 			AlertCount: 1,
 			Created:    fixedTime.Add(-time.Hour),
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					Timestamp:            fixedTime.Add(-time.Minute),
 					IssueFollowUpEnabled: true,
 				},
@@ -306,9 +306,9 @@ func TestIssue_AddAlert(t *testing.T) {
 		}
 
 		newAlert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				Timestamp:             fixedTime,
-				Severity:              common.AlertWarning,
+				Severity:              types.AlertWarning,
 				AutoResolveSeconds:    7200,
 				ArchivingDelaySeconds: 600,
 			},
@@ -336,25 +336,25 @@ func TestIssue_AddAlert(t *testing.T) {
 			Created:     fixedTime.Add(-time.Hour),
 			IsEscalated: true,
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					Timestamp:            fixedTime.Add(-time.Minute),
-					Severity:             common.AlertPanic,
+					Severity:             types.AlertPanic,
 					IssueFollowUpEnabled: true,
 				},
 			},
 		}
 
 		newAlert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				Timestamp: fixedTime,
-				Severity:  common.AlertWarning,
+				Severity:  types.AlertWarning,
 			},
 		}
 
 		result := issue.AddAlert(newAlert, logger)
 
 		assert.True(t, result)
-		assert.Equal(t, common.AlertPanic, newAlert.Severity)
+		assert.Equal(t, types.AlertPanic, newAlert.Severity)
 	})
 }
 
@@ -385,7 +385,7 @@ func TestIssue_GetSlackAction(t *testing.T) {
 		issue := &Issue{
 			SlackPostNeedsUpdate: true,
 			LastAlert: &Alert{
-				Alert: common.Alert{IssueFollowUpEnabled: false},
+				Alert: types.Alert{IssueFollowUpEnabled: false},
 			},
 		}
 
@@ -401,8 +401,8 @@ func TestIssue_GetSlackAction(t *testing.T) {
 			SlackPostNeedsUpdate: true,
 			ResolveTime:          fixedTime.Add(time.Hour),
 			LastAlert: &Alert{
-				Alert: common.Alert{
-					Severity:             common.AlertError,
+				Alert: types.Alert{
+					Severity:             types.AlertError,
 					IssueFollowUpEnabled: true,
 				},
 			},
@@ -422,8 +422,8 @@ func TestIssue_GetSlackAction(t *testing.T) {
 			ResolveTime:               fixedTime.Add(-time.Hour),
 			SlackPostLastAction:       ActionAlert,
 			LastAlert: &Alert{
-				Alert: common.Alert{
-					Severity:             common.AlertError,
+				Alert: types.Alert{
+					Severity:             types.AlertError,
 					IssueFollowUpEnabled: true,
 				},
 			},
@@ -441,7 +441,7 @@ func TestIssue_RegisterMethods(t *testing.T) {
 
 		issue := &Issue{
 			SlackPostNeedsUpdate: true,
-			LastAlert:            &Alert{Alert: common.Alert{Header: "Test", Text: "Body"}},
+			LastAlert:            &Alert{Alert: types.Alert{Header: "Test", Text: "Body"}},
 		}
 
 		issue.RegisterSlackPostCreatedOrUpdated("12345.67890", ActionAlert)
@@ -477,7 +477,7 @@ func TestIssue_RegisterMethods(t *testing.T) {
 
 	t.Run("RegisterTerminationRequest", func(t *testing.T) {
 		issue := &Issue{
-			LastAlert: &Alert{Alert: common.Alert{IssueFollowUpEnabled: false}},
+			LastAlert: &Alert{Alert: types.Alert{IssueFollowUpEnabled: false}},
 		}
 
 		issue.RegisterTerminationRequest("user123")
@@ -492,7 +492,7 @@ func TestIssue_RegisterMethods(t *testing.T) {
 		defer cleanup()
 
 		issue := &Issue{
-			LastAlert: &Alert{Alert: common.Alert{IssueFollowUpEnabled: true}},
+			LastAlert: &Alert{Alert: types.Alert{IssueFollowUpEnabled: true}},
 		}
 
 		issue.RegisterResolveRequest("user123")
@@ -505,7 +505,7 @@ func TestIssue_RegisterMethods(t *testing.T) {
 
 	t.Run("RegisterResolveRequest ignored when follow-up disabled", func(t *testing.T) {
 		issue := &Issue{
-			LastAlert: &Alert{Alert: common.Alert{IssueFollowUpEnabled: false}},
+			LastAlert: &Alert{Alert: types.Alert{IssueFollowUpEnabled: false}},
 		}
 
 		issue.RegisterResolveRequest("user123")
@@ -519,7 +519,7 @@ func TestIssue_RegisterMethods(t *testing.T) {
 		defer cleanup()
 
 		issue := &Issue{
-			LastAlert: &Alert{Alert: common.Alert{IssueFollowUpEnabled: true}},
+			LastAlert: &Alert{Alert: types.Alert{IssueFollowUpEnabled: true}},
 		}
 
 		issue.RegisterInvestigateRequest("user123")
@@ -536,7 +536,7 @@ func TestIssue_RegisterMethods(t *testing.T) {
 		defer cleanup()
 
 		issue := &Issue{
-			LastAlert: &Alert{Alert: common.Alert{IssueFollowUpEnabled: true}},
+			LastAlert: &Alert{Alert: types.Alert{IssueFollowUpEnabled: true}},
 		}
 
 		issue.RegisterMuteRequest("user123")
@@ -550,7 +550,7 @@ func TestIssue_RegisterMethods(t *testing.T) {
 	t.Run("RegisterMoveRequest", func(t *testing.T) {
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					SlackChannelID: "C11111",
 				},
 				OriginalSlackChannelID: "C11111",
@@ -587,10 +587,10 @@ func TestIssue_HasSlackPost(t *testing.T) {
 func TestIssue_IsLowerPriorityThan(t *testing.T) {
 	t.Run("error is lower priority than panic", func(t *testing.T) {
 		errorIssue := &Issue{
-			LastAlert: &Alert{Alert: common.Alert{Severity: common.AlertError}},
+			LastAlert: &Alert{Alert: types.Alert{Severity: types.AlertError}},
 		}
 		panicIssue := &Issue{
-			LastAlert: &Alert{Alert: common.Alert{Severity: common.AlertPanic}},
+			LastAlert: &Alert{Alert: types.Alert{Severity: types.AlertPanic}},
 		}
 
 		assert.True(t, errorIssue.IsLowerPriorityThan(panicIssue))
@@ -605,11 +605,11 @@ func TestIssue_IsLowerPriorityThan(t *testing.T) {
 		mutedPanic := &Issue{
 			IsEmojiMuted: true,
 			ResolveTime:  fixedTime.Add(time.Hour),
-			LastAlert:    &Alert{Alert: common.Alert{Severity: common.AlertPanic, IssueFollowUpEnabled: true}},
+			LastAlert:    &Alert{Alert: types.Alert{Severity: types.AlertPanic, IssueFollowUpEnabled: true}},
 		}
 		normalWarning := &Issue{
 			ResolveTime: fixedTime.Add(time.Hour),
-			LastAlert:   &Alert{Alert: common.Alert{Severity: common.AlertWarning, IssueFollowUpEnabled: true}},
+			LastAlert:   &Alert{Alert: types.Alert{Severity: types.AlertWarning, IssueFollowUpEnabled: true}},
 		}
 
 		assert.True(t, mutedPanic.IsLowerPriorityThan(normalWarning))
@@ -619,7 +619,7 @@ func TestIssue_IsLowerPriorityThan(t *testing.T) {
 func TestIssue_IsResolved(t *testing.T) {
 	t.Run("returns true for resolved severity", func(t *testing.T) {
 		issue := &Issue{
-			LastAlert: &Alert{Alert: common.Alert{Severity: common.AlertResolved}},
+			LastAlert: &Alert{Alert: types.Alert{Severity: types.AlertResolved}},
 		}
 
 		assert.True(t, issue.IsResolved())
@@ -633,8 +633,8 @@ func TestIssue_IsResolved(t *testing.T) {
 		issue := &Issue{
 			ResolveTime: fixedTime.Add(-time.Hour),
 			LastAlert: &Alert{
-				Alert: common.Alert{
-					Severity:             common.AlertError,
+				Alert: types.Alert{
+					Severity:             types.AlertError,
 					IssueFollowUpEnabled: true,
 				},
 			},
@@ -651,8 +651,8 @@ func TestIssue_IsResolved(t *testing.T) {
 		issue := &Issue{
 			ResolveTime: fixedTime.Add(time.Hour),
 			LastAlert: &Alert{
-				Alert: common.Alert{
-					Severity:             common.AlertError,
+				Alert: types.Alert{
+					Severity:             types.AlertError,
 					IssueFollowUpEnabled: true,
 				},
 			},
@@ -684,7 +684,7 @@ func TestIssue_LogFields(t *testing.T) {
 			ArchiveTime:       now.Add(2 * time.Hour),
 			SlackPostID:       "12345.67890",
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					SlackChannelID:       "C12345",
 					Timestamp:            now,
 					IssueFollowUpEnabled: true,
@@ -712,7 +712,7 @@ func TestIssue_LogFields(t *testing.T) {
 		issue := &Issue{
 			CorrelationID: longID,
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					Timestamp: time.Now(),
 				},
 			},
@@ -802,11 +802,11 @@ func TestIssue_FindWebhook(t *testing.T) {
 	t.Run("finds existing webhook", func(t *testing.T) {
 		t.Parallel()
 
-		webhook := &common.Webhook{ID: "hook-1", ButtonText: "Test"}
+		webhook := &types.Webhook{ID: "hook-1", ButtonText: "Test"}
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{
-					Webhooks: []*common.Webhook{
+				Alert: types.Alert{
+					Webhooks: []*types.Webhook{
 						{ID: "hook-0"},
 						webhook,
 						{ID: "hook-2"},
@@ -825,8 +825,8 @@ func TestIssue_FindWebhook(t *testing.T) {
 
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{
-					Webhooks: []*common.Webhook{
+				Alert: types.Alert{
+					Webhooks: []*types.Webhook{
 						{ID: "hook-0"},
 					},
 				},
@@ -843,10 +843,10 @@ func TestIssue_ApplyEscalationRules(t *testing.T) {
 	t.Run("no escalation when resolved", func(t *testing.T) {
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{
-					Severity: common.AlertResolved,
-					Escalation: []*common.Escalation{
-						{DelaySeconds: 0, Severity: common.AlertPanic},
+				Alert: types.Alert{
+					Severity: types.AlertResolved,
+					Escalation: []*types.Escalation{
+						{DelaySeconds: 0, Severity: types.AlertPanic},
 					},
 				},
 			},
@@ -861,10 +861,10 @@ func TestIssue_ApplyEscalationRules(t *testing.T) {
 		issue := &Issue{
 			Archived: true,
 			LastAlert: &Alert{
-				Alert: common.Alert{
-					Severity: common.AlertError,
-					Escalation: []*common.Escalation{
-						{DelaySeconds: 0, Severity: common.AlertPanic},
+				Alert: types.Alert{
+					Severity: types.AlertError,
+					Escalation: []*types.Escalation{
+						{DelaySeconds: 0, Severity: types.AlertPanic},
 					},
 				},
 			},
@@ -883,8 +883,8 @@ func TestIssue_ApplyEscalationRules(t *testing.T) {
 		issue := &Issue{
 			ResolveTime: fixedTime.Add(time.Hour),
 			LastAlert: &Alert{
-				Alert: common.Alert{
-					Severity:             common.AlertError,
+				Alert: types.Alert{
+					Severity:             types.AlertError,
 					IssueFollowUpEnabled: true,
 					Escalation:           nil,
 				},
@@ -905,11 +905,11 @@ func TestIssue_ApplyEscalationRules(t *testing.T) {
 			Created:     fixedTime.Add(-2 * time.Hour),
 			ResolveTime: fixedTime.Add(time.Hour),
 			LastAlert: &Alert{
-				Alert: common.Alert{
-					Severity:             common.AlertWarning,
+				Alert: types.Alert{
+					Severity:             types.AlertWarning,
 					IssueFollowUpEnabled: true,
-					Escalation: []*common.Escalation{
-						{DelaySeconds: 3600, Severity: common.AlertError, SlackMentions: []string{"<@user1>"}},
+					Escalation: []*types.Escalation{
+						{DelaySeconds: 3600, Severity: types.AlertError, SlackMentions: []string{"<@user1>"}},
 					},
 					Text: "Original text",
 				},
@@ -921,7 +921,7 @@ func TestIssue_ApplyEscalationRules(t *testing.T) {
 
 		assert.True(t, result.Escalated)
 		assert.True(t, issue.IsEscalated)
-		assert.Equal(t, common.AlertError, issue.LastAlert.Severity)
+		assert.Equal(t, types.AlertError, issue.LastAlert.Severity)
 		assert.Contains(t, issue.LastAlert.Text, "<@user1>")
 	})
 }
@@ -963,7 +963,7 @@ func TestIssue_RegisterUnresolveRequest(t *testing.T) {
 			ResolveTime:       fixedTime,
 			AutoResolvePeriod: 2 * time.Hour,
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					Timestamp:            alertTime,
 					IssueFollowUpEnabled: true,
 				},
@@ -984,7 +984,7 @@ func TestIssue_RegisterUnresolveRequest(t *testing.T) {
 			IsEmojiResolved: true,
 			ResolvedByUser:  "user123",
 			LastAlert: &Alert{
-				Alert: common.Alert{IssueFollowUpEnabled: false},
+				Alert: types.Alert{IssueFollowUpEnabled: false},
 			},
 		}
 
@@ -1007,7 +1007,7 @@ func TestIssue_RegisterUninvestigateRequest(t *testing.T) {
 			InvestigatedSince:    time.Now(),
 			SlackPostNeedsUpdate: false,
 			LastAlert: &Alert{
-				Alert: common.Alert{IssueFollowUpEnabled: true},
+				Alert: types.Alert{IssueFollowUpEnabled: true},
 			},
 		}
 
@@ -1026,7 +1026,7 @@ func TestIssue_RegisterUninvestigateRequest(t *testing.T) {
 			IsEmojiInvestigated: true,
 			InvestigatedByUser:  "user123",
 			LastAlert: &Alert{
-				Alert: common.Alert{IssueFollowUpEnabled: false},
+				Alert: types.Alert{IssueFollowUpEnabled: false},
 			},
 		}
 
@@ -1049,7 +1049,7 @@ func TestIssue_RegisterUnmuteRequest(t *testing.T) {
 			MutedSince:           time.Now(),
 			SlackPostNeedsUpdate: false,
 			LastAlert: &Alert{
-				Alert: common.Alert{IssueFollowUpEnabled: true},
+				Alert: types.Alert{IssueFollowUpEnabled: true},
 			},
 		}
 
@@ -1068,7 +1068,7 @@ func TestIssue_RegisterUnmuteRequest(t *testing.T) {
 			IsEmojiMuted: true,
 			MutedByUser:  "user123",
 			LastAlert: &Alert{
-				Alert: common.Alert{IssueFollowUpEnabled: false},
+				Alert: types.Alert{IssueFollowUpEnabled: false},
 			},
 		}
 
@@ -1116,7 +1116,7 @@ func TestIssue_IsReadyForArchiving(t *testing.T) {
 		issue := &Issue{
 			ArchiveTime: fixedTime.Add(-time.Minute),
 			LastAlert: &Alert{
-				Alert: common.Alert{IssueFollowUpEnabled: false},
+				Alert: types.Alert{IssueFollowUpEnabled: false},
 			},
 		}
 
@@ -1131,7 +1131,7 @@ func TestIssue_IsReadyForArchiving(t *testing.T) {
 		issue := &Issue{
 			ArchiveTime: fixedTime.Add(time.Minute),
 			LastAlert: &Alert{
-				Alert: common.Alert{IssueFollowUpEnabled: false},
+				Alert: types.Alert{IssueFollowUpEnabled: false},
 			},
 		}
 
@@ -1148,7 +1148,7 @@ func TestIssue_IsReadyForArchiving(t *testing.T) {
 			SlackPostID:         "12345.67890",
 			SlackPostLastAction: ActionAlert,
 			LastAlert: &Alert{
-				Alert: common.Alert{IssueFollowUpEnabled: true},
+				Alert: types.Alert{IssueFollowUpEnabled: true},
 			},
 		}
 
@@ -1165,7 +1165,7 @@ func TestIssue_IsReadyForArchiving(t *testing.T) {
 			SlackPostID:         "12345.67890",
 			SlackPostLastAction: ActionResolve,
 			LastAlert: &Alert{
-				Alert: common.Alert{IssueFollowUpEnabled: true},
+				Alert: types.Alert{IssueFollowUpEnabled: true},
 			},
 		}
 
@@ -1183,7 +1183,7 @@ func TestIssue_IsReadyForArchiving(t *testing.T) {
 			SlackPostID:         "12345.67890",
 			SlackPostLastAction: ActionAlert,
 			LastAlert: &Alert{
-				Alert: common.Alert{IssueFollowUpEnabled: true},
+				Alert: types.Alert{IssueFollowUpEnabled: true},
 			},
 		}
 
@@ -1209,7 +1209,7 @@ func TestIssue_LastAlertHasActiveMentions(t *testing.T) {
 
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{Text: "Hello <@U12345> please check this"},
+				Alert: types.Alert{Text: "Hello <@U12345> please check this"},
 			},
 		}
 
@@ -1221,7 +1221,7 @@ func TestIssue_LastAlertHasActiveMentions(t *testing.T) {
 
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{Text: "Hello <!here> please check this"},
+				Alert: types.Alert{Text: "Hello <!here> please check this"},
 			},
 		}
 
@@ -1233,7 +1233,7 @@ func TestIssue_LastAlertHasActiveMentions(t *testing.T) {
 
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{Text: "Hello world"},
+				Alert: types.Alert{Text: "Hello world"},
 			},
 		}
 
@@ -1245,7 +1245,7 @@ func TestIssue_LastAlertHasActiveMentions(t *testing.T) {
 
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{Text: "Hello *U12345* please check this"},
+				Alert: types.Alert{Text: "Hello *U12345* please check this"},
 			},
 		}
 
@@ -1261,9 +1261,9 @@ func TestIssue_IsResolvedAsInconclusive(t *testing.T) {
 
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					AutoResolveAsInconclusive: true,
-					Severity:                  common.AlertError,
+					Severity:                  types.AlertError,
 				},
 			},
 		}
@@ -1276,9 +1276,9 @@ func TestIssue_IsResolvedAsInconclusive(t *testing.T) {
 
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					AutoResolveAsInconclusive: false,
-					Severity:                  common.AlertError,
+					Severity:                  types.AlertError,
 				},
 			},
 		}
@@ -1291,9 +1291,9 @@ func TestIssue_IsResolvedAsInconclusive(t *testing.T) {
 
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					AutoResolveAsInconclusive: true,
-					Severity:                  common.AlertInfo,
+					Severity:                  types.AlertInfo,
 				},
 			},
 		}
@@ -1306,9 +1306,9 @@ func TestIssue_IsResolvedAsInconclusive(t *testing.T) {
 
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					AutoResolveAsInconclusive: true,
-					Severity:                  common.AlertResolved,
+					Severity:                  types.AlertResolved,
 				},
 			},
 		}
@@ -1322,9 +1322,9 @@ func TestIssue_IsResolvedAsInconclusive(t *testing.T) {
 		issue := &Issue{
 			IsEmojiResolved: true,
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					AutoResolveAsInconclusive: true,
-					Severity:                  common.AlertError,
+					Severity:                  types.AlertError,
 				},
 			},
 		}
@@ -1337,7 +1337,7 @@ func TestIssue_IsInfoOrResolved(t *testing.T) {
 	t.Run("returns true for info severity", func(t *testing.T) {
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{Severity: common.AlertInfo},
+				Alert: types.Alert{Severity: types.AlertInfo},
 			},
 		}
 
@@ -1347,7 +1347,7 @@ func TestIssue_IsInfoOrResolved(t *testing.T) {
 	t.Run("returns true for resolved severity", func(t *testing.T) {
 		issue := &Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{Severity: common.AlertResolved},
+				Alert: types.Alert{Severity: types.AlertResolved},
 			},
 		}
 
@@ -1362,8 +1362,8 @@ func TestIssue_IsInfoOrResolved(t *testing.T) {
 		issue := &Issue{
 			ResolveTime: fixedTime.Add(-time.Hour),
 			LastAlert: &Alert{
-				Alert: common.Alert{
-					Severity:             common.AlertError,
+				Alert: types.Alert{
+					Severity:             types.AlertError,
 					IssueFollowUpEnabled: true,
 				},
 			},
@@ -1380,8 +1380,8 @@ func TestIssue_IsInfoOrResolved(t *testing.T) {
 		issue := &Issue{
 			ResolveTime: fixedTime.Add(time.Hour),
 			LastAlert: &Alert{
-				Alert: common.Alert{
-					Severity:             common.AlertError,
+				Alert: types.Alert{
+					Severity:             types.AlertError,
 					IssueFollowUpEnabled: true,
 				},
 			},
@@ -1399,7 +1399,7 @@ func TestSlackMentionHandling(t *testing.T) {
 
 		issue := Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					Text: "abc everyone hei",
 				},
 			},
@@ -1413,13 +1413,13 @@ func TestSlackMentionHandling(t *testing.T) {
 
 		issue := Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					Header: "hei <@a>",
 					Author: "hei <@b>",
 					Host:   "hei <@c>",
 					Footer: "hei <@d>",
 					Text:   "hei <@e>",
-					Fields: []*common.Field{
+					Fields: []*types.Field{
 						{
 							Title: "hei <!here>",
 							Value: "hei <@there>",
@@ -1443,7 +1443,7 @@ func TestSlackMentionHandling(t *testing.T) {
 
 		issue := Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					Text: "abc <!everyone> hei <@everyone>",
 				},
 			},
@@ -1455,7 +1455,7 @@ func TestSlackMentionHandling(t *testing.T) {
 	t.Run("mentions are muted after first use within threshold", func(t *testing.T) {
 		issue := Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					Text: "abc <!here> hei <@bar>",
 				},
 			},
@@ -1469,7 +1469,7 @@ func TestSlackMentionHandling(t *testing.T) {
 	t.Run("mentions are allowed when text changes", func(t *testing.T) {
 		issue := Issue{
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					Text: "abc <!here> hei <@bar>",
 				},
 			},
@@ -1486,7 +1486,7 @@ func TestSlackMentionHandling(t *testing.T) {
 			LastSlackMention:     "<!here>,<@bar>",
 			LastSlackMentionTime: time.Now(),
 			LastAlert: &Alert{
-				Alert: common.Alert{
+				Alert: types.Alert{
 					Text: "abc <!here> hei <@bar>",
 				},
 			},

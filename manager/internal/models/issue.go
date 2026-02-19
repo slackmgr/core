@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/internal"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/types"
 )
 
 var (
@@ -90,7 +90,7 @@ type Issue struct {
 
 // NewIssue creates a new Issue from an Alert.
 // Returns nil if the provided alert is nil.
-func NewIssue(alert *Alert, logger common.Logger) *Issue {
+func NewIssue(alert *Alert, logger types.Logger) *Issue {
 	if alert == nil {
 		return nil
 	}
@@ -113,7 +113,7 @@ func NewIssue(alert *Alert, logger common.Logger) *Issue {
 
 	// For new issues, the combination of IssueFollowUpEnabled and severity Info is not allowed. There is nothing to follow up on.
 	// Rather than creating an issue that is immediately resolved, we disable follow-up for this alert and treat it as a fire-and-forget info message.
-	if alert.IssueFollowUpEnabled && alert.Severity == common.AlertInfo {
+	if alert.IssueFollowUpEnabled && alert.Severity == types.AlertInfo {
 		alert.IssueFollowUpEnabled = false
 		alert.NotificationDelaySeconds = 0
 
@@ -121,7 +121,7 @@ func NewIssue(alert *Alert, logger common.Logger) *Issue {
 	}
 
 	if alert.IssueFollowUpEnabled {
-		if alert.Severity == common.AlertResolved {
+		if alert.Severity == types.AlertResolved {
 			issue.ResolveTime = alert.Timestamp
 		} else {
 			issue.ResolveTime = alert.Timestamp.Add(issue.AutoResolvePeriod)
@@ -176,12 +176,12 @@ func (issue *Issue) FollowUpEnabled() bool {
 // The SlackPostDelayedUntil is calculated from issue.Created (not current time) by design,
 // ensuring the issue doesn't appear until the original delay period has elapsed,
 // regardless of how many alerts are added to the issue.
-func (issue *Issue) AddAlert(alert *Alert, logger common.Logger) bool {
+func (issue *Issue) AddAlert(alert *Alert, logger types.Logger) bool {
 	if !alert.Timestamp.After(issue.LastAlert.Timestamp) {
 		return false
 	}
 
-	if issue.IsResolved() && alert.Severity == common.AlertResolved {
+	if issue.IsResolved() && alert.Severity == types.AlertResolved {
 		return false
 	}
 
@@ -191,9 +191,9 @@ func (issue *Issue) AddAlert(alert *Alert, logger common.Logger) bool {
 
 	// Increase the new alert severity if the issue is escalated AND the current severity is not RESOLVED or INFO
 	if issue.IsEscalated &&
-		alert.Severity != common.AlertResolved &&
-		alert.Severity != common.AlertInfo &&
-		common.SeverityPriority(issue.LastAlert.Severity) > common.SeverityPriority(alert.Severity) {
+		alert.Severity != types.AlertResolved &&
+		alert.Severity != types.AlertInfo &&
+		types.SeverityPriority(issue.LastAlert.Severity) > types.SeverityPriority(alert.Severity) {
 		alert.Severity = issue.LastAlert.Severity
 	}
 
@@ -208,7 +208,7 @@ func (issue *Issue) AddAlert(alert *Alert, logger common.Logger) bool {
 	issue.SlackPostNeedsUpdate = true
 	issue.Archived = false
 
-	if alert.Severity == common.AlertInfo || alert.Severity == common.AlertResolved {
+	if alert.Severity == types.AlertInfo || alert.Severity == types.AlertResolved {
 		issue.ResolveTime = alert.Timestamp
 	} else {
 		issue.ResolveTime = alert.Timestamp.Add(issue.AutoResolvePeriod)
@@ -438,17 +438,17 @@ func (issue *Issue) LastAlertHasActiveMentions() bool {
 
 // IsLowerPriorityThan returns true if this issue has lower priority than the other issue
 func (issue *Issue) IsLowerPriorityThan(other *Issue) bool {
-	thisPriority := common.SeverityPriority(issue.LastAlert.Severity)
-	otherPriority := common.SeverityPriority(other.LastAlert.Severity)
+	thisPriority := types.SeverityPriority(issue.LastAlert.Severity)
+	otherPriority := types.SeverityPriority(other.LastAlert.Severity)
 
 	// Muted issues are treated as resolved when it comes to sorting
 	if issue.IsInfoOrResolved() || issue.IsEmojiMuted {
-		thisPriority = common.SeverityPriority(common.AlertResolved)
+		thisPriority = types.SeverityPriority(types.AlertResolved)
 	}
 
 	// Muted issues are treated as resolved when it comes to sorting
 	if other.IsInfoOrResolved() || other.IsEmojiMuted {
-		otherPriority = common.SeverityPriority(common.AlertResolved)
+		otherPriority = types.SeverityPriority(types.AlertResolved)
 	}
 
 	// When priority is the same AND neither issue has an existing Slack post, we take the timestamp into account when sorting
@@ -464,7 +464,7 @@ func (issue *Issue) IsResolvedAsInconclusive() bool {
 		return false
 	}
 
-	if issue.LastAlert.Severity == common.AlertInfo || issue.LastAlert.Severity == common.AlertResolved {
+	if issue.LastAlert.Severity == types.AlertInfo || issue.LastAlert.Severity == types.AlertResolved {
 		return false
 	}
 
@@ -476,11 +476,11 @@ func (issue *Issue) IsResolvedAsInconclusive() bool {
 }
 
 func (issue *Issue) IsResolved() bool {
-	return issue.LastAlert.Severity == common.AlertResolved || (issue.LastAlert.IssueFollowUpEnabled && nowFunc().After(issue.ResolveTime))
+	return issue.LastAlert.Severity == types.AlertResolved || (issue.LastAlert.IssueFollowUpEnabled && nowFunc().After(issue.ResolveTime))
 }
 
 func (issue *Issue) IsInfoOrResolved() bool {
-	return issue.LastAlert.Severity == common.AlertInfo || issue.IsResolved()
+	return issue.LastAlert.Severity == types.AlertInfo || issue.IsResolved()
 }
 
 func (issue *Issue) LogFields() map[string]any {
@@ -529,7 +529,7 @@ func (issue *Issue) ApplyEscalationRules() *EscalationResult {
 		return result
 	}
 
-	var escalation *common.Escalation
+	var escalation *types.Escalation
 	issueAge := int(nowFunc().Sub(issue.Created).Seconds())
 
 	// The alerts API ensures that escalation rules are sorted by delay (ascending)
@@ -556,10 +556,10 @@ func (issue *Issue) ApplyEscalationRules() *EscalationResult {
 	}
 
 	// Determine the current issue priority (which may be the result of a previous escalation)
-	currentPriority := common.SeverityPriority(issue.LastAlert.Severity)
+	currentPriority := types.SeverityPriority(issue.LastAlert.Severity)
 
 	// Determine the priority of the current escalation rule
-	escalatedPriority := common.SeverityPriority(escalation.Severity)
+	escalatedPriority := types.SeverityPriority(escalation.Severity)
 
 	// Update the issue severity
 	issue.LastAlert.Severity = escalation.Severity
@@ -587,7 +587,7 @@ func (issue *Issue) ApplyEscalationRules() *EscalationResult {
 	return result
 }
 
-func (issue *Issue) FindWebhook(id string) *common.Webhook {
+func (issue *Issue) FindWebhook(id string) *types.Webhook {
 	for _, hook := range issue.LastAlert.Webhooks {
 		if hook.ID == id {
 			return hook

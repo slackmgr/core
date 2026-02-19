@@ -5,13 +5,13 @@ import (
 	"sync"
 
 	"github.com/eko/gocache/lib/v4/store"
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
-	"github.com/peteraglen/slack-manager/manager/internal/models"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/types"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -32,7 +32,7 @@ type SocketModeHandler struct {
 	cacheStore       store.StoreInterface
 	cfg              *config.ManagerConfig
 	managerSettings  *models.ManagerSettingsWrapper
-	logger           common.Logger
+	logger           types.Logger
 
 	eventMap                       map[socketmode.EventType][]SocketModeHandlerFunc
 	interactionEventMap            map[slack.InteractionType][]SocketModeHandlerFunc
@@ -52,7 +52,7 @@ type SocketModeHandlerFunc func(context.Context, *socketmode.Event, SocketModeCl
 
 // NewSocketModeHandler creates a new SocketModeHandler.
 func NewSocketModeHandler(apiClient SlackAPIClient, socketModeClient SocketModeClient, commandQueue FifoQueueProducer, issueFinder IssueFinder,
-	cacheStore store.StoreInterface, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper, logger common.Logger,
+	cacheStore store.StoreInterface, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper, logger types.Logger,
 ) *SocketModeHandler {
 	eventMap := make(map[socketmode.EventType][]SocketModeHandlerFunc)
 	interactionEventMap := make(map[slack.InteractionType][]SocketModeHandlerFunc)

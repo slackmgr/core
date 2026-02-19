@@ -7,7 +7,6 @@
 bin/
 out/
 target/
-slack-manager
 
 # Test binary, built with `go test -c`
 *.test

@@ -9,20 +9,20 @@ import (
 
 	"github.com/eko/gocache/lib/v4/cache"
 	"github.com/eko/gocache/lib/v4/store"
-	common "github.com/peteraglen/slack-manager-common"
+	"github.com/slackmgr/types"
 )
 
 // Cache is a wrapper around a cache store that provides methods for getting, setting, and deleting cached items.
 type Cache struct {
 	cache        cache.CacheInterface[string]
 	keyPrefix    string
-	logger       common.Logger
+	logger       types.Logger
 	panicOnError bool // If true, panics on cache errors instead of logging them
 }
 
 // NewCache creates a new Cache instance with the provided cache store, key prefix, and logger.
 // The key prefix is optional, but may be useful for namespacing cache keys.
-func NewCache(cacheStore store.StoreInterface, keyPrefix string, logger common.Logger) *Cache {
+func NewCache(cacheStore store.StoreInterface, keyPrefix string, logger types.Logger) *Cache {
 	return &Cache{
 		cache:     cache.New[string](cacheStore),
 		keyPrefix: keyPrefix,

@@ -26,6 +26,51 @@ go test -v ./manager/internal/models/
 
 **IMPORTANT:** Both `make test` and `make lint` MUST pass with zero errors before committing any changes. This applies regardless of whether the errors were introduced by your changes or existed previously - all issues must be resolved before committing. Always run both commands to verify code quality.
 
+## Keeping README.md in Sync
+
+**After every code change, check whether `README.md` needs updating.** The README is the public-facing documentation and must always reflect the actual code.
+
+## Tagging and Releases
+
+### Process
+
+1. **Update `CHANGELOG.md` first** — this is MANDATORY before creating any tag.
+   - Review every commit since the last tagged commit: `git log <last-tag>..HEAD --oneline`
+   - Every commit MUST be considered and represented under the correct section (`Added`, `Changed`, `Fixed`, `Removed`)
+   - Add the new version section above `[Unreleased]` with today's date
+   - Update the comparison links at the bottom of the file
+
+2. **Commit the changelog:**
+   ```bash
+   git add CHANGELOG.md
+   git commit -m "Update CHANGELOG for vX.Y.Z"
+   ```
+
+3. **Create and push the tag:**
+   ```bash
+   git tag vX.Y.Z
+   git push origin main
+   git push origin vX.Y.Z
+   ```
+
+4. **Create the GitHub release:**
+   ```bash
+   gh release create vX.Y.Z --repo slackmgr/core --title "vX.Y.Z" --notes "..."
+   ```
+   Use the same content as the changelog entry for the release notes.
+
+### Versioning
+
+Follows [Semantic Versioning](https://semver.org/):
+- **Patch** (`Z`): bug fixes, CI/infra changes, documentation updates
+- **Minor** (`Y`): new backwards-compatible features or functionality
+- **Major** (`X`): breaking changes to the public API
+
+### Rules
+
+- **NEVER** create a tag without updating `CHANGELOG.md` first
+- **ALWAYS** review all commits since the last tag — do not rely on memory or summaries
+
 ## Architecture
 
 The system runs as two main services that communicate via message queues:
@@ -75,12 +120,11 @@ manager.Run(ctx)
 - `manager/internal/slack/` - Slack integration layer with controllers for different event types
 - `manager/internal/slack/views/` - Slack UI components (modals, message blocks)
 - `config/` - Configuration structures for API and Manager
-- `internal/` - Shared internal utilities (cache, encryption, channel summary)
-- `internal/slackapi/` - Low-level Slack API wrapper with caching and rate limit handling
+- `internal/` - Shared internal utilities (cache, encryption, channel summary, low-level Slack API wrapper)
 
 ## Key Dependencies
 
-- `github.com/peteraglen/slack-manager-common` - Common interfaces (`Logger`, `DB`, `Metrics`) shared across services
+- `github.com/slackmgr/types` - Common interfaces (`Logger`, `DB`, `Metrics`) shared across services
 - `github.com/gin-gonic/gin` - HTTP web framework for REST API
 - `github.com/slack-go/slack` - Slack API client and Socket Mode
 - `github.com/eko/gocache` - Caching abstraction with Redis backend
@@ -113,7 +157,7 @@ You are an expert Go Backend Engineer. Your goal is to produce performant, maint
 - Keep handlers thin; delegate business logic to the `service` layer.
 
 #### 2. Logging
-- All logging via injected Logger instance implementing the `common.Logger` interface (from `slack-manager-common` package).
+- All logging via injected Logger instance implementing the `types.Logger` interface (from `types` package).
 - Use **Structured Logging** (JSON).
 - Never use `fmt.Printf` or standard `log`.
 - Include context when applicable: `logger.WithField("user_id", id).Info("action")`.

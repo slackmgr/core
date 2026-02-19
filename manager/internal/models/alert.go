@@ -5,15 +5,15 @@ import (
 	"errors"
 	"fmt"
 
-	commonlib "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/types"
 )
 
 // Alert represents an alert message to be sent to a Slack channel.
-// It extends the commonlib.Alert struct with additional fields needed in this package.
+// It extends the types.Alert struct with additional fields needed in this package.
 type Alert struct {
-	commonlib.Alert
+	types.Alert
 
 	SlackChannelName       string `json:"slackChannelName"`
 	OriginalSlackChannelID string `json:"originalSlackChannelId"`
@@ -25,12 +25,12 @@ type Alert struct {
 
 // NewAlertFromQueueItem creates a new Alert instance from a FifoQueueItem.
 // It unmarshals the JSON body of the queue item into an Alert struct.
-func NewAlertFromQueueItem(queueItem *commonlib.FifoQueueItem) (InFlightMessage, error) { //nolint:ireturn
+func NewAlertFromQueueItem(queueItem *types.FifoQueueItem) (InFlightMessage, error) { //nolint:ireturn
 	if len(queueItem.Body) == 0 {
 		return nil, errors.New("alert body is empty")
 	}
 
-	var alert commonlib.Alert
+	var alert types.Alert
 
 	if err := json.Unmarshal([]byte(queueItem.Body), &alert); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal message body: %w", err)
@@ -93,7 +93,7 @@ func (a *Alert) SetDefaultValues(settings *config.ManagerSettings) {
 
 	for _, w := range a.Webhooks {
 		if w.AccessLevel == "" {
-			w.AccessLevel = commonlib.WebhookAccessLevelGlobalAdmins
+			w.AccessLevel = types.WebhookAccessLevelGlobalAdmins
 		}
 	}
 }

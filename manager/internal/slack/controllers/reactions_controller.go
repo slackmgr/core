@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"time"
 
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
-	"github.com/peteraglen/slack-manager/manager/internal/models"
-	"github.com/peteraglen/slack-manager/manager/internal/slack/views"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/core/manager/internal/slack/views"
+	"github.com/slackmgr/types"
 )
 
 var (
@@ -25,7 +25,7 @@ type reactionsController struct {
 	apiClient       SlackAPIClient
 	commandQueue    FifoQueueProducer
 	cache           *internal.Cache
-	logger          common.Logger
+	logger          types.Logger
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 }
@@ -151,7 +151,7 @@ func (c *reactionsController) sendReactionRemovedCommand(ctx context.Context, ev
 	}
 }
 
-func (c *reactionsController) getUserInfo(ctx context.Context, channel, userID string, requireChannelAdmin bool, logger common.Logger) (*slack.User, error) {
+func (c *reactionsController) getUserInfo(ctx context.Context, channel, userID string, requireChannelAdmin bool, logger types.Logger) (*slack.User, error) {
 	isAlertChannel, _, err := c.apiClient.IsAlertChannel(ctx, channel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify if channel %s is a valid alert channel: %w", channel, err)
@@ -184,7 +184,7 @@ func (c *reactionsController) getUserInfo(ctx context.Context, channel, userID s
 	return userInfo, nil
 }
 
-func (c *reactionsController) postNotAdminAlert(ctx context.Context, channel, userID, userRealName string, logger common.Logger) {
+func (c *reactionsController) postNotAdminAlert(ctx context.Context, channel, userID, userRealName string, logger types.Logger) {
 	cacheKey := fmt.Sprintf("ReactionsController:userNotAdmin:%s:%s", channel, userID)
 
 	if _, ok := c.cache.Get(ctx, cacheKey); ok {

@@ -3,8 +3,8 @@ package internal_test
 import (
 	"testing"
 
-	"github.com/peteraglen/slack-manager/internal"
 	"github.com/slack-go/slack"
+	"github.com/slackmgr/core/internal"
 	"github.com/stretchr/testify/assert"
 )
 

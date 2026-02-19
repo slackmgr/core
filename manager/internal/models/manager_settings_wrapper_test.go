@@ -4,8 +4,8 @@ import (
 	"sync"
 	"testing"
 
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -45,7 +45,7 @@ func TestManagerSettingsWrapper_GetSettings(t *testing.T) {
 
 		settings := &config.ManagerSettings{
 			DefaultPostUsername:  "test-bot",
-			DefaultAlertSeverity: common.AlertWarning,
+			DefaultAlertSeverity: types.AlertWarning,
 		}
 
 		wrapper := NewManagerSettingsWrapper(settings)
@@ -53,7 +53,7 @@ func TestManagerSettingsWrapper_GetSettings(t *testing.T) {
 		result := wrapper.GetSettings()
 
 		assert.Equal(t, "test-bot", result.DefaultPostUsername)
-		assert.Equal(t, common.AlertWarning, result.DefaultAlertSeverity)
+		assert.Equal(t, types.AlertWarning, result.DefaultAlertSeverity)
 	})
 
 	t.Run("returns nil when settings are nil", func(t *testing.T) {

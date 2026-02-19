@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	common "github.com/peteraglen/slack-manager-common"
+	"github.com/slackmgr/types"
 )
 
 const (
@@ -174,7 +174,7 @@ func (s *APISettings) Clone() (*APISettings, error) {
 // are updated, so external callers typically don't need to call it directly.
 //
 // Returns an error describing the first validation failure encountered, or nil if valid.
-func (s *APISettings) InitAndValidate(logger common.Logger) error {
+func (s *APISettings) InitAndValidate(logger types.Logger) error {
 	if s.initialized {
 		return nil
 	}
@@ -287,7 +287,7 @@ func (s *APISettings) InitAndValidate(logger common.Logger) error {
 //
 // Returns the target channel ID and true if a match is found, or ("", false) if no
 // routing rule matches the given route key and alert type.
-func (s *APISettings) Match(routeKey, alertType string, logger common.Logger) (string, bool) {
+func (s *APISettings) Match(routeKey, alertType string, logger types.Logger) (string, bool) {
 	routeKey = strings.ToLower(routeKey)
 	alertType = strings.ToLower(alertType)
 	cacheKey := routeKey + ":" + alertType

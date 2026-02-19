@@ -9,36 +9,36 @@ import (
 	"github.com/eko/gocache/lib/v4/store"
 	gocache_store "github.com/eko/gocache/store/go_cache/v4"
 	gocache "github.com/patrickmn/go-cache"
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/manager/internal/models"
-	slack "github.com/peteraglen/slack-manager/manager/internal/slack"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/manager/internal/models"
+	slack "github.com/slackmgr/core/manager/internal/slack"
+	"github.com/slackmgr/types"
 	"golang.org/x/sync/errgroup"
 )
 
 type Manager struct {
-	db              common.DB
+	db              types.DB
 	slackClient     *slack.Client
 	coordinator     *coordinator
 	alertQueue      FifoQueue
 	commandQueue    FifoQueue
 	cacheStore      store.StoreInterface
 	locker          ChannelLocker
-	logger          common.Logger
-	metrics         common.Metrics
+	logger          types.Logger
+	metrics         types.Metrics
 	webhookHandlers []WebhookHandler
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func New(db common.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, locker ChannelLocker, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
+func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, locker ChannelLocker, logger types.Logger, metrics types.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
 	if cacheStore == nil {
 		gocacheClient := gocache.New(5*time.Minute, time.Minute)
 		cacheStore = gocache_store.NewGoCache(gocacheClient)
 	}
 
 	if metrics == nil {
-		metrics = &common.NoopMetrics{}
+		metrics = &types.NoopMetrics{}
 	}
 
 	if managerSettings == nil {

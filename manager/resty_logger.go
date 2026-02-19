@@ -1,12 +1,12 @@
 package manager
 
-import common "github.com/peteraglen/slack-manager-common"
+import "github.com/slackmgr/types"
 
 type restyLogger struct {
-	logger common.Logger
+	logger types.Logger
 }
 
-func newRestyLogger(logger common.Logger) *restyLogger {
+func newRestyLogger(logger types.Logger) *restyLogger {
 	return &restyLogger{logger: logger}
 }
 

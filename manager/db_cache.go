@@ -8,20 +8,20 @@ import (
 	"time"
 
 	"github.com/eko/gocache/lib/v4/store"
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
-	"github.com/peteraglen/slack-manager/manager/internal/models"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/types"
 )
 
 type dbCacheMiddleware struct {
-	db                          common.DB
+	db                          types.DB
 	issueHashCache              *internal.Cache
 	channelProcessingStateCache *internal.Cache
 	moveMappingCache            *internal.Cache
 }
 
-func newDBCacheMiddleware(db common.DB, cacheStore store.StoreInterface, logger common.Logger, cfg config.ManagerConfig) *dbCacheMiddleware {
+func newDBCacheMiddleware(db types.DB, cacheStore store.StoreInterface, logger types.Logger, cfg config.ManagerConfig) *dbCacheMiddleware {
 	cacheKeyPrefix := cfg.CacheKeyPrefix + "db-cache:"
 
 	issueHashCache := internal.NewCache(cacheStore, cacheKeyPrefix+"issueHash:", logger)
@@ -40,20 +40,20 @@ func (d *dbCacheMiddleware) Init(_ context.Context, _ bool) error {
 	return errors.New("dbCacheMiddleware does not support the Init method")
 }
 
-func (d *dbCacheMiddleware) SaveAlert(ctx context.Context, alert *common.Alert) error {
+func (d *dbCacheMiddleware) SaveAlert(ctx context.Context, alert *types.Alert) error {
 	return d.db.SaveAlert(ctx, alert)
 }
 
-func (d *dbCacheMiddleware) SaveIssue(ctx context.Context, issue common.Issue) error {
+func (d *dbCacheMiddleware) SaveIssue(ctx context.Context, issue types.Issue) error {
 	return d.SaveIssues(ctx, issue)
 }
 
-func (d *dbCacheMiddleware) SaveIssues(ctx context.Context, issues ...common.Issue) error {
+func (d *dbCacheMiddleware) SaveIssues(ctx context.Context, issues ...types.Issue) error {
 	if len(issues) == 0 {
 		return nil
 	}
 
-	issuesToUpdate := []common.Issue{}
+	issuesToUpdate := []types.Issue{}
 	issueHashes := make(map[string]string)
 	issueModels := []*models.Issue{}
 
@@ -121,7 +121,7 @@ func (d *dbCacheMiddleware) SaveIssues(ctx context.Context, issues ...common.Iss
 	return nil
 }
 
-func (d *dbCacheMiddleware) MoveIssue(ctx context.Context, issue common.Issue, sourceChannelID, targetChannelID string) error {
+func (d *dbCacheMiddleware) MoveIssue(ctx context.Context, issue types.Issue, sourceChannelID, targetChannelID string) error {
 	issueModel, ok := issue.(*models.Issue)
 	if !ok {
 		return fmt.Errorf("expected issue to be of type *internal.Issue, got %T", issue)
@@ -180,7 +180,7 @@ func (d *dbCacheMiddleware) LoadOpenIssuesInChannel(ctx context.Context, channel
 	return issueBodies, nil
 }
 
-func (d *dbCacheMiddleware) SaveMoveMapping(ctx context.Context, moveMapping common.MoveMapping) error {
+func (d *dbCacheMiddleware) SaveMoveMapping(ctx context.Context, moveMapping types.MoveMapping) error {
 	body, err := moveMapping.MarshalJSON()
 	if err != nil {
 		return fmt.Errorf("failed to marshal move mapping: %w", err)
@@ -238,7 +238,7 @@ func (d *dbCacheMiddleware) DeleteMoveMapping(ctx context.Context, channelID, co
 	return nil
 }
 
-func (d *dbCacheMiddleware) SaveChannelProcessingState(ctx context.Context, state *common.ChannelProcessingState) error {
+func (d *dbCacheMiddleware) SaveChannelProcessingState(ctx context.Context, state *types.ChannelProcessingState) error {
 	if state == nil {
 		return errors.New("channel processing state cannot be nil")
 	}
@@ -257,9 +257,9 @@ func (d *dbCacheMiddleware) SaveChannelProcessingState(ctx context.Context, stat
 	return nil
 }
 
-func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, channelID string) (*common.ChannelProcessingState, error) {
+func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, channelID string) (*types.ChannelProcessingState, error) {
 	if cachedJSONBody, ok := d.channelProcessingStateCache.Get(ctx, channelID); ok {
-		var state common.ChannelProcessingState
+		var state types.ChannelProcessingState
 
 		if err := json.Unmarshal([]byte(cachedJSONBody), &state); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal channel processing state from cache: %w", err)

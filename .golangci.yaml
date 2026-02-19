@@ -38,7 +38,7 @@ linters:
         - empty
         - stdlib
         - generic
-        - github.com/peteraglen/slack-manager-common.Logger
+        - github.com/slackmgr/types.Logger
   exclusions:
     generated: lax
     presets:

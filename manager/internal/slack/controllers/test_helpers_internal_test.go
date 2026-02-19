@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/eko/gocache/lib/v4/store"
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/manager/internal/models"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -118,20 +118,20 @@ func (m *mockIssueFinder) FindIssueBySlackPost(ctx context.Context, channelID st
 	return issue
 }
 
-// mockLogger implements common.Logger for testing.
+// mockLogger implements types.Logger for testing.
 type mockLogger struct {
 	mock.Mock
 }
 
-func (m *mockLogger) Debug(msg string)                               { m.Called(msg) }
-func (m *mockLogger) Debugf(format string, args ...any)              { m.Called(format, args) }
-func (m *mockLogger) Info(msg string)                                { m.Called(msg) }
-func (m *mockLogger) Infof(format string, args ...any)               { m.Called(format, args) }
-func (m *mockLogger) Error(msg string)                               { m.Called(msg) }
-func (m *mockLogger) Errorf(format string, args ...any)              { m.Called(format, args) }
-func (m *mockLogger) WithField(key string, value any) common.Logger  { return m }
-func (m *mockLogger) WithFields(fields map[string]any) common.Logger { return m }
-func (m *mockLogger) HttpLoggingHandler() io.Writer                  { return io.Discard }
+func (m *mockLogger) Debug(msg string)                              { m.Called(msg) }
+func (m *mockLogger) Debugf(format string, args ...any)             { m.Called(format, args) }
+func (m *mockLogger) Info(msg string)                               { m.Called(msg) }
+func (m *mockLogger) Infof(format string, args ...any)              { m.Called(format, args) }
+func (m *mockLogger) Error(msg string)                              { m.Called(msg) }
+func (m *mockLogger) Errorf(format string, args ...any)             { m.Called(format, args) }
+func (m *mockLogger) WithField(key string, value any) types.Logger  { return m }
+func (m *mockLogger) WithFields(fields map[string]any) types.Logger { return m }
+func (m *mockLogger) HttpLoggingHandler() io.Writer                 { return io.Discard }
 
 // mockCacheStore implements store.StoreInterface for testing.
 type mockCacheStore struct {

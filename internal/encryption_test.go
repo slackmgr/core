@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/internal"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +18,7 @@ func TestWebhookEncryption(t *testing.T) {
 	t.Run("encrypts and decrypts payload successfully", func(t *testing.T) {
 		t.Parallel()
 
-		w := &common.Webhook{
+		w := &types.Webhook{
 			Payload: map[string]any{
 				"foo":       "bar",
 				"val":       1,
@@ -46,7 +46,7 @@ func TestWebhookEncryption(t *testing.T) {
 	t.Run("empty payload is not encrypted", func(t *testing.T) {
 		t.Parallel()
 
-		w := &common.Webhook{
+		w := &types.Webhook{
 			Payload: map[string]any{},
 		}
 
@@ -60,7 +60,7 @@ func TestWebhookEncryption(t *testing.T) {
 	t.Run("nil payload is not encrypted", func(t *testing.T) {
 		t.Parallel()
 
-		w := &common.Webhook{
+		w := &types.Webhook{
 			Payload: nil,
 		}
 
@@ -72,7 +72,7 @@ func TestWebhookEncryption(t *testing.T) {
 	t.Run("invalid key length returns error", func(t *testing.T) {
 		t.Parallel()
 
-		w := &common.Webhook{
+		w := &types.Webhook{
 			Payload: map[string]any{"key": "value"},
 		}
 
@@ -86,7 +86,7 @@ func TestWebhookEncryption(t *testing.T) {
 
 		// Create a large payload > 2048 bytes
 		largeValue := strings.Repeat("x", 3000)
-		w := &common.Webhook{
+		w := &types.Webhook{
 			Payload: map[string]any{"large": largeValue},
 		}
 
@@ -98,7 +98,7 @@ func TestWebhookEncryption(t *testing.T) {
 	t.Run("decrypt with wrong key fails", func(t *testing.T) {
 		t.Parallel()
 
-		w := &common.Webhook{
+		w := &types.Webhook{
 			Payload: map[string]any{"key": "value"},
 		}
 
@@ -113,7 +113,7 @@ func TestWebhookEncryption(t *testing.T) {
 	t.Run("decrypt with invalid key length returns error", func(t *testing.T) {
 		t.Parallel()
 
-		w := &common.Webhook{
+		w := &types.Webhook{
 			Payload: map[string]any{"__encrypted_data": "somedata"},
 		}
 
@@ -125,7 +125,7 @@ func TestWebhookEncryption(t *testing.T) {
 	t.Run("decrypt empty payload returns empty map", func(t *testing.T) {
 		t.Parallel()
 
-		w := &common.Webhook{
+		w := &types.Webhook{
 			Payload: map[string]any{},
 		}
 
@@ -137,7 +137,7 @@ func TestWebhookEncryption(t *testing.T) {
 	t.Run("decrypt payload without __encrypted_data returns empty map", func(t *testing.T) {
 		t.Parallel()
 
-		w := &common.Webhook{
+		w := &types.Webhook{
 			Payload: map[string]any{"other": "data"},
 		}
 
@@ -149,7 +149,7 @@ func TestWebhookEncryption(t *testing.T) {
 	t.Run("decrypt with invalid base64 returns error", func(t *testing.T) {
 		t.Parallel()
 
-		w := &common.Webhook{
+		w := &types.Webhook{
 			Payload: map[string]any{"__encrypted_data": "not-valid-base64!!!"},
 		}
 
@@ -160,7 +160,7 @@ func TestWebhookEncryption(t *testing.T) {
 	t.Run("decrypt with wrong type for __encrypted_data returns error", func(t *testing.T) {
 		t.Parallel()
 
-		w := &common.Webhook{
+		w := &types.Webhook{
 			Payload: map[string]any{"__encrypted_data": 12345},
 		}
 
@@ -172,7 +172,7 @@ func TestWebhookEncryption(t *testing.T) {
 	t.Run("decrypt with truncated data returns error", func(t *testing.T) {
 		t.Parallel()
 
-		w := &common.Webhook{
+		w := &types.Webhook{
 			Payload: map[string]any{"key": "value"},
 		}
 

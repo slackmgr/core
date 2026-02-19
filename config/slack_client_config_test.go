@@ -3,7 +3,7 @@ package config_test
 import (
 	"testing"
 
-	"github.com/peteraglen/slack-manager/config"
+	"github.com/slackmgr/core/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

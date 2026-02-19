@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/peteraglen/slack-manager/internal"
+	"github.com/slackmgr/core/internal"
 )
 
 // moveMappingNowFunc returns the current time. It can be overridden in tests for deterministic behavior.
@@ -48,7 +48,7 @@ func (m *MoveMapping) GetCorrelationID() string {
 }
 
 // MarshalJSON implements the json.Marshaler interface, which is required
-// by the common.MoveMapping interface.
+// by the types.MoveMapping interface.
 func (m *MoveMapping) MarshalJSON() ([]byte, error) {
 	type Alias MoveMapping
 

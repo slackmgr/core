@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
-	common "github.com/peteraglen/slack-manager-common"
+	"github.com/slackmgr/types"
 )
 
 // HTTPWebhookHandler is an implementation of the WebhookHandler interface that sends webhooks via HTTP.
@@ -19,7 +19,7 @@ type HTTPWebhookHandler struct {
 }
 
 // NewHTTPWebhookHandler creates a new HTTPWebhookHandler.
-func NewHTTPWebhookHandler(logger common.Logger) *HTTPWebhookHandler {
+func NewHTTPWebhookHandler(logger types.Logger) *HTTPWebhookHandler {
 	restyLogger := newRestyLogger(logger)
 
 	client := resty.New().
@@ -50,7 +50,7 @@ func (h *HTTPWebhookHandler) ShouldHandleWebhook(_ context.Context, target strin
 
 // HandleWebhook sends the webhook data to the target URL via an HTTP POST request.
 // It expects a successful HTTP status code (2xx) in response.
-func (h *HTTPWebhookHandler) HandleWebhook(ctx context.Context, target string, data *common.WebhookCallback, logger common.Logger) error {
+func (h *HTTPWebhookHandler) HandleWebhook(ctx context.Context, target string, data *types.WebhookCallback, logger types.Logger) error {
 	response, err := h.client.R().SetContext(ctx).SetBody(data).Post(target)
 	if err != nil {
 		return fmt.Errorf("webhook POST %s failed: %w", response.Request.URL, err)

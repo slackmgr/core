@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/manager/internal/models"
 	"github.com/slack-go/slack"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/manager/internal/models"
 )
 
 //go:embed issue_details_modal_assets/*

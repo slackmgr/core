@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/eko/gocache/lib/v4/store"
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/manager/internal/models"
 	"github.com/segmentio/ksuid"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/types"
 )
 
 type coordinator struct {
@@ -22,20 +22,20 @@ type coordinator struct {
 	// channelManagersWaitGroup is used to wait for all channel managers to exit when the coordinator is shutting down.
 	channelManagersWaitGroup *sync.WaitGroup
 
-	db              common.DB
+	db              types.DB
 	alertQueue      FifoQueue
 	slack           SlackClient
 	cacheStore      store.StoreInterface
 	locker          ChannelLocker
-	logger          common.Logger
-	metrics         common.Metrics
+	logger          types.Logger
+	metrics         types.Metrics
 	webhookHandlers []WebhookHandler
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func newCoordinator(db common.DB, alertQueue FifoQueue, slack SlackClient, cacheStore store.StoreInterface,
-	locker ChannelLocker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler,
+func newCoordinator(db types.DB, alertQueue FifoQueue, slack SlackClient, cacheStore store.StoreInterface,
+	locker ChannelLocker, logger types.Logger, metrics types.Metrics, webhookHandlers []WebhookHandler,
 	cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper,
 ) *coordinator {
 	return &coordinator{
@@ -337,7 +337,7 @@ func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.
 	// Commands are attempted exactly once, so we ack regardless of any errors below.
 	defer cmd.Ack()
 
-	alert := common.NewAlert(common.AlertSeverity(cmd.ParamAsString("severity")))
+	alert := types.NewAlert(types.AlertSeverity(cmd.ParamAsString("severity")))
 
 	alert.CorrelationID = ksuid.New().String()
 	alert.SlackChannelID = cmd.SlackChannelID

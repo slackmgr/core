@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/peteraglen/slack-manager/internal"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/core/internal"
 	"github.com/stretchr/testify/mock"
 )
 

@@ -3,7 +3,7 @@ package manager
 import (
 	"context"
 
-	common "github.com/peteraglen/slack-manager-common"
+	"github.com/slackmgr/types"
 )
 
 // FifoQueue is an interface for interacting with a fifo queue.
@@ -26,5 +26,5 @@ type FifoQueue interface {
 	// Receive receives messages from the queue, until the context is cancelled.
 	// Messages are sent to the provided channel.
 	// The channel must be closed by the implementation before returning, typically when the context is cancelled or a fatal error occurs.
-	Receive(ctx context.Context, sinkCh chan<- *common.FifoQueueItem) error
+	Receive(ctx context.Context, sinkCh chan<- *types.FifoQueueItem) error
 }

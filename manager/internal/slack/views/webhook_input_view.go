@@ -3,11 +3,11 @@ package views
 import (
 	"fmt"
 
-	common "github.com/peteraglen/slack-manager-common"
 	"github.com/slack-go/slack"
+	"github.com/slackmgr/types"
 )
 
-func WebhookInputView(webhook *common.Webhook) []slack.Block {
+func WebhookInputView(webhook *types.Webhook) []slack.Block {
 	blocks := []slack.Block{}
 
 	if webhook == nil {
@@ -35,7 +35,7 @@ func WebhookInputView(webhook *common.Webhook) []slack.Block {
 	return blocks
 }
 
-func createStringInputBlock(input *common.WebhookPlainTextInput) *slack.InputBlock {
+func createStringInputBlock(input *types.WebhookPlainTextInput) *slack.InputBlock {
 	label := slack.NewTextBlockObject(slack.PlainTextType, input.Description, false, false)
 
 	inputElement := slack.NewPlainTextInputBlockElement(nil, input.ID)
@@ -54,7 +54,7 @@ func createStringInputBlock(input *common.WebhookPlainTextInput) *slack.InputBlo
 	return slack.NewInputBlock(input.ID, label, nil, inputElement)
 }
 
-func createCheckboxInputBlock(input *common.WebhookCheckboxInput) *slack.InputBlock {
+func createCheckboxInputBlock(input *types.WebhookCheckboxInput) *slack.InputBlock {
 	label := slack.NewTextBlockObject(slack.PlainTextType, input.Label, false, false)
 
 	checkboxGroup := slack.NewCheckboxGroupsBlockElement(input.ID)

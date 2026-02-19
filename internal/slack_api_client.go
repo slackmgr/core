@@ -11,10 +11,10 @@ import (
 	"time"
 
 	cachestore "github.com/eko/gocache/lib/v4/store"
-	commonlib "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/types"
 )
 
 const (
@@ -40,15 +40,15 @@ type retryable interface{ Retryable() bool }
 
 type SlackAPIClient struct {
 	api       *slack.Client
-	logger    commonlib.Logger
+	logger    types.Logger
 	cache     *Cache
-	metrics   commonlib.Metrics
+	metrics   types.Metrics
 	cfg       *config.SlackClientConfig
 	connected bool
 	botUserID string
 }
 
-func NewSlackAPIClient(cacheStore cachestore.StoreInterface, cacheKeyPrefix string, logger commonlib.Logger, metrics commonlib.Metrics, cfg *config.SlackClientConfig) *SlackAPIClient {
+func NewSlackAPIClient(cacheStore cachestore.StoreInterface, cacheKeyPrefix string, logger types.Logger, metrics types.Metrics, cfg *config.SlackClientConfig) *SlackAPIClient {
 	cfg.SetDefaults()
 
 	cacheKeyPrefix += "slack-api-client:"
@@ -656,7 +656,7 @@ func (c *SlackAPIClient) checkConnected() error {
 	return nil
 }
 
-func callAPI[V any, W any](ctx context.Context, logger commonlib.Logger, metrics commonlib.Metrics,
+func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics types.Metrics,
 	cfg *config.SlackClientConfig, action string, f func(ctx context.Context) (V, W, error), expectedErrors ...string,
 ) (V, W, error) {
 	attempt := 1
@@ -703,7 +703,7 @@ func callAPI[V any, W any](ctx context.Context, logger commonlib.Logger, metrics
 	}
 }
 
-func waitForAPIError(ctx context.Context, started time.Time, logger commonlib.Logger, attempt int, action string, cfg *config.SlackClientConfig, err error) error {
+func waitForAPIError(ctx context.Context, started time.Time, logger types.Logger, attempt int, action string, cfg *config.SlackClientConfig, err error) error {
 	var rateLimitError *slack.RateLimitedError
 
 	if errors.As(err, &rateLimitError) {
@@ -735,7 +735,7 @@ func waitForAPIError(ctx context.Context, started time.Time, logger commonlib.Lo
 	return waitForFatalError(ctx, logger, err, attempt, action, remainingWaitTime)
 }
 
-func waitForRateLimit(ctx context.Context, logger commonlib.Logger, err *slack.RateLimitedError, attempt int, action string, remainingWaitTime time.Duration) error {
+func waitForRateLimit(ctx context.Context, logger types.Logger, err *slack.RateLimitedError, attempt int, action string, remainingWaitTime time.Duration) error {
 	wait := min(err.RetryAfter+2*time.Second, remainingWaitTime)
 
 	logger.Infof("Slack API rate limit exceeded when calling %s - waiting %v before trying again (attempt %d)", action, wait, attempt)
@@ -743,7 +743,7 @@ func waitForRateLimit(ctx context.Context, logger commonlib.Logger, err *slack.R
 	return sleep(ctx, wait)
 }
 
-func waitForTransientError(ctx context.Context, logger commonlib.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
+func waitForTransientError(ctx context.Context, logger types.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
 	wait := min(time.Duration(attempt)*time.Second, remainingWaitTime)
 
 	logger.Infof("Slack transient error %s when calling %s - waiting %v before trying again (attempt %d)", err, action, wait, attempt)
@@ -751,7 +751,7 @@ func waitForTransientError(ctx context.Context, logger commonlib.Logger, err err
 	return sleep(ctx, wait)
 }
 
-func waitForFatalError(ctx context.Context, logger commonlib.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
+func waitForFatalError(ctx context.Context, logger types.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
 	wait := min(time.Duration(attempt)*time.Second*2, remainingWaitTime)
 
 	logger.Infof("Slack fatal error %s when calling %s - waiting %v before trying again (attempt %d)", err, action, wait, attempt)

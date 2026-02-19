@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"strings"
 
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/manager/internal/models"
-	"github.com/peteraglen/slack-manager/manager/internal/slack/views"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/core/manager/internal/slack/views"
+	"github.com/slackmgr/types"
 )
 
 const (
@@ -39,7 +39,7 @@ type interactiveController struct {
 	apiClient       SlackAPIClient
 	commandQueue    FifoQueueProducer
 	issueFinder     IssueFinder
-	logger          common.Logger
+	logger          types.Logger
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 }
@@ -157,7 +157,7 @@ func (c *interactiveController) defaultInteractiveHandler(_ context.Context, evt
 // handleMoveIssueRequest handles a request to move an issue from one channel to another. It is triggered by a message shortcut.
 // It opens a modal view with options to move the issue, IF the user is allowed to perform this action AND the issue state allows it.
 // https://api.slack.com/interactivity/shortcuts/using#message_shortcuts
-func (c *interactiveController) handleMoveIssueRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) handleMoveIssueRequest(ctx context.Context, interaction slack.InteractionCallback, logger types.Logger) {
 	userIsGlobalAdmin := c.managerSettings.GetSettings().UserIsGlobalAdmin(interaction.User.ID)
 
 	if !userIsGlobalAdmin {
@@ -236,7 +236,7 @@ func (c *interactiveController) handleMoveIssueRequest(ctx context.Context, inte
 
 // moveIssueViewSubmission handles the callback from the modal move issue dialog (created by handleMoveIssueRequest).
 // It dispatches an async command with info about the move request, IF the Slack App integration is in the receiving channel.
-func (c *interactiveController) moveIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt SocketModeClient, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) moveIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt SocketModeClient, interaction slack.InteractionCallback, logger types.Logger) {
 	targetChannelID, err := getSelectedValue(interaction, "select_channel", "select_channel_input")
 	if err != nil {
 		ack(evt, clt)
@@ -301,7 +301,7 @@ func (c *interactiveController) moveIssueViewSubmission(ctx context.Context, evt
 
 // handleCreateIssueRequest handles a request to create a new issue in the current channel. It is triggered by a global shortcut.
 // It opens a modal view with options to create the issue.
-func (c *interactiveController) handleCreateIssueRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) handleCreateIssueRequest(ctx context.Context, interaction slack.InteractionCallback, logger types.Logger) {
 	blocks, err := views.CreateIssueModal(c.managerSettings.GetSettings())
 	if err != nil {
 		logger.Errorf("Failed to generate view: %s", err)
@@ -326,7 +326,7 @@ func (c *interactiveController) handleCreateIssueRequest(ctx context.Context, in
 
 // createIssueViewSubmission handles the callback from the modal create issue dialog (created by handleCreateIssueRequest).
 // It dispatches an async command with info about the create request, IF the Slack App integration is in the receiving channel.
-func (c *interactiveController) createIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt SocketModeClient, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) createIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt SocketModeClient, interaction slack.InteractionCallback, logger types.Logger) {
 	targetChannelID, err := getSelectedValue(interaction, "select_channel", "select_channel_input")
 	if err != nil {
 		ack(evt, clt)
@@ -439,7 +439,7 @@ func (c *interactiveController) createIssueViewSubmission(ctx context.Context, e
 
 // handleViewIssueDetailsRequest handles a request to view issue details. It is triggered by a message shortcut.
 // It opens a modal view with the issue details.
-func (c *interactiveController) handleViewIssueDetailsRequest(ctx context.Context, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) handleViewIssueDetailsRequest(ctx context.Context, interaction slack.InteractionCallback, logger types.Logger) {
 	isAlertChannel, _, err := c.apiClient.IsAlertChannel(ctx, interaction.Channel.ID)
 	if err != nil {
 		logger.Errorf("Failed to verify if channel %s is a valid alert channel: %s", interaction.Channel.ID, err)
@@ -484,7 +484,7 @@ func (c *interactiveController) handleViewIssueDetailsRequest(ctx context.Contex
 	}
 }
 
-func (c *interactiveController) handleIssueOptionsButtonRequest(ctx context.Context, interaction slack.InteractionCallback, action *slack.BlockAction, logger common.Logger) {
+func (c *interactiveController) handleIssueOptionsButtonRequest(ctx context.Context, interaction slack.InteractionCallback, action *slack.BlockAction, logger types.Logger) {
 	switch action.Value {
 	case MoveIssueAction:
 		c.handleMoveIssueRequest(ctx, interaction, logger)
@@ -497,7 +497,7 @@ func (c *interactiveController) handleIssueOptionsButtonRequest(ctx context.Cont
 
 // handleWebhookRequest handles a request to post to a webhook. It is triggered by an action button in a message.
 // It opens a modal view IF the user is allowed to perform this action.
-func (c *interactiveController) handleWebhookRequest(ctx context.Context, interaction slack.InteractionCallback, action *slack.BlockAction, logger common.Logger) {
+func (c *interactiveController) handleWebhookRequest(ctx context.Context, interaction slack.InteractionCallback, action *slack.BlockAction, logger types.Logger) {
 	issue := c.issueFinder.FindIssueBySlackPost(ctx, interaction.Channel.ID, interaction.Message.Timestamp, false)
 
 	if issue == nil {
@@ -514,7 +514,7 @@ func (c *interactiveController) handleWebhookRequest(ctx context.Context, intera
 		return
 	}
 
-	var webhook *common.Webhook
+	var webhook *types.Webhook
 
 	for _, hook := range issue.LastAlert.Webhooks {
 		if hook.ID == action.Value {
@@ -560,8 +560,8 @@ func (c *interactiveController) handleWebhookRequest(ctx context.Context, intera
 	}
 }
 
-func (c *interactiveController) verifyWebhookAccess(ctx context.Context, interaction slack.InteractionCallback, webhook *common.Webhook, logger common.Logger) bool {
-	if webhook.AccessLevel == common.WebhookAccessLevelGlobalAdmins || webhook.AccessLevel == "" {
+func (c *interactiveController) verifyWebhookAccess(ctx context.Context, interaction slack.InteractionCallback, webhook *types.Webhook, logger types.Logger) bool {
+	if webhook.AccessLevel == types.WebhookAccessLevelGlobalAdmins || webhook.AccessLevel == "" {
 		userIsGlobalAdmin := c.managerSettings.GetSettings().UserIsGlobalAdmin(interaction.User.ID)
 
 		if !userIsGlobalAdmin {
@@ -575,7 +575,7 @@ func (c *interactiveController) verifyWebhookAccess(ctx context.Context, interac
 		return true
 	}
 
-	if webhook.AccessLevel == common.WebhookAccessLevelChannelAdmins {
+	if webhook.AccessLevel == types.WebhookAccessLevelChannelAdmins {
 		userIsChannelAdmin := c.managerSettings.GetSettings().UserIsChannelAdmin(ctx, interaction.Channel.ID, interaction.User.ID, c.apiClient.UserIsInGroup)
 
 		if !userIsChannelAdmin {
@@ -591,7 +591,7 @@ func (c *interactiveController) verifyWebhookAccess(ctx context.Context, interac
 
 // webhookViewSubmission handles the callback from the modal confirm webhook dialog (created by handleWebhookRequest).
 // It dispatches an async command with info about the webhook.
-func (c *interactiveController) webhookViewSubmission(ctx context.Context, evt *socketmode.Event, clt SocketModeClient, interaction slack.InteractionCallback, logger common.Logger) {
+func (c *interactiveController) webhookViewSubmission(ctx context.Context, evt *socketmode.Event, clt SocketModeClient, interaction slack.InteractionCallback, logger types.Logger) {
 	// Fetch info about the user
 	userInfo, err := c.apiClient.GetUserInfo(ctx, interaction.User.ID)
 	if err != nil {
@@ -736,7 +736,7 @@ func getViewStateCheckboxSelectedValues(view slack.View) map[string][]string {
 }
 
 // getInteractionAndLoggerFromEvent casts the event data to interaction callback, and creates a log entry with suitable fields
-func getInteractionAndLoggerFromEvent(evt *socketmode.Event, logger common.Logger) (slack.InteractionCallback, common.Logger, error) {
+func getInteractionAndLoggerFromEvent(evt *socketmode.Event, logger types.Logger) (slack.InteractionCallback, types.Logger, error) {
 	interaction, ok := evt.Data.(slack.InteractionCallback)
 	if !ok {
 		return slack.InteractionCallback{}, logger, fmt.Errorf("failed to cast InteractionCallback")

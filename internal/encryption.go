@@ -10,12 +10,12 @@ import (
 	"fmt"
 	"io"
 
-	common "github.com/peteraglen/slack-manager-common"
+	"github.com/slackmgr/types"
 )
 
 // EncryptWebhookPayload encrypts the existing webhook payload (if any) and replaces it with an encrypted version.
 // This function modifies the state of the webhook.
-func EncryptWebhookPayload(w *common.Webhook, key []byte) error {
+func EncryptWebhookPayload(w *types.Webhook, key []byte) error {
 	if len(w.Payload) == 0 {
 		return nil
 	}
@@ -67,7 +67,7 @@ func encrypt(key, data []byte) ([]byte, error) {
 
 // DecryptWebhookPayload decrypts the encrypted webhook payload (if any) and returns it, or nil if payload is empty.
 // This function does not modify the state of the webhook.
-func DecryptWebhookPayload(w *common.Webhook, key []byte) (map[string]any, error) {
+func DecryptWebhookPayload(w *types.Webhook, key []byte) (map[string]any, error) {
 	if len(w.Payload) == 0 {
 		return map[string]any{}, nil
 	}

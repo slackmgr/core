@@ -8,16 +8,16 @@ import (
 	"time"
 
 	redis_store "github.com/eko/gocache/store/rediscluster/v4"
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/internal"
 	"github.com/redis/go-redis/v9"
 	"github.com/segmentio/ksuid"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCacheForStrings(t *testing.T) {
 	ctx := context.Background()
-	logger := &common.NoopLogger{}
+	logger := &types.NoopLogger{}
 
 	options := &redis.Options{
 		Addr:     "localhost:6379",

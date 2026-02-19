@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,7 +17,7 @@ func TestNewAlertFromQueueItem(t *testing.T) {
 	t.Run("returns error for empty body", func(t *testing.T) {
 		t.Parallel()
 
-		queueItem := &common.FifoQueueItem{
+		queueItem := &types.FifoQueueItem{
 			Body: "",
 		}
 
@@ -31,7 +31,7 @@ func TestNewAlertFromQueueItem(t *testing.T) {
 	t.Run("returns error for invalid JSON", func(t *testing.T) {
 		t.Parallel()
 
-		queueItem := &common.FifoQueueItem{
+		queueItem := &types.FifoQueueItem{
 			Body: "invalid json",
 		}
 
@@ -45,10 +45,10 @@ func TestNewAlertFromQueueItem(t *testing.T) {
 	t.Run("creates alert from valid JSON", func(t *testing.T) {
 		t.Parallel()
 
-		alertData := common.Alert{
+		alertData := types.Alert{
 			SlackChannelID: "C12345",
 			CorrelationID:  "corr-123",
-			Severity:       common.AlertError,
+			Severity:       types.AlertError,
 			Header:         "Test Alert",
 			Text:           "Alert text",
 			Timestamp:      time.Now().UTC(),
@@ -60,7 +60,7 @@ func TestNewAlertFromQueueItem(t *testing.T) {
 		ackCalled := false
 		nackCalled := false
 
-		queueItem := &common.FifoQueueItem{
+		queueItem := &types.FifoQueueItem{
 			Body: string(jsonBody),
 			Ack:  func() { ackCalled = true },
 			Nack: func() { nackCalled = true },
@@ -76,7 +76,7 @@ func TestNewAlertFromQueueItem(t *testing.T) {
 
 		assert.Equal(t, "C12345", alert.SlackChannelID)
 		assert.Equal(t, "corr-123", alert.CorrelationID)
-		assert.Equal(t, common.AlertError, alert.Severity)
+		assert.Equal(t, types.AlertError, alert.Severity)
 		assert.Equal(t, "Test Alert", alert.Header)
 
 		// Verify ack function is set
@@ -210,7 +210,7 @@ func TestAlert_SetDefaultValues(t *testing.T) {
 	t.Parallel()
 
 	defaultSettings := &config.ManagerSettings{
-		DefaultAlertSeverity:              common.AlertWarning,
+		DefaultAlertSeverity:              types.AlertWarning,
 		DefaultPostUsername:               "default-bot",
 		DefaultPostIconEmoji:              ":robot:",
 		DefaultIssueArchivingDelaySeconds: 600,
@@ -229,7 +229,7 @@ func TestAlert_SetDefaultValues(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				SlackChannelID: "C12345",
 				Header:         "Test Header",
 				Author:         "test-author",
@@ -247,7 +247,7 @@ func TestAlert_SetDefaultValues(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				CorrelationID: "existing-corr-id",
 			},
 		}
@@ -261,36 +261,36 @@ func TestAlert_SetDefaultValues(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				CorrelationID: "corr-123",
 			},
 		}
 
 		alert.SetDefaultValues(defaultSettings)
 
-		assert.Equal(t, common.AlertWarning, alert.Severity)
+		assert.Equal(t, types.AlertWarning, alert.Severity)
 	})
 
 	t.Run("preserves existing Severity", func(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				CorrelationID: "corr-123",
-				Severity:      common.AlertPanic,
+				Severity:      types.AlertPanic,
 			},
 		}
 
 		alert.SetDefaultValues(defaultSettings)
 
-		assert.Equal(t, common.AlertPanic, alert.Severity)
+		assert.Equal(t, types.AlertPanic, alert.Severity)
 	})
 
 	t.Run("sets default Username when empty", func(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				CorrelationID: "corr-123",
 			},
 		}
@@ -304,7 +304,7 @@ func TestAlert_SetDefaultValues(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				CorrelationID: "corr-123",
 				Username:      "custom-bot",
 			},
@@ -319,7 +319,7 @@ func TestAlert_SetDefaultValues(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				CorrelationID: "corr-123",
 			},
 		}
@@ -333,7 +333,7 @@ func TestAlert_SetDefaultValues(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				CorrelationID: "corr-123",
 				IconEmoji:     ":fire:",
 			},
@@ -348,7 +348,7 @@ func TestAlert_SetDefaultValues(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				CorrelationID:         "corr-123",
 				ArchivingDelaySeconds: 0,
 			},
@@ -363,7 +363,7 @@ func TestAlert_SetDefaultValues(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				CorrelationID:         "corr-123",
 				ArchivingDelaySeconds: -100,
 			},
@@ -378,7 +378,7 @@ func TestAlert_SetDefaultValues(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				CorrelationID:         "corr-123",
 				ArchivingDelaySeconds: 1200,
 			},
@@ -393,9 +393,9 @@ func TestAlert_SetDefaultValues(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				CorrelationID: "corr-123",
-				Webhooks: []*common.Webhook{
+				Webhooks: []*types.Webhook{
 					{ID: "hook-1", AccessLevel: ""},
 					{ID: "hook-2", AccessLevel: ""},
 				},
@@ -404,25 +404,25 @@ func TestAlert_SetDefaultValues(t *testing.T) {
 
 		alert.SetDefaultValues(defaultSettings)
 
-		assert.Equal(t, common.WebhookAccessLevelGlobalAdmins, alert.Webhooks[0].AccessLevel)
-		assert.Equal(t, common.WebhookAccessLevelGlobalAdmins, alert.Webhooks[1].AccessLevel)
+		assert.Equal(t, types.WebhookAccessLevelGlobalAdmins, alert.Webhooks[0].AccessLevel)
+		assert.Equal(t, types.WebhookAccessLevelGlobalAdmins, alert.Webhooks[1].AccessLevel)
 	})
 
 	t.Run("preserves existing webhook AccessLevel", func(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				CorrelationID: "corr-123",
-				Webhooks: []*common.Webhook{
-					{ID: "hook-1", AccessLevel: common.WebhookAccessLevelChannelMembers},
+				Webhooks: []*types.Webhook{
+					{ID: "hook-1", AccessLevel: types.WebhookAccessLevelChannelMembers},
 				},
 			},
 		}
 
 		alert.SetDefaultValues(defaultSettings)
 
-		assert.Equal(t, common.WebhookAccessLevelChannelMembers, alert.Webhooks[0].AccessLevel)
+		assert.Equal(t, types.WebhookAccessLevelChannelMembers, alert.Webhooks[0].AccessLevel)
 	})
 }
 
@@ -443,7 +443,7 @@ func TestAlert_LogFields(t *testing.T) {
 		t.Parallel()
 
 		alert := &Alert{
-			Alert: common.Alert{
+			Alert: types.Alert{
 				SlackChannelID: "C12345",
 				CorrelationID:  "corr-123",
 			},

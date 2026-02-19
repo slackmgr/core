@@ -1,4 +1,4 @@
-module github.com/peteraglen/slack-manager
+module github.com/slackmgr/core
 
 go 1.25
 
@@ -11,10 +11,10 @@ require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-resty/resty/v2 v2.17.1
 	github.com/patrickmn/go-cache v2.1.0+incompatible
-	github.com/peteraglen/slack-manager-common v0.1.4
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/segmentio/ksuid v1.0.4
 	github.com/slack-go/slack v0.17.3
+	github.com/slackmgr/types v0.3.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sync v0.19.0
 	golang.org/x/time v0.14.0

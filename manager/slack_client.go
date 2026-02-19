@@ -3,7 +3,7 @@ package manager
 import (
 	"context"
 
-	"github.com/peteraglen/slack-manager/manager/internal/models"
+	"github.com/slackmgr/core/manager/internal/models"
 	"golang.org/x/sync/semaphore"
 )
 

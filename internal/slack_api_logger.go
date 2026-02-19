@@ -1,11 +1,11 @@
 package internal
 
 import (
-	common "github.com/peteraglen/slack-manager-common"
+	"github.com/slackmgr/types"
 )
 
 type slackApilogger struct {
-	logger common.Logger
+	logger types.Logger
 }
 
 func (l *slackApilogger) Output(_ int, msg string) error {

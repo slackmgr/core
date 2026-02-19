@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
-	common "github.com/peteraglen/slack-manager-common"
 	"github.com/redis/go-redis/v9"
+	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
-// mockLogger is a simple mock implementation of common.Logger for testing.
+// mockLogger is a simple mock implementation of types.Logger for testing.
 type mockLogger struct {
 	mock.Mock
 }
@@ -26,11 +26,11 @@ func (m *mockLogger) Infof(_ string, _ ...any)  {}
 func (m *mockLogger) Error(_ string)            {}
 func (m *mockLogger) Errorf(_ string, _ ...any) {}
 
-func (m *mockLogger) WithField(_ string, _ any) common.Logger {
+func (m *mockLogger) WithField(_ string, _ any) types.Logger {
 	return m
 }
 
-func (m *mockLogger) WithFields(_ map[string]any) common.Logger {
+func (m *mockLogger) WithFields(_ map[string]any) types.Logger {
 	return m
 }
 
@@ -591,7 +591,7 @@ func TestRedisFifoQueue_ProcessMessageWithLock(t *testing.T) {
 		},
 	}
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 	ctx := context.Background()
 
 	err = queue.processMessageWithLock(ctx, "slack-manager:queue:test-queue:stream:C12345", "C12345", msg, mockLock, sinkCh)
@@ -629,7 +629,7 @@ func TestRedisFifoQueue_ProcessMessageWithLock_MissingBody(t *testing.T) {
 		},
 	}
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 	ctx := context.Background()
 
 	err = queue.processMessageWithLock(ctx, "slack-manager:queue:test-queue:stream:C12345", "C12345", msg, mockLock, sinkCh)
@@ -663,7 +663,7 @@ func TestRedisFifoQueue_AckReleasesLock(t *testing.T) {
 		},
 	}
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 	ctx := context.Background()
 
 	err = queue.processMessageWithLock(ctx, "slack-manager:queue:test-queue:stream:C12345", "C12345", msg, mockLock, sinkCh)
@@ -703,7 +703,7 @@ func TestRedisFifoQueue_NackReleasesLock(t *testing.T) {
 		},
 	}
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 	ctx := context.Background()
 
 	err = queue.processMessageWithLock(ctx, "slack-manager:queue:test-queue:stream:C12345", "C12345", msg, mockLock, sinkCh)
@@ -930,7 +930,7 @@ func TestRedisFifoQueue_Receive_NotInitialized(t *testing.T) {
 	queue := NewRedisFifoQueue(mockClient, mockLocker, "test-queue", logger)
 	// Don't call Init()
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 	err := queue.Receive(context.Background(), sinkCh)
 
 	require.Error(t, err)
@@ -1131,7 +1131,7 @@ func TestRedisFifoQueue_ReadMessagesWithLocking_EmptyStreams(t *testing.T) {
 	require.NoError(t, err)
 
 	// knownStreams is empty by default after Init()
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 
 	messagesRead, err := queue.readMessagesWithLocking(context.Background(), sinkCh)
 
@@ -1160,7 +1160,7 @@ func TestRedisFifoQueue_ReadMessagesWithLocking_LockUnavailable(t *testing.T) {
 	queue.knownStreams[streamKey] = true
 	queue.knownStreamsMu.Unlock()
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 
 	messagesRead, err := queue.readMessagesWithLocking(context.Background(), sinkCh)
 
@@ -1191,7 +1191,7 @@ func TestRedisFifoQueue_ReadMessagesWithLocking_ContextCancelled(t *testing.T) {
 	queue.knownStreams[streamKey] = true
 	queue.knownStreamsMu.Unlock()
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 
 	// Should return immediately with context.Canceled error.
 	messagesRead, err := queue.readMessagesWithLocking(ctx, sinkCh)
@@ -1224,7 +1224,7 @@ func TestRedisFifoQueue_ReadMessagesWithLocking_LockError(t *testing.T) {
 	queue.knownStreams[streamKey] = true
 	queue.knownStreamsMu.Unlock()
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 
 	messagesRead, err := queue.readMessagesWithLocking(context.Background(), sinkCh)
 
@@ -1347,7 +1347,7 @@ func TestRedisFifoQueue_ReadOneMessageFromStream_NoMessages(t *testing.T) {
 	mockClient.On("XReadGroup", mock.Anything, mock.Anything).
 		Return([]redis.XStream{}, redis.Nil)
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 	read, err := queue.readOneMessageFromStream(context.Background(), "test-stream", "C12345", mockLock, sinkCh)
 
 	require.NoError(t, err)
@@ -1375,7 +1375,7 @@ func TestRedisFifoQueue_ReadOneMessageFromStream_XReadGroupError(t *testing.T) {
 	mockClient.On("XReadGroup", mock.Anything, mock.Anything).
 		Return([]redis.XStream{}, errors.New("redis connection error"))
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 	read, err := queue.readOneMessageFromStream(context.Background(), "test-stream", "C12345", mockLock, sinkCh)
 
 	require.Error(t, err)
@@ -1407,7 +1407,7 @@ func TestRedisFifoQueue_ReadOneMessageFromStream_ClaimsPending(t *testing.T) {
 	mockClient.On("XAutoClaim", mock.Anything, mock.Anything).
 		Return([]redis.XMessage{pendingMsg}, "0-0", nil)
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 	read, err := queue.readOneMessageFromStream(context.Background(), "test-stream", "C12345", mockLock, sinkCh)
 
 	require.NoError(t, err)
@@ -1446,7 +1446,7 @@ func TestRedisFifoQueue_ReadOneMessageFromStream_ReadsNew(t *testing.T) {
 	mockClient.On("XReadGroup", mock.Anything, mock.Anything).
 		Return([]redis.XStream{{Stream: "test-stream", Messages: []redis.XMessage{newMsg}}}, nil)
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 	read, err := queue.readOneMessageFromStream(context.Background(), "test-stream", "C12345", mockLock, sinkCh)
 
 	require.NoError(t, err)
@@ -1591,7 +1591,7 @@ func TestRedisFifoQueue_ReadMessagesWithLocking_Success(t *testing.T) {
 	queue.knownStreams[streamKey] = true
 	queue.knownStreamsMu.Unlock()
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 
 	messagesRead, err := queue.readMessagesWithLocking(context.Background(), sinkCh)
 
@@ -1638,7 +1638,7 @@ func TestRedisFifoQueue_ReadMessagesWithLocking_NoMessageReleasesLock(t *testing
 	queue.knownStreams[streamKey] = true
 	queue.knownStreamsMu.Unlock()
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 
 	messagesRead, err := queue.readMessagesWithLocking(context.Background(), sinkCh)
 
@@ -1679,7 +1679,7 @@ func TestRedisFifoQueue_ReadMessagesWithLocking_ErrorReleasesLock(t *testing.T) 
 	queue.knownStreams[streamKey] = true
 	queue.knownStreamsMu.Unlock()
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 
 	messagesRead, err := queue.readMessagesWithLocking(context.Background(), sinkCh)
 
@@ -1745,7 +1745,7 @@ func TestRedisFifoQueue_ProcessMessageWithLock_ContextCancelled(t *testing.T) {
 	cancel()
 
 	// Use an unbuffered channel that will block (context is already cancelled).
-	sinkCh := make(chan *common.FifoQueueItem)
+	sinkCh := make(chan *types.FifoQueueItem)
 
 	err = queue.processMessageWithLock(ctx, "slack-manager:queue:test-queue:stream:C12345", "C12345", msg, mockLock, sinkCh)
 
@@ -1775,7 +1775,7 @@ func TestRedisFifoQueue_ProcessMessageWithLock_UsesChannelIDFromMessage(t *testi
 		},
 	}
 
-	sinkCh := make(chan *common.FifoQueueItem, 10)
+	sinkCh := make(chan *types.FifoQueueItem, 10)
 	ctx := context.Background()
 
 	err = queue.processMessageWithLock(ctx, "slack-manager:queue:test-queue:stream:C12345", "C12345", msg, mockLock, sinkCh)

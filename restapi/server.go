@@ -20,10 +20,10 @@ import (
 	"github.com/gin-contrib/timeout"
 	"github.com/gin-gonic/gin"
 	gocache "github.com/patrickmn/go-cache"
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
 	"github.com/slack-go/slack"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/types"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 )
@@ -35,7 +35,7 @@ const (
 var ErrRateLimit = errors.New("rate limit exceeded")
 
 type FifoQueueConsumer interface {
-	Receive(ctx context.Context, sinkCh chan<- *common.FifoQueueItem) error
+	Receive(ctx context.Context, sinkCh chan<- *types.FifoQueueItem) error
 }
 
 type FifoQueueProducer interface {
@@ -57,21 +57,21 @@ type Server struct {
 	cacheStore          cachestore.StoreInterface
 	slackClient         SlackClient
 	channelInfoProvider ChannelInfoProvider
-	logger              common.Logger
-	metrics             common.Metrics
+	logger              types.Logger
+	metrics             types.Metrics
 	apiSettings         *config.APISettings
 	cfg                 *config.APIConfig
 	defaultPretty       bool
 }
 
-func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.APIConfig, settings *config.APISettings) *Server {
+func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, logger types.Logger, metrics types.Metrics, cfg *config.APIConfig, settings *config.APISettings) *Server {
 	if cacheStore == nil {
 		gocacheClient := gocache.New(5*time.Minute, time.Minute)
 		cacheStore = gocache_store.NewGoCache(gocacheClient)
 	}
 
 	if metrics == nil {
-		metrics = &common.NoopMetrics{}
+		metrics = &types.NoopMetrics{}
 	}
 
 	if settings == nil {
@@ -97,7 +97,7 @@ func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, log
 //
 // The server can receive alerts from both the main rest API and the raw alert consumers simultaneously.
 //
-// The queue item body must be a single JSON-serialized common.Alert. Prometheus webhooks are not supported here.
+// The queue item body must be a single JSON-serialized types.Alert. Prometheus webhooks are not supported here.
 func (s *Server) WithRawAlertConsumer(consumer FifoQueueConsumer) *Server {
 	s.rawAlertConsumers = append(s.rawAlertConsumers, consumer)
 	return s
@@ -208,7 +208,7 @@ func (s *Server) Run(ctx context.Context) error {
 	))
 
 	// We support both /alert and /alerts endpoints for backwards compatibility.
-	// Input is either a single alert (common.Alert), or an array of alerts.
+	// Input is either a single alert (types.Alert), or an array of alerts.
 	engine.POST("/alert", s.handleAlerts)
 	engine.POST("/alert/:slackChannelId", s.handleAlerts)
 	engine.POST("/alerts", s.handleAlerts)
@@ -314,7 +314,7 @@ func (s *Server) setChannelInfoProvider(provider ChannelInfoProvider) {
 }
 
 // runRawAlertConsumer starts consuming alerts from the given FIFO queue consumer.
-// Each alert is expected to be a JSON-serialized common.Alert.
+// Each alert is expected to be a JSON-serialized types.Alert.
 //
 // Retryable processing errors result in the message being nacked, thus allowing re-processing later.
 // Non-retryable processing errors result in the message being acked, thus avoiding re-processing.
@@ -324,7 +324,7 @@ func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueCons
 	s.logger.Info("Starting raw alert consumer")
 	defer s.logger.Info("Raw alert consumer exited")
 
-	queueCh := make(chan *common.FifoQueueItem, 100)
+	queueCh := make(chan *types.FifoQueueItem, 100)
 
 	errg, ctx := errgroup.WithContext(ctx)
 
@@ -337,7 +337,7 @@ func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueCons
 			logger := s.logger.WithField("message_id", item.MessageID).WithField("channel_id", item.SlackChannelID)
 			logger.Debug("Alert received")
 
-			var alert *common.Alert
+			var alert *types.Alert
 
 			// Unmarshal the alert from the queue item body.
 			// If the alert is invalid, we *ack* the message to avoid re-processing it.
@@ -383,7 +383,7 @@ func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueCons
 	return errg.Wait()
 }
 
-func (s *Server) writeErrorResponse(c *gin.Context, err error, statusCode int, alert *common.Alert) {
+func (s *Server) writeErrorResponse(c *gin.Context, err error, statusCode int, alert *types.Alert) {
 	errorMsg := err.Error()
 
 	if statusCode < 500 {
@@ -413,18 +413,18 @@ func (s *Server) writeErrorResponse(c *gin.Context, err error, statusCode int, a
 
 // createClientErrorAlert creates an alert for reporting client errors to the configured Slack error report channel.
 // This is an optional debug feature, used by Slack Manager admins to track client errors that may indicate misconfiguration or integration issues.
-func (s *Server) createClientErrorAlert(err error, statusCode int, debugFields map[string]string, targetChannel string) *common.Alert {
-	severity := common.AlertWarning
+func (s *Server) createClientErrorAlert(err error, statusCode int, debugFields map[string]string, targetChannel string) *types.Alert {
+	severity := types.AlertWarning
 
 	if statusCode >= 500 {
-		severity = common.AlertError
+		severity = types.AlertError
 	}
 
 	if targetChannel == "" {
 		targetChannel = NA
 	}
 
-	alert := common.NewAlert(severity)
+	alert := types.NewAlert(severity)
 
 	alert.CorrelationID = fmt.Sprintf("__client_error_%s_%s", targetChannel, internal.Hash(err.Error()))
 	alert.Header = fmt.Sprintf(":status: Client error %d", statusCode)
@@ -459,7 +459,7 @@ func (s *Server) createClientErrorAlert(err error, statusCode int, debugFields m
 
 // queueAlert serializes the alert and sends it to the alert queue.
 // Any returned errors are considered retryable, as they typically indicate transient queuing issues.
-func (s *Server) queueAlert(ctx context.Context, alert *common.Alert) error {
+func (s *Server) queueAlert(ctx context.Context, alert *types.Alert) error {
 	// Serialize the alert to JSON
 	// This really can't fail, but if it does, we log the error and return nil.
 	// Errors from this method are supposed to indicate retryable queuing errors, not fatal serialization errors.
@@ -640,7 +640,7 @@ func timeoutResponse(c *gin.Context) {
 	c.JSON(http.StatusServiceUnavailable, errorResponse{Error: "Request timeout"})
 }
 
-func debugGetAlertChannelOrRouteKey(c *gin.Context, alert *common.Alert) string {
+func debugGetAlertChannelOrRouteKey(c *gin.Context, alert *types.Alert) string {
 	if alert.SlackChannelID != "" {
 		return fmt.Sprintf("%s (channel ID from alert body)", alert.SlackChannelID)
 	}
@@ -658,7 +658,7 @@ func debugGetAlertChannelOrRouteKey(c *gin.Context, alert *common.Alert) string 
 	return "[no channel ID or route key found]"
 }
 
-func debugGetAlertFields(alert *common.Alert) map[string]string {
+func debugGetAlertFields(alert *types.Alert) map[string]string {
 	if alert == nil {
 		return nil
 	}

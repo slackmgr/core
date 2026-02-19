@@ -7,24 +7,24 @@ import (
 	"fmt"
 	"time"
 
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
-	"github.com/peteraglen/slack-manager/manager/internal/models"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/types"
 )
 
 const alertsTotal = "processed_alerts_total"
 
-type cmdFunc func(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) (bool, error)
+type cmdFunc func(ctx context.Context, issue *models.Issue, cmd *models.Command, logger types.Logger) (bool, error)
 
 type channelManager struct {
 	channelID       string
 	slackClient     SlackClient
-	db              common.DB
+	db              types.DB
 	webhookHandlers []WebhookHandler
 	locker          ChannelLocker
-	logger          common.Logger
-	metrics         common.Metrics
+	logger          types.Logger
+	metrics         types.Metrics
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 	alertCh         chan *models.Alert
@@ -33,7 +33,7 @@ type channelManager struct {
 	cmdFuncs        map[models.CommandAction]cmdFunc
 }
 
-func newChannelManager(channelID string, slackClient SlackClient, db common.DB, locker ChannelLocker, logger common.Logger, metrics common.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
+func newChannelManager(channelID string, slackClient SlackClient, db types.DB, locker ChannelLocker, logger types.Logger, metrics types.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
 	managerSettings *models.ManagerSettingsWrapper,
 ) *channelManager {
 	logger = logger.WithField("channel_id", channelID)
@@ -311,7 +311,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	return nil
 }
 
-func (c *channelManager) cleanAlertEscalations(ctx context.Context, alert *models.Alert, logger common.Logger) error {
+func (c *channelManager) cleanAlertEscalations(ctx context.Context, alert *models.Alert, logger types.Logger) error {
 	for _, escalation := range alert.Escalation {
 		if escalation.MoveToChannel == "" {
 			continue
@@ -402,7 +402,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 	// No processing state found means this is the first time we are processing this channel.
 	// Create a new processing state and proceed.
 	if processingState == nil {
-		processingState = common.NewChannelProcessingState(c.channelID)
+		processingState = types.NewChannelProcessingState(c.channelID)
 		c.logger.Debug("No channel processing state found in database, creating a new one")
 	}
 
@@ -610,9 +610,9 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 
 // createNewIssue creates a new issue with the specified alert, creates a new Slack post, and finally stores the issue in the database.
 // Some alerts may be ignored, for various reasons.
-func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert, logger common.Logger) error {
+func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert, logger types.Logger) error {
 	// Do not create a new issue for an alert that is already resolved
-	if alert.IssueFollowUpEnabled && alert.Severity == common.AlertResolved {
+	if alert.IssueFollowUpEnabled && alert.Severity == types.AlertResolved {
 		logger.Info("Resolved alert ignored for new issue")
 		return nil
 	}
@@ -642,8 +642,8 @@ func (c *channelManager) saveIssuesToDB(ctx context.Context, issues []*models.Is
 		return nil
 	}
 
-	// Convert issues to common.Issue slice for db.SaveIssues
-	issuesToUpdate := make([]common.Issue, len(issues))
+	// Convert issues to types.Issue slice for db.SaveIssues
+	issuesToUpdate := make([]types.Issue, len(issues))
 
 	for i, issue := range issues {
 		issuesToUpdate[i] = issue
@@ -658,7 +658,7 @@ func (c *channelManager) saveIssuesToDB(ctx context.Context, issues []*models.Is
 	return nil
 }
 
-func (c *channelManager) terminateIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) (bool, error) {
+func (c *channelManager) terminateIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger types.Logger) (bool, error) {
 	logger.Info("Cmd: terminate issue")
 
 	if issue != nil {
@@ -669,7 +669,7 @@ func (c *channelManager) terminateIssue(ctx context.Context, issue *models.Issue
 	return false, c.slackClient.DeletePost(ctx, cmd.SlackChannelID, cmd.SlackPostID)
 }
 
-func (c *channelManager) resolveIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) (bool, error) {
+func (c *channelManager) resolveIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger types.Logger) (bool, error) {
 	logger.Info("Cmd: resolve issue")
 
 	issue.RegisterResolveRequest(cmd.UserRealName)
@@ -677,7 +677,7 @@ func (c *channelManager) resolveIssue(ctx context.Context, issue *models.Issue, 
 	return true, c.slackClient.UpdateSingleIssue(ctx, issue, "resolve issue request")
 }
 
-func (c *channelManager) unresolveIssue(ctx context.Context, issue *models.Issue, _ *models.Command, logger common.Logger) (bool, error) {
+func (c *channelManager) unresolveIssue(ctx context.Context, issue *models.Issue, _ *models.Command, logger types.Logger) (bool, error) {
 	logger.Info("Cmd: unresolve issue")
 
 	issue.RegisterUnresolveRequest()
@@ -685,7 +685,7 @@ func (c *channelManager) unresolveIssue(ctx context.Context, issue *models.Issue
 	return true, c.slackClient.UpdateSingleIssue(ctx, issue, "unresolve issue request")
 }
 
-func (c *channelManager) investigateIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) (bool, error) {
+func (c *channelManager) investigateIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger types.Logger) (bool, error) {
 	logger.Info("Cmd: investigate issue")
 
 	issue.RegisterInvestigateRequest(cmd.UserRealName)
@@ -693,7 +693,7 @@ func (c *channelManager) investigateIssue(ctx context.Context, issue *models.Iss
 	return true, c.slackClient.UpdateSingleIssue(ctx, issue, "investigate issue request")
 }
 
-func (c *channelManager) uninvestigateIssue(ctx context.Context, issue *models.Issue, _ *models.Command, logger common.Logger) (bool, error) {
+func (c *channelManager) uninvestigateIssue(ctx context.Context, issue *models.Issue, _ *models.Command, logger types.Logger) (bool, error) {
 	logger.Info("Cmd: uninvestigate issue")
 
 	issue.RegisterUninvestigateRequest()
@@ -701,7 +701,7 @@ func (c *channelManager) uninvestigateIssue(ctx context.Context, issue *models.I
 	return true, c.slackClient.UpdateSingleIssue(ctx, issue, "uninvestigate issue request")
 }
 
-func (c *channelManager) muteIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) (bool, error) {
+func (c *channelManager) muteIssue(ctx context.Context, issue *models.Issue, cmd *models.Command, logger types.Logger) (bool, error) {
 	logger.Info("Cmd: mute issue")
 
 	issue.RegisterMuteRequest(cmd.UserRealName)
@@ -709,7 +709,7 @@ func (c *channelManager) muteIssue(ctx context.Context, issue *models.Issue, cmd
 	return true, c.slackClient.UpdateSingleIssue(ctx, issue, "mute issue request")
 }
 
-func (c *channelManager) unmuteIssue(ctx context.Context, issue *models.Issue, _ *models.Command, logger common.Logger) (bool, error) {
+func (c *channelManager) unmuteIssue(ctx context.Context, issue *models.Issue, _ *models.Command, logger types.Logger) (bool, error) {
 	logger.Info("Cmd: unmute issue")
 
 	issue.RegisterUnmuteRequest()
@@ -717,7 +717,7 @@ func (c *channelManager) unmuteIssue(ctx context.Context, issue *models.Issue, _
 	return true, c.slackClient.UpdateSingleIssue(ctx, issue, "unmute issue request")
 }
 
-func (c *channelManager) handleMoveIssueCmd(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) (bool, error) {
+func (c *channelManager) handleMoveIssueCmd(ctx context.Context, issue *models.Issue, cmd *models.Command, logger types.Logger) (bool, error) {
 	logger.Info("Cmd: move issue")
 
 	if cmd.Parameters == nil {
@@ -739,7 +739,7 @@ func (c *channelManager) handleMoveIssueCmd(ctx context.Context, issue *models.I
 	return false, c.moveIssue(ctx, issue, targetChannelStr, models.MoveIssueReasonUserCommand, cmd.UserRealName, logger)
 }
 
-func (c *channelManager) showIssueOptionButtons(ctx context.Context, issue *models.Issue, _ *models.Command, logger common.Logger) (bool, error) {
+func (c *channelManager) showIssueOptionButtons(ctx context.Context, issue *models.Issue, _ *models.Command, logger types.Logger) (bool, error) {
 	logger.Info("Cmd: show issue option buttons")
 
 	issue.RegisterShowOptionButtonsRequest()
@@ -747,7 +747,7 @@ func (c *channelManager) showIssueOptionButtons(ctx context.Context, issue *mode
 	return true, c.slackClient.UpdateSingleIssue(ctx, issue, "show issue option buttons request")
 }
 
-func (c *channelManager) hideIssueOptionButtons(ctx context.Context, issue *models.Issue, _ *models.Command, logger common.Logger) (bool, error) {
+func (c *channelManager) hideIssueOptionButtons(ctx context.Context, issue *models.Issue, _ *models.Command, logger types.Logger) (bool, error) {
 	logger.Info("Cmd: hide issue option buttons")
 
 	issue.RegisterHideOptionButtonsRequest()
@@ -755,7 +755,7 @@ func (c *channelManager) hideIssueOptionButtons(ctx context.Context, issue *mode
 	return true, c.slackClient.UpdateSingleIssue(ctx, issue, "hide issue option buttons request")
 }
 
-func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, targetChannel string, reason models.MoveIssueReason, username string, logger common.Logger) error {
+func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, targetChannel string, reason models.MoveIssueReason, username string, logger types.Logger) error {
 	if issue.LastAlert.SlackChannelID == targetChannel {
 		logger.Errorf("Cannot move issue %s to the same channel", issue.CorrelationID)
 		return nil
@@ -825,7 +825,7 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 	return nil
 }
 
-func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue, cmd *models.Command, logger common.Logger) (bool, error) {
+func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue, cmd *models.Command, logger types.Logger) (bool, error) {
 	logger.Info("Handle issue webhook")
 
 	if cmd.WebhookParameters == nil {
@@ -858,7 +858,7 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 		return false, fmt.Errorf("no webhook handler found for target %s", webhook.URL)
 	}
 
-	data := &common.WebhookCallback{
+	data := &types.WebhookCallback{
 		ID:            cmd.WebhookParameters.WebhookID,
 		Timestamp:     time.Now(),
 		UserID:        cmd.UserID,
@@ -900,7 +900,7 @@ func (c *channelManager) releaseLock(lock ChannelLock) {
 	}
 }
 
-func postWebhook(ctx context.Context, handler WebhookHandler, target string, data *common.WebhookCallback, logger common.Logger) {
+func postWebhook(ctx context.Context, handler WebhookHandler, target string, data *types.WebhookCallback, logger types.Logger) {
 	if err := handler.HandleWebhook(ctx, target, data, logger); err != nil {
 		logger.Errorf("Failed to handle webhook: %s", err)
 	}

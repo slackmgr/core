@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/eko/gocache/lib/v4/store"
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
-	"github.com/peteraglen/slack-manager/manager/internal/models"
-	"github.com/peteraglen/slack-manager/manager/internal/slack/controllers"
 	slack "github.com/slack-go/slack"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/core/manager/internal/slack/controllers"
+	"github.com/slackmgr/types"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -49,13 +49,13 @@ type Client struct {
 	commandQueue    FifoQueueProducer
 	issueFinder     IssueFinder
 	cacheStore      store.StoreInterface
-	logger          common.Logger
-	metrics         common.Metrics
+	logger          types.Logger
+	metrics         types.Metrics
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func New(commandHandler FifoQueueProducer, cacheStore store.StoreInterface, logger common.Logger, metrics common.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *Client {
+func New(commandHandler FifoQueueProducer, cacheStore store.StoreInterface, logger types.Logger, metrics types.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *Client {
 	return &Client{
 		commandQueue:    commandHandler,
 		cacheStore:      cacheStore,
@@ -670,11 +670,11 @@ func getWebhookButtons(issue *models.Issue) []slack.BlockElement {
 	buttons := []slack.BlockElement{}
 
 	for index, hook := range issue.LastAlert.Webhooks {
-		if issue.IsResolved() && (hook.DisplayMode == "" || hook.DisplayMode == common.WebhookDisplayModeOpenIssue) {
+		if issue.IsResolved() && (hook.DisplayMode == "" || hook.DisplayMode == types.WebhookDisplayModeOpenIssue) {
 			continue
 		}
 
-		if !issue.IsResolved() && hook.DisplayMode == common.WebhookDisplayModeResolvedIssue {
+		if !issue.IsResolved() && hook.DisplayMode == types.WebhookDisplayModeResolvedIssue {
 			continue
 		}
 
@@ -718,24 +718,24 @@ func (c *Client) getStatusEmoji(issue *models.Issue, action models.SlackAction, 
 	}
 
 	switch issue.LastAlert.Severity {
-	case common.AlertPanic:
+	case types.AlertPanic:
 		if issue.IsEmojiMuted || method == postUpdateMethodUpdateDeleted {
 			return c.managerSettings.GetSettings().IssueStatus.MutePanicEmoji
 		}
 		return c.managerSettings.GetSettings().IssueStatus.PanicEmoji
-	case common.AlertError:
+	case types.AlertError:
 		if issue.IsEmojiMuted || method == postUpdateMethodUpdateDeleted {
 			return c.managerSettings.GetSettings().IssueStatus.MuteErrorEmoji
 		}
 		return c.managerSettings.GetSettings().IssueStatus.ErrorEmoji
-	case common.AlertWarning:
+	case types.AlertWarning:
 		if issue.IsEmojiMuted || method == postUpdateMethodUpdateDeleted {
 			return c.managerSettings.GetSettings().IssueStatus.MuteWarningEmoji
 		}
 		return c.managerSettings.GetSettings().IssueStatus.WarningEmoji
-	case common.AlertResolved:
+	case types.AlertResolved:
 		return c.managerSettings.GetSettings().IssueStatus.ResolvedEmoji
-	case common.AlertInfo:
+	case types.AlertInfo:
 		return c.managerSettings.GetSettings().IssueStatus.InfoEmoji
 	default:
 		c.logger.WithFields(issue.LogFields()).Errorf("Unknown alert severity %s", issue.LastAlert.Severity)

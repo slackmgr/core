@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	common "github.com/peteraglen/slack-manager-common"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/segmentio/ksuid"
+	"github.com/slackmgr/types"
 )
 
 // ackNackTimeout is the timeout for ack/nack operations.
@@ -85,7 +85,7 @@ type RedisFifoQueueProducer struct {
 	client      redis.UniversalClient
 	opts        *RedisFifoQueueOptions
 	name        string
-	logger      common.Logger
+	logger      types.Logger
 	initialized bool
 }
 
@@ -127,7 +127,7 @@ type RedisFifoQueue struct {
 // Use this when the service only needs to send messages and doesn't need to receive.
 // The client should be a configured Redis client (can be a single node, sentinel, or cluster client).
 // The name is used as part of the Redis key prefix and for identification.
-func NewRedisFifoQueueProducer(client redis.UniversalClient, name string, logger common.Logger, opts ...RedisFifoQueueOption) *RedisFifoQueueProducer {
+func NewRedisFifoQueueProducer(client redis.UniversalClient, name string, logger types.Logger, opts ...RedisFifoQueueOption) *RedisFifoQueueProducer {
 	options := newRedisFifoQueueOptions()
 
 	for _, o := range opts {
@@ -152,7 +152,7 @@ func NewRedisFifoQueueProducer(client redis.UniversalClient, name string, logger
 // The name is used as part of the Redis key prefix and for identification.
 //
 // For write-only usage (e.g., API server), consider using NewRedisFifoQueueProducer instead.
-func NewRedisFifoQueue(client redis.UniversalClient, locker ChannelLocker, name string, logger common.Logger, opts ...RedisFifoQueueOption) *RedisFifoQueue {
+func NewRedisFifoQueue(client redis.UniversalClient, locker ChannelLocker, name string, logger types.Logger, opts ...RedisFifoQueueOption) *RedisFifoQueue {
 	producer := NewRedisFifoQueueProducer(client, name, logger, opts...)
 
 	// Update logger component for full queue
@@ -301,7 +301,7 @@ func (q *RedisFifoQueue) Send(ctx context.Context, slackChannelID, dedupID, body
 // Messages are sent to the provided channel, which is closed when Receive returns.
 // The receiver uses the shared knownStreams map which is updated by Send() for
 // immediate discovery of new streams created by in-process senders.
-func (q *RedisFifoQueue) Receive(ctx context.Context, sinkCh chan<- *common.FifoQueueItem) error {
+func (q *RedisFifoQueue) Receive(ctx context.Context, sinkCh chan<- *types.FifoQueueItem) error {
 	defer close(sinkCh)
 
 	if !q.initialized {
@@ -543,7 +543,7 @@ func (q *RedisFifoQueue) cleanupStaleStreams(ctx context.Context) ([]string, err
 // no other consumer can read from that stream.
 // Returns true if at least one message was read.
 // Uses the shared knownStreams via getKnownStreams() for safe concurrent access.
-func (q *RedisFifoQueue) readMessagesWithLocking(ctx context.Context, sinkCh chan<- *common.FifoQueueItem) (bool, error) {
+func (q *RedisFifoQueue) readMessagesWithLocking(ctx context.Context, sinkCh chan<- *types.FifoQueueItem) (bool, error) {
 	knownStreams := q.getKnownStreams()
 
 	if len(knownStreams) == 0 {
@@ -614,7 +614,7 @@ func (q *RedisFifoQueue) getKnownStreams() map[string]bool {
 // then falls back to reading new messages if no pending messages exist.
 // Returns true if a message was read.
 // The lock is passed to the message's ack/nack functions so it can be released after processing.
-func (q *RedisFifoQueue) readOneMessageFromStream(ctx context.Context, streamKey, channelID string, lock ChannelLock, sinkCh chan<- *common.FifoQueueItem) (bool, error) {
+func (q *RedisFifoQueue) readOneMessageFromStream(ctx context.Context, streamKey, channelID string, lock ChannelLock, sinkCh chan<- *types.FifoQueueItem) (bool, error) {
 	// First, check for pending messages that need to be reclaimed.
 	// This ensures strict ordering: pending messages must be processed before new ones.
 	// If this fails, we must not read new messages as it could break ordering.
@@ -696,7 +696,7 @@ func (q *RedisFifoQueue) tryClaimPendingMessage(ctx context.Context, streamKey s
 
 // processMessageWithLock processes a single message and sends it to the sink channel.
 // The lock is stored in the ack/nack closures so it can be released after processing.
-func (q *RedisFifoQueue) processMessageWithLock(ctx context.Context, streamKey, channelID string, msg redis.XMessage, lock ChannelLock, sinkCh chan<- *common.FifoQueueItem) error {
+func (q *RedisFifoQueue) processMessageWithLock(ctx context.Context, streamKey, channelID string, msg redis.XMessage, lock ChannelLock, sinkCh chan<- *types.FifoQueueItem) error {
 	body, ok := msg.Values["body"].(string)
 	if !ok {
 		q.logger.WithField("message_id", msg.ID).Error("Message has no body, acknowledging and skipping")
@@ -734,7 +734,7 @@ func (q *RedisFifoQueue) processMessageWithLock(ctx context.Context, streamKey, 
 		})
 	}
 
-	item := &common.FifoQueueItem{
+	item := &types.FifoQueueItem{
 		MessageID:        msg.ID,
 		SlackChannelID:   channelID,
 		ReceiveTimestamp: time.Now(),

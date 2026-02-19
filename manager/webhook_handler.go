@@ -3,7 +3,7 @@ package manager
 import (
 	"context"
 
-	common "github.com/peteraglen/slack-manager-common"
+	"github.com/slackmgr/types"
 )
 
 // WebhookHandler is an interface for handling alert webhooks (i.e. issue callbacks).
@@ -17,5 +17,5 @@ type WebhookHandler interface {
 	// HandleWebhook handles the webhook target, with the specified callback data.
 	// If successful, it should DEBUG log the send action and return nil.
 	// If unsuccessful, it should return the error (without logging it).
-	HandleWebhook(ctx context.Context, target string, data *common.WebhookCallback, logger common.Logger) error
+	HandleWebhook(ctx context.Context, target string, data *types.WebhookCallback, logger types.Logger) error
 }

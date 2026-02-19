@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/peteraglen/slack-manager/config"
 	"github.com/slack-go/slack"
+	"github.com/slackmgr/core/config"
 )
 
 //go:embed move_issue_modal_assets/*

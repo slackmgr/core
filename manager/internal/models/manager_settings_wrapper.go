@@ -3,7 +3,7 @@ package models
 import (
 	"sync"
 
-	"github.com/peteraglen/slack-manager/config"
+	"github.com/slackmgr/core/config"
 )
 
 // ManagerSettingsWrapper wraps the ManagerSettings configuration with thread-safe access.

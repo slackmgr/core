@@ -1,7 +1,7 @@
 package models
 
 import (
-	commonlib "github.com/peteraglen/slack-manager-common"
+	"github.com/slackmgr/types"
 )
 
 // InFlightMessage represents a message that is currently being processed.
@@ -17,4 +17,4 @@ type InFlightMessage interface {
 
 // InFlightMsgConstructor is a function type that constructs an InFlightMessage from a FifoQueueItem.
 // The actual implementation may vary based on the message type (e.g., Alert, Command).
-type InFlightMsgConstructor func(queueItem *commonlib.FifoQueueItem) (InFlightMessage, error)
+type InFlightMsgConstructor func(queueItem *types.FifoQueueItem) (InFlightMessage, error)

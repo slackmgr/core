@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	common "github.com/peteraglen/slack-manager-common"
+	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +23,7 @@ func TestNewCommandFromQueueItem(t *testing.T) {
 	t.Run("returns error for empty body", func(t *testing.T) {
 		t.Parallel()
 
-		queueItem := &common.FifoQueueItem{
+		queueItem := &types.FifoQueueItem{
 			Body: "",
 		}
 
@@ -37,7 +37,7 @@ func TestNewCommandFromQueueItem(t *testing.T) {
 	t.Run("returns error for invalid JSON", func(t *testing.T) {
 		t.Parallel()
 
-		queueItem := &common.FifoQueueItem{
+		queueItem := &types.FifoQueueItem{
 			Body: "invalid json",
 		}
 
@@ -66,7 +66,7 @@ func TestNewCommandFromQueueItem(t *testing.T) {
 		ackCalled := false
 		nackCalled := false
 
-		queueItem := &common.FifoQueueItem{
+		queueItem := &types.FifoQueueItem{
 			Body: string(jsonBody),
 			Ack:  func() { ackCalled = true },
 			Nack: func() { nackCalled = true },
@@ -109,7 +109,7 @@ func TestNewCommandFromQueueItem(t *testing.T) {
 		jsonBody, err := json.Marshal(cmdData)
 		require.NoError(t, err)
 
-		queueItem := &common.FifoQueueItem{
+		queueItem := &types.FifoQueueItem{
 			Body: string(jsonBody),
 		}
 

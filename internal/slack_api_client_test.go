@@ -7,24 +7,24 @@ import (
 
 	gocache_store "github.com/eko/gocache/store/go_cache/v4"
 	gocache "github.com/patrickmn/go-cache"
-	common "github.com/peteraglen/slack-manager-common"
-	"github.com/peteraglen/slack-manager/config"
-	"github.com/peteraglen/slack-manager/internal"
 	"github.com/slack-go/slack"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type mockLogger struct{}
 
-func (m *mockLogger) Debug(msg string)                               {}
-func (m *mockLogger) Debugf(format string, args ...any)              {}
-func (m *mockLogger) Info(msg string)                                {}
-func (m *mockLogger) Infof(format string, args ...any)               {}
-func (m *mockLogger) Error(msg string)                               {}
-func (m *mockLogger) Errorf(format string, args ...any)              {}
-func (m *mockLogger) WithField(key string, value any) common.Logger  { return m }
-func (m *mockLogger) WithFields(fields map[string]any) common.Logger { return m }
+func (m *mockLogger) Debug(msg string)                              {}
+func (m *mockLogger) Debugf(format string, args ...any)             {}
+func (m *mockLogger) Info(msg string)                               {}
+func (m *mockLogger) Infof(format string, args ...any)              {}
+func (m *mockLogger) Error(msg string)                              {}
+func (m *mockLogger) Errorf(format string, args ...any)             {}
+func (m *mockLogger) WithField(key string, value any) types.Logger  { return m }
+func (m *mockLogger) WithFields(fields map[string]any) types.Logger { return m }
 
 type mockMetrics struct {
 	counters map[string]int

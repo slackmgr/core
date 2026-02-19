@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/peteraglen/slack-manager/internal"
+	"github.com/slackmgr/core/internal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

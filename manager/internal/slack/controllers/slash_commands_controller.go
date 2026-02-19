@@ -3,12 +3,12 @@ package controllers
 import (
 	"context"
 
-	common "github.com/peteraglen/slack-manager-common"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/types"
 )
 
 type slashCommandsController struct {
-	logger common.Logger
+	logger types.Logger
 }
 
 func (c *slashCommandsController) handleEventTypeSlashCommands(_ context.Context, evt *socketmode.Event, clt SocketModeClient) {

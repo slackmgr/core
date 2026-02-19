@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	common "github.com/peteraglen/slack-manager-common"
+	"github.com/slackmgr/types"
 )
 
 // Default values for ManagerSettings general fields.
@@ -30,7 +30,7 @@ const (
 	// Valid severities are: panic (highest), error, warning, info (lowest).
 	// Severity affects issue ordering when reordering is enabled - higher severity
 	// issues appear at the bottom of the channel for visibility.
-	DefaultAlertSeverity = common.AlertError
+	DefaultAlertSeverity = types.AlertError
 
 	// DefaultAppFriendlyName is the application name shown in Slack messages and modals.
 	// Used in greeting messages, help text, and error dialogs to identify the bot.
@@ -283,7 +283,7 @@ type ManagerSettings struct {
 	// Valid values: "panic" (highest), "error", "warning". Info-level alerts are not allowed
 	// as the default since they typically don't require immediate attention.
 	// Default: "error"
-	DefaultAlertSeverity common.AlertSeverity `json:"defaultAlertSeverity" yaml:"defaultAlertSeverity"`
+	DefaultAlertSeverity types.AlertSeverity `json:"defaultAlertSeverity" yaml:"defaultAlertSeverity"`
 
 	// DefaultIssueArchivingDelaySeconds is the time (in seconds) after resolution before
 	// an issue is marked as archived. During this period, new alerts can still re-open the
@@ -623,7 +623,7 @@ func (s *ManagerSettings) InitAndValidate() error {
 			s.DefaultPostIconEmoji += ":"
 		}
 
-		if !common.IconRegex.MatchString(s.DefaultPostIconEmoji) {
+		if !types.IconRegex.MatchString(s.DefaultPostIconEmoji) {
 			return errors.New("default icon emoji must be on the format \":emoji:\"")
 		}
 	}
@@ -632,10 +632,10 @@ func (s *ManagerSettings) InitAndValidate() error {
 		s.DefaultPostUsername = DefaultPostUsername
 	}
 
-	allowedDefaultAlertSeverities := map[common.AlertSeverity]struct{}{
-		common.AlertPanic:   {},
-		common.AlertError:   {},
-		common.AlertWarning: {},
+	allowedDefaultAlertSeverities := map[types.AlertSeverity]struct{}{
+		types.AlertPanic:   {},
+		types.AlertError:   {},
+		types.AlertWarning: {},
 	}
 
 	if s.DefaultAlertSeverity == "" {
@@ -985,7 +985,7 @@ func initReactionEmojiSlice(emojis []string, defaultEmoji string, fieldName stri
 			emoji += ":"
 		}
 
-		if !common.IconRegex.MatchString(emoji) {
+		if !types.IconRegex.MatchString(emoji) {
 			return nil, fmt.Errorf("%s[%d] %q is not a valid emoji format (expected :emoji:)", fieldName, i, emojis[i])
 		}
 
@@ -1007,7 +1007,7 @@ func initReactionEmojiSlice(emojis []string, defaultEmoji string, fieldName stri
 func initStatusEmoji(emoji, defaultEmoji string) string {
 	emoji = strings.TrimSpace(emoji)
 
-	if !common.IconRegex.MatchString(emoji) {
+	if !types.IconRegex.MatchString(emoji) {
 		return defaultEmoji
 	}
 
