@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-19
+
 ### Changed
 - Rename module to `github.com/slackmgr/core`: update module path from `github.com/peteraglen/slack-manager`, all import paths, and CHANGELOG comparison links
 - Update common library dependency to `github.com/slackmgr/types` (renamed from `github.com/peteraglen/slack-manager-common`); replace stale `commonlib` import alias with the unaliased `types` package name throughout
@@ -99,7 +101,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/slackmgr/core/compare/v0.1.8...v0.2.0
 [0.1.8]: https://github.com/slackmgr/core/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/slackmgr/core/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/slackmgr/core/compare/v0.1.5...v0.1.6
