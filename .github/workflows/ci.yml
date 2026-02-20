@@ -78,10 +78,17 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v6.0.2
 
-    - name: Run Gosec Security Scanner
-      uses: securego/gosec@v2.23.0
+    - name: Set up Go
+      uses: actions/setup-go@v6.2.0
       with:
-        args: '-fmt sarif -out results.sarif ./...'
+        go-version-file: 'go.mod'
+        cache: false
+
+    - name: Install gosec
+      run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+    - name: Run Gosec Security Scanner
+      run: gosec -fmt sarif -out results.sarif ./...
 
     - name: Upload Gosec results
       if: always()
