@@ -101,12 +101,9 @@ func (c *channelManager) run(ctx context.Context) {
 				return
 			}
 
-			// Process the alert. If successful, ack the alert, otherwise nack it for reprocessing.
+			// Process the alert. Ack or nack happens inside processAlert, depending on success or type of failure.
 			if err := c.processAlert(ctx, alert); err != nil {
-				alert.Nack()
 				c.logger.WithFields(alert.LogFields()).Errorf("Failed to process alert: %s", err)
-			} else {
-				alert.Ack()
 			}
 
 			// Make sure the issue processor is running after an alert is received.
@@ -260,6 +257,7 @@ func (c *channelManager) findIssueBySlackPost(ctx context.Context, slackPostID s
 func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) error {
 	lock, err := c.obtainLock(ctx, c.channelID, 5*time.Minute, 30*time.Second)
 	if err != nil {
+		alert.Nack()
 		return fmt.Errorf("failed to obtain lock for channel %s after 30 seconds: %w", c.channelID, err)
 	}
 
@@ -270,6 +268,10 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	alert.SlackChannelName = c.slackClient.GetChannelName(ctx, c.channelID)
 
 	if err := alert.Validate(); err != nil {
+		// Non-retryable: the alert data is malformed and will never become valid.
+		// This really should not happen, since the API is expected to reject such alerts before queuing them.
+		// Ack the alert to remove it from the queue, and log the error for debugging.
+		alert.Ack()
 		return fmt.Errorf("alert is invalid: %w", err)
 	}
 
@@ -278,17 +280,22 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	// If this alert was injected directly into the queue (bypassing the API), we log and discard it.
 	if len(alert.Webhooks) > 0 && c.cfg.EncryptionKey == "" {
 		c.logger.WithFields(alert.LogFields()).Error("Ignoring alert with webhook payloads: no encryption key is configured")
+		alert.Ack()
 		return nil
 	}
 
 	logger := c.logger.WithFields(alert.LogFields())
 
 	if err := c.cleanAlertEscalations(ctx, alert, logger); err != nil {
-		logger.Errorf("Failed to clean alert escalations: %s", err)
+		// Transient: Slack API call failed; nack so the alert is retried.
+		alert.Nack()
+		return fmt.Errorf("failed to clean alert escalations: %w", err)
 	}
 
 	_, issueBody, err := c.db.FindOpenIssueByCorrelationID(ctx, c.channelID, alert.CorrelationID)
 	if err != nil {
+		// Transient: database call failed; nack so the alert is retried.
+		alert.Nack()
 		return fmt.Errorf("failed to find open issue by correlation ID: %w", err)
 	}
 
@@ -296,29 +303,45 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		issue := &models.Issue{}
 
 		if err := json.Unmarshal(issueBody, issue); err != nil {
+			// Non-retryable: the issue record in the DB is corrupt; retrying hits the same data.
+			alert.Ack()
 			return fmt.Errorf("failed to unmarshal issue body: %w", err)
 		}
 
 		if issue.LastAlert == nil {
+			// Non-retryable: corrupt DB state that retrying cannot repair.
+			alert.Ack()
 			return errors.New("issue has nil LastAlert after unmarshal")
 		}
 
 		if err := c.addAlertToExistingIssue(ctx, issue, alert); err != nil {
+			// Transient: database or Slack API call failed; nack so the alert is retried.
+			alert.Nack()
 			return fmt.Errorf("failed to add alert to existing issue: %w", err)
 		}
 	} else {
 		if err := c.createNewIssue(ctx, alert, logger); err != nil {
+			// Transient: database or Slack API call failed; nack so the alert is retried.
+			alert.Nack()
 			return fmt.Errorf("failed to create new issue: %w", err)
 		}
 	}
 
 	if err := c.db.SaveAlert(ctx, &alert.Alert); err != nil {
+		// Transient: database call failed; nack so the alert is retried.
+		alert.Nack()
 		return fmt.Errorf("failed to save alert to database: %w", err)
 	}
+
+	// Ack the alert to remove it from the queue, since it has been successfully processed.
+	alert.Ack()
 
 	return nil
 }
 
+// cleanAlertEscalations ensures that escalations that will move the issue to another channel, actually point to valid alert channels.
+// If not, the move directive is removed.
+// Errors returned from this method indicate a Slack API error, typically of a transient nature.
 func (c *channelManager) cleanAlertEscalations(ctx context.Context, alert *models.Alert, logger types.Logger) error {
 	for _, escalation := range alert.Escalation {
 		if escalation.MoveToChannel == "" {
