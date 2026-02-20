@@ -24,11 +24,26 @@ go test -v -run TestName ./path/to/package
 go test -v ./manager/internal/models/
 ```
 
-**IMPORTANT:** Both `make test` and `make lint` MUST pass with zero errors before committing any changes. This applies regardless of whether the errors were introduced by your changes or existed previously - all issues must be resolved before committing. Always run both commands to verify code quality.
+## Code Quality Requirements
+
+**CRITICAL:** Before committing any changes, you MUST ensure both `make test` and `make lint` pass without errors. This applies to ALL changes, regardless of who made them (human, Claude, or other tools/linters).
+
+```bash
+# Always run before committing:
+make test    # Must pass: gosec, go fmt, go test (with race detector), go vet
+make lint    # Must pass: golangci-lint with zero issues
+```
+
+If either command fails:
+1. Fix all reported issues
+2. Re-run both commands to verify
+3. Only commit after both pass
+
+This ensures code quality, prevents broken releases, and maintains consistency across the codebase.
 
 ## Keeping README.md in Sync
 
-**After every code change, check whether `README.md` needs updating.** The README is the public-facing documentation and must always reflect the actual code.
+After every code change, check whether `README.md` needs updating. The README is the public-facing documentation and must always reflect the actual code.
 
 ## Tagging and Releases
 
