@@ -141,6 +141,12 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 		}
 
 		for _, alert := range channelAlerts {
+			if len(alert.Webhooks) > 0 && s.cfg.EncryptionKey == "" {
+				err := errors.New("alert contains webhooks, but no encryption key is configured")
+				s.writeErrorResponse(c, err, http.StatusBadRequest, alert)
+				return
+			}
+
 			for _, w := range alert.Webhooks {
 				if err := internal.EncryptWebhookPayload(w, []byte(s.cfg.EncryptionKey)); err != nil {
 					err = fmt.Errorf("failed to encrypt webhook payload: %w", err)
@@ -203,6 +209,10 @@ func (s *Server) processQueuedAlert(ctx context.Context, alert *types.Alert) err
 
 	// Encrypt any webhook payloads.
 	// Errors here are non-retryable, as they indicate invalid input or invalid API configuration.
+	if len(alert.Webhooks) > 0 && s.cfg.EncryptionKey == "" {
+		return newNonRetryableProcessingError("alert contains webhooks, but no encryption key is configured")
+	}
+
 	for _, w := range alert.Webhooks {
 		if err := internal.EncryptWebhookPayload(w, []byte(s.cfg.EncryptionKey)); err != nil {
 			return newNonRetryableProcessingError("failed to encrypt webhook payload: %w", err)

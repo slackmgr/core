@@ -102,6 +102,10 @@ func (m *Manager) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to validate configuration: %w", err)
 	}
 
+	if m.cfg.EncryptionKey == "" {
+		m.logger.Error("No encryption key configured. The manager will start, but alerts with webhook payloads will be dropped.")
+	}
+
 	if err := m.managerSettings.GetSettings().InitAndValidate(); err != nil {
 		return fmt.Errorf("failed to initialize channel settings: %w", err)
 	}

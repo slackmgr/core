@@ -80,12 +80,14 @@ func main() {
     commandQueue, _ := manager.NewRedisFifoQueue(redisClient, locker, "commands", logger).Init()
 
     apiCfg := &config.APIConfig{
-        RestPort:    "8080",
-        SlackClient: &config.SlackClientConfig{BotToken: "xoxb-...", AppToken: "xapp-..."},
+        RestPort:      "8080",
+        EncryptionKey: "your-32-char-key-here-0000000000", // optional; required for webhook support
+        SlackClient:   &config.SlackClientConfig{BotToken: "xoxb-...", AppToken: "xapp-..."},
     }
 
     managerCfg := &config.ManagerConfig{
-        SlackClient: &config.SlackClientConfig{BotToken: "xoxb-...", AppToken: "xapp-..."},
+        EncryptionKey: "your-32-char-key-here-0000000000", // must match APIConfig.EncryptionKey
+        SlackClient:   &config.SlackClientConfig{BotToken: "xoxb-...", AppToken: "xapp-..."},
     }
 
     server := restapi.New(alertProducer, nil, logger, metrics, apiCfg, nil)
@@ -144,6 +146,17 @@ locker := manager.NewRedisChannelLocker(redisClient)
 // No-op — suitable for single-instance deployments only
 locker := &manager.NoopChannelLocker{}
 ```
+
+## Webhook Support
+
+Alerts can include interactive webhook buttons that trigger HTTP POST requests when clicked. Webhook payloads are AES-256 encrypted in transit between the API and Manager, so both services must share an `EncryptionKey`.
+
+`EncryptionKey` is **optional**. When omitted:
+- Both the API server and Manager start normally, but emit a single `Error`-level log warning at startup.
+- The API rejects any alert that contains webhooks with HTTP 400.
+- The Manager drops any alert with webhooks that bypasses the API (e.g. injected directly into the queue), logging an error.
+
+When set, `EncryptionKey` must be the same 32-character alphanumeric string in both `APIConfig` and `ManagerConfig`.
 
 ## Slack App Setup
 

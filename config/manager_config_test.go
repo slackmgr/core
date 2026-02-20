@@ -43,7 +43,7 @@ func TestManagerConfig_Validate(t *testing.T) {
 			modify: func(c *config.ManagerConfig) {
 				c.EncryptionKey = ""
 			},
-			expectError: "encryption key must be a 32 character alphanumeric string",
+			expectError: "",
 		},
 		{
 			name: "encryption key too short",

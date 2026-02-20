@@ -1958,6 +1958,86 @@ func TestIgnoreAlert(t *testing.T) {
 	})
 }
 
+// --- Webhook Without Key Tests ---
+
+func TestServer_HandleAlerts_WebhooksWithoutKey(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns 400 for alert with webhooks when no encryption key configured", func(t *testing.T) {
+		t.Parallel()
+
+		// newTestServer creates a server with cfg.EncryptionKey = "" by default
+		server, _, channelInfo := newTestServer(t)
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: true,
+			UserCount:          10,
+		}, nil)
+
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		alert := types.Alert{
+			SlackChannelID: "C123",
+			Header:         "Test Alert",
+			Webhooks: []*types.Webhook{
+				{
+					ID:         "webhook-1",
+					URL:        "https://example.com/webhook",
+					ButtonText: "Click me",
+				},
+			},
+		}
+		body, _ := json.Marshal(alert)
+		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertJSONError(t, w, "no encryption key")
+	})
+
+	t.Run("accepts alert with webhooks when encryption key is configured", func(t *testing.T) {
+		t.Parallel()
+
+		server, queue, channelInfo := newTestServer(t)
+		server.cfg.EncryptionKey = "abcdefghijklmnopqrstuvwxyz123456"
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: true,
+			UserCount:          10,
+		}, nil)
+		queue.On("Send", mock.Anything, "C123", mock.Anything, mock.Anything).Return(nil)
+
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		alert := types.Alert{
+			SlackChannelID: "C123",
+			Header:         "Test Alert",
+			Webhooks: []*types.Webhook{
+				{
+					ID:         "webhook-1",
+					URL:        "https://example.com/webhook",
+					ButtonText: "Click me",
+				},
+			},
+		}
+		body, _ := json.Marshal(alert)
+		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusAccepted, w.Code)
+	})
+}
+
 // --- Raw Alert Consumer Tests ---
 
 type mockFifoQueueConsumer struct {

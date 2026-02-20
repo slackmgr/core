@@ -210,7 +210,7 @@ func NewDefaultManagerConfig() *ManagerConfig {
 // encountered, or nil if the configuration is valid.
 //
 // Validation includes:
-//   - EncryptionKey: must be exactly 32 alphanumeric characters
+//   - EncryptionKey: if non-empty, must be exactly 32 alphanumeric characters
 //   - CacheKeyPrefix: must not be empty (required for cache namespacing)
 //   - Location: must not be nil
 //   - SlackClient: must not be nil, and must pass its own validation
@@ -219,7 +219,7 @@ func NewDefaultManagerConfig() *ManagerConfig {
 //   - SocketModeMaxWorkers: must be between 10 and 1000
 //   - SocketModeDrainTimeout: must be between 2 seconds and 5 minutes
 func (c *ManagerConfig) Validate() error {
-	if !encryptionKeyRegex.MatchString(c.EncryptionKey) {
+	if c.EncryptionKey != "" && !encryptionKeyRegex.MatchString(c.EncryptionKey) {
 		return fmt.Errorf("encryption key must be a %d character alphanumeric string", EncryptionKeyLength)
 	}
 

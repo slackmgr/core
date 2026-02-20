@@ -123,6 +123,10 @@ func (s *Server) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to validate manager configuration: %w", err)
 	}
 
+	if s.cfg.EncryptionKey == "" {
+		s.logger.Error("No encryption key configured. The server will start, but alerts with webhook payloads will be rejected with HTTP 400.")
+	}
+
 	if err := s.apiSettings.InitAndValidate(s.logger); err != nil {
 		return fmt.Errorf("failed to initialize API settings: %w", err)
 	}

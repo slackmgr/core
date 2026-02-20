@@ -273,6 +273,14 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		return fmt.Errorf("alert is invalid: %w", err)
 	}
 
+	// Guard: alerts with webhooks require an encryption key to decrypt payloads.
+	// This should not normally happen - the API is expected to reject such alerts before queuing them.
+	// If this alert was injected directly into the queue (bypassing the API), we log and discard it.
+	if len(alert.Webhooks) > 0 && c.cfg.EncryptionKey == "" {
+		c.logger.WithFields(alert.LogFields()).Error("Ignoring alert with webhook payloads: no encryption key is configured")
+		return nil
+	}
+
 	logger := c.logger.WithFields(alert.LogFields())
 
 	if err := c.cleanAlertEscalations(ctx, alert, logger); err != nil {

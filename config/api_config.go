@@ -221,7 +221,7 @@ func NewDefaultAPIConfig() *APIConfig {
 //
 // Validation includes:
 //   - RestPort: must be a valid port number (1-65535)
-//   - EncryptionKey: must be exactly 32 alphanumeric characters
+//   - EncryptionKey: if non-empty, must be exactly 32 alphanumeric characters
 //   - CacheKeyPrefix: must not be empty
 //   - MaxUsersInAlertChannel: must be between 1 and 10,000
 //   - RateLimitPerAlertChannel: must not be nil, and all fields must be valid
@@ -231,7 +231,7 @@ func (c *APIConfig) Validate() error {
 		return err
 	}
 
-	if !encryptionKeyRegex.MatchString(c.EncryptionKey) {
+	if c.EncryptionKey != "" && !encryptionKeyRegex.MatchString(c.EncryptionKey) {
 		return fmt.Errorf("encryption key must be a %d character alphanumeric string", EncryptionKeyLength)
 	}
 

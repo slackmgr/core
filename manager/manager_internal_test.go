@@ -22,6 +22,7 @@ func (s *stubDB) MoveIssue(_ context.Context, _ types.Issue, _, _ string) error 
 func (s *stubDB) FindOpenIssueByCorrelationID(_ context.Context, _, _ string) (string, json.RawMessage, error) {
 	return "", nil, nil
 }
+
 func (s *stubDB) FindIssueBySlackPostID(_ context.Context, _, _ string) (string, json.RawMessage, error) {
 	return "", nil, nil
 }
@@ -37,6 +38,7 @@ func (s *stubDB) DeleteMoveMapping(_ context.Context, _, _ string) error { retur
 func (s *stubDB) SaveChannelProcessingState(_ context.Context, _ *types.ChannelProcessingState) error {
 	return nil
 }
+
 func (s *stubDB) FindChannelProcessingState(_ context.Context, _ string) (*types.ChannelProcessingState, error) {
 	return nil, nil
 }
@@ -49,6 +51,7 @@ func (s *stubFifoQueue) Name() string { return s.name }
 func (s *stubFifoQueue) Send(_ context.Context, _, _, _ string) error {
 	return nil
 }
+
 func (s *stubFifoQueue) Receive(_ context.Context, _ chan<- *types.FifoQueueItem) error {
 	return nil
 }

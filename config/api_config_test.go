@@ -78,7 +78,7 @@ func TestAPIConfig_Validate(t *testing.T) {
 			modify: func(c *config.APIConfig) {
 				c.EncryptionKey = ""
 			},
-			expectError: "encryption key must be a 32 character alphanumeric string",
+			expectError: "",
 		},
 		{
 			name: "encryption key too short",
