@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-02-20
+
+### Changed
+- Make `EncryptionKey` optional in `APIConfig` and `ManagerConfig`: an empty key is now valid and enables graceful degradation. The API rejects alerts with webhook payloads (HTTP 400) and the manager discards them with an error log, instead of blocking startup for deployments that do not use webhooks
+
+### Fixed
+- Fix ack/nack error handling in `processAlert` to prevent permanent failures from causing infinite retry loops: validation failures and corrupt DB records (`json.Unmarshal` failure, `nil` `LastAlert`) now ack the message rather than nacking it. Errors from `cleanAlertEscalations` are now propagated and nacked instead of being silently swallowed
+
 ## [0.2.2] - 2026-02-20
 
 ### Changed
@@ -125,7 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/slackmgr/core/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/slackmgr/core/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/slackmgr/core/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/slackmgr/core/compare/v0.1.8...v0.2.0
