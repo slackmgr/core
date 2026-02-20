@@ -28,6 +28,7 @@ linters:
     - wrapcheck
     - wsl
     - wsl_v5
+    - gosec
   settings:
     asasalint:
       use-builtin-exclusions: true
@@ -49,7 +50,6 @@ linters:
     rules:
       - linters:
           - gochecknoglobals
-          - gosec
           - revive
           - paralleltest
         path: _test\.go
