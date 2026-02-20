@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-02-20
+
+### Changed
+- Enforce non-nil channel locker in `Manager.Run`; passing a nil locker now returns an explicit error instead of panicking later in a distributed environment
+
 ## [0.2.1] - 2026-02-19
 
 ### Added
@@ -120,7 +125,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/slackmgr/core/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/slackmgr/core/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/slackmgr/core/compare/v0.1.8...v0.2.0
 [0.1.8]: https://github.com/slackmgr/core/compare/v0.1.7...v0.1.8
