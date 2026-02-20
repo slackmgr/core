@@ -84,6 +84,12 @@ func (m *Manager) Run(ctx context.Context) error {
 		return errors.New("command queue cannot be nil")
 	}
 
+	// We could create a default in-memory locker, but this decision needs to be explicit.
+	// Running the manager in a distributed environment without a proper channel locker will end badly.
+	if m.locker == nil {
+		return errors.New("channel locker cannot be nil")
+	}
+
 	if m.logger == nil {
 		return errors.New("logger cannot be nil")
 	}
