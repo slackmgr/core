@@ -1,4 +1,4 @@
-# core
+# slackmgr/core
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/slackmgr/core.svg)](https://pkg.go.dev/github.com/slackmgr/core)
 [![Go Report Card](https://goreportcard.com/badge/github.com/slackmgr/core)](https://goreportcard.com/report/github.com/slackmgr/core)
