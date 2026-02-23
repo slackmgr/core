@@ -2,7 +2,6 @@ package config_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/slackmgr/core/config"
 	"github.com/stretchr/testify/assert"
@@ -25,7 +24,6 @@ func TestNewDefaultAPIConfig(t *testing.T) {
 	require.NotNil(t, cfg.RateLimitPerAlertChannel)
 	assert.InDelta(t, 1.0, cfg.RateLimitPerAlertChannel.AlertsPerSecond, 0.001)
 	assert.Equal(t, 30, cfg.RateLimitPerAlertChannel.AllowedBurst)
-	assert.Equal(t, 15*time.Second, cfg.RateLimitPerAlertChannel.MaxRequestWaitTime)
 
 	require.NotNil(t, cfg.SlackClient)
 }
@@ -181,27 +179,6 @@ func TestAPIConfig_Validate(t *testing.T) {
 			},
 			expectError: "rate limit config is invalid: allowed burst must be between 1 and 10000",
 		},
-		{
-			name: "max request wait time is zero",
-			modify: func(c *config.APIConfig) {
-				c.RateLimitPerAlertChannel.MaxRequestWaitTime = 0
-			},
-			expectError: "rate limit config is invalid: max request wait time must be between 1s and 5m0s",
-		},
-		{
-			name: "max request wait time is too short",
-			modify: func(c *config.APIConfig) {
-				c.RateLimitPerAlertChannel.MaxRequestWaitTime = 500 * time.Millisecond
-			},
-			expectError: "rate limit config is invalid: max request wait time must be between 1s and 5m0s",
-		},
-		{
-			name: "max request wait time exceeds maximum",
-			modify: func(c *config.APIConfig) {
-				c.RateLimitPerAlertChannel.MaxRequestWaitTime = 6 * time.Minute
-			},
-			expectError: "rate limit config is invalid: max request wait time must be between 1s and 5m0s",
-		},
 		// SlackClient validation
 		{
 			name: "nil slack client config",
@@ -328,21 +305,6 @@ func TestAPIConfig_Validate_BoundaryValues(t *testing.T) {
 		t.Parallel()
 		cfg := validAPIConfig()
 		cfg.RateLimitPerAlertChannel.AllowedBurst = config.MaxAllowedBurst
-		assert.NoError(t, cfg.Validate())
-	})
-
-	// MaxRequestWaitTime boundaries
-	t.Run("max request wait time at lower bound", func(t *testing.T) {
-		t.Parallel()
-		cfg := validAPIConfig()
-		cfg.RateLimitPerAlertChannel.MaxRequestWaitTime = config.MinMaxRequestWaitTime
-		assert.NoError(t, cfg.Validate())
-	})
-
-	t.Run("max request wait time at upper bound", func(t *testing.T) {
-		t.Parallel()
-		cfg := validAPIConfig()
-		cfg.RateLimitPerAlertChannel.MaxRequestWaitTime = config.MaxMaxRequestWaitTime
 		assert.NoError(t, cfg.Validate())
 	})
 }

@@ -32,7 +32,13 @@ const (
 	httpRequestMetric = "http_server_request_duration_seconds"
 )
 
-var ErrRateLimit = errors.New("rate limit exceeded")
+const (
+	handlerTimeout     = 30 * time.Second
+	readHeaderTimeout  = 5 * time.Second
+	timeoutBuffer      = time.Second // wiggle room added to HTTP server timeouts
+	idleTimeout        = 60 * time.Second
+	maxRetryAfterDelay = 24 * time.Hour // cap for rate.InfDuration from ReserveN
+)
 
 type FifoQueueConsumer interface {
 	Receive(ctx context.Context, sinkCh chan<- *types.FifoQueueItem) error
@@ -197,13 +203,6 @@ func (s *Server) Run(ctx context.Context) error {
 		s.defaultPretty = false
 	}
 
-	// Calculate timeouts for the HTTP server and handler middleware.
-	readHeaderTimeout := 5 * time.Second
-	handlerTimeout := s.getHandlerTimeout()
-	timeoutWiggleRoom := time.Second
-	readTimeout := readHeaderTimeout + handlerTimeout + timeoutWiggleRoom
-	writeTimeout := handlerTimeout + timeoutWiggleRoom
-
 	// Apply timeout middleware globally.
 	// This MUST be added before routes are registered, otherwise it won't apply to them.
 	engine.Use(timeout.New(
@@ -236,21 +235,25 @@ func (s *Server) Run(ctx context.Context) error {
 	// Ping
 	engine.GET("/ping", s.ping)
 
+	// Calculate timeouts for the HTTP server and handler middleware.
+	readTimeout := readHeaderTimeout + handlerTimeout + timeoutBuffer
+	writeTimeout := handlerTimeout + timeoutBuffer
+
 	srv := &http.Server{
 		Addr:              ":" + s.cfg.RestPort,
 		Handler:           engine,
 		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
-		IdleTimeout:       60 * time.Second,
+		IdleTimeout:       idleTimeout,
 	}
 
 	s.logger.
-		WithField("read_header_timeout", fmt.Sprintf("%v", srv.ReadHeaderTimeout)).
-		WithField("read_timeout", fmt.Sprintf("%v", srv.ReadTimeout)).
+		WithField("read_header_timeout", fmt.Sprintf("%v", readHeaderTimeout)).
+		WithField("read_timeout", fmt.Sprintf("%v", readTimeout)).
 		WithField("handler_timeout", fmt.Sprintf("%v", handlerTimeout)).
-		WithField("write_timeout", fmt.Sprintf("%v", srv.WriteTimeout)).
-		WithField("idle_timeout", fmt.Sprintf("%v", srv.IdleTimeout)).
+		WithField("write_timeout", fmt.Sprintf("%v", writeTimeout)).
+		WithField("idle_timeout", fmt.Sprintf("%v", idleTimeout)).
 		WithField("port", s.cfg.RestPort).
 		Info("Starting API listener")
 
@@ -481,22 +484,52 @@ func (s *Server) queueAlert(ctx context.Context, alert *types.Alert) error {
 	return nil
 }
 
-func (s *Server) waitForRateLimit(ctx context.Context, channel string, count int) error {
-	limiter := s.getRateLimiter(channel)
+func (s *Server) checkRateLimit(channel string, count int) (bool, time.Duration) {
+	r := s.getRateLimiter(channel).ReserveN(time.Now(), count)
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, s.cfg.RateLimitPerAlertChannel.MaxRequestWaitTime)
-	defer cancel()
+	delay := r.Delay()
 
-	err := limiter.WaitN(timeoutCtx, count)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "rate") {
-			return ErrRateLimit
+	if delay == rate.InfDuration || delay > 0 {
+		r.Cancel()
+		if delay == rate.InfDuration {
+			delay = maxRetryAfterDelay
 		}
-
-		return fmt.Errorf("failed to wait for rate limit: %w", err)
+		return false, delay
 	}
 
-	return nil
+	return true, 0
+}
+
+// rateLimitInfo holds a snapshot of the rate limiter state for RateLimit-* headers.
+type rateLimitInfo struct {
+	limit     int
+	remaining int
+	resetSecs int
+}
+
+// getRateLimitInfo returns a post-reservation snapshot of the limiter for channel.
+// Call after a successful checkRateLimit so remaining reflects consumed tokens.
+func (s *Server) getRateLimitInfo(channel string) rateLimitInfo {
+	l := s.getRateLimiter(channel)
+	tokens := l.Tokens()
+	burst := l.Burst()
+
+	remaining := max(int(tokens), 0)
+
+	var resetSecs int
+	if lim := float64(l.Limit()); lim > 0 && tokens < float64(burst) {
+		deficit := float64(burst) - tokens
+		deficitDur := time.Duration(deficit / lim * float64(time.Second))
+		resetSecs = int((deficitDur + time.Second - 1) / time.Second)
+	}
+
+	return rateLimitInfo{limit: burst, remaining: remaining, resetSecs: resetSecs}
+}
+
+func (s *Server) setRateLimitHeaders(c *gin.Context, info rateLimitInfo) {
+	c.Header("Ratelimit-Limit", strconv.Itoa(info.limit))
+	c.Header("Ratelimit-Remaining", strconv.Itoa(info.remaining))
+	c.Header("Ratelimit-Reset", strconv.Itoa(info.resetSecs))
 }
 
 func (s *Server) getRateLimiter(channel string) *rate.Limiter {
@@ -515,21 +548,6 @@ func (s *Server) getRateLimiter(channel string) *rate.Limiter {
 
 func (s *Server) debugLogRequest(c *gin.Context, body []byte) {
 	s.logger.WithField("body", string(body)).Debugf("%s %s", c.Request.Method, c.Request.URL.Path)
-}
-
-// getHandlerTimeout calculates the timeout duration for request handlers based on rate limit settings.
-// It ensures that the timeout is sufficient to handle the maximum wait time due to rate limiting, plus a small buffer.
-// The timeout is never less than 30 seconds.
-func (s *Server) getHandlerTimeout() time.Duration {
-	apiRateLimitMaxTimeSeconds := int(s.cfg.RateLimitPerAlertChannel.MaxRequestWaitTime.Seconds()) + 5
-
-	// Ensure a minimum timeout of 30 seconds.
-	timeoutSeconds := max(
-		apiRateLimitMaxTimeSeconds,
-		30,
-	)
-
-	return time.Duration(timeoutSeconds) * time.Second
 }
 
 // jsonLogMiddleware is a Gin middleware that logs HTTP requests in JSON format.

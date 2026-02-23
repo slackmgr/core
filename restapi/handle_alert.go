@@ -114,6 +114,9 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 		}
 	}
 
+	// Track the most constrained channel for RateLimit-* informational headers.
+	var tightest *rateLimitInfo
+
 	for channel, channelAlerts := range alertsByChannel {
 		channelInfo, err := s.channelInfoProvider.GetChannelInfo(c.Request.Context(), channel)
 		if err != nil {
@@ -129,15 +132,23 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 
 		alertCount := len(channelAlerts)
 
-		if err = s.waitForRateLimit(c.Request.Context(), channel, alertCount); err != nil {
-			if errors.Is(err, ErrRateLimit) {
-				err = fmt.Errorf("rate limit exceeded for %d alerts in channel %s", alertCount, channel)
-				s.writeErrorResponse(c, err, http.StatusTooManyRequests, channelAlerts[0])
-				return
-			}
-
-			s.writeErrorResponse(c, err, http.StatusInternalServerError, channelAlerts[0])
+		if ok, retryAfter := s.checkRateLimit(channel, alertCount); !ok {
+			err := fmt.Errorf("rate limit exceeded for %d alerts in channel %s", alertCount, channel)
+			retrySecs := int((retryAfter + time.Second - 1) / time.Second)
+			c.Header("Retry-After", fmt.Sprintf("%d", retrySecs))
+			s.setRateLimitHeaders(c, rateLimitInfo{
+				limit:     s.cfg.RateLimitPerAlertChannel.AllowedBurst,
+				remaining: 0,
+				resetSecs: retrySecs,
+			})
+			s.writeErrorResponse(c, err, http.StatusTooManyRequests, channelAlerts[0])
 			return
+		}
+
+		// Snapshot the limiter state after tokens are consumed.
+		info := s.getRateLimitInfo(channel)
+		if tightest == nil || info.remaining < tightest.remaining {
+			tightest = &info
 		}
 
 		for _, alert := range channelAlerts {
@@ -164,6 +175,9 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 		}
 	}
 
+	if tightest != nil {
+		s.setRateLimitHeaders(c, *tightest)
+	}
 	c.Status(http.StatusAccepted)
 }
 

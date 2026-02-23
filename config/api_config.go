@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"time"
 )
 
 // Validation constants for APIConfig fields.
@@ -52,15 +51,6 @@ const (
 	// A burst of 10,000 alerts allows handling large batch imports or incident
 	// recovery scenarios while still providing meaningful rate protection.
 	MaxAllowedBurst = 10000
-
-	// MinMaxRequestWaitTime is the minimum time a request will wait for tokens.
-	// At least 1 second is required to allow the rate limiter to function.
-	MinMaxRequestWaitTime = 1 * time.Second
-
-	// MaxMaxRequestWaitTime is the maximum time a request will wait for tokens.
-	// Waiting longer than 5 minutes is impractical as HTTP clients and load
-	// balancers typically have shorter timeouts.
-	MaxMaxRequestWaitTime = 5 * time.Minute
 )
 
 // APIConfig holds configuration for the Slack Manager REST API server.
@@ -135,7 +125,7 @@ type APIConfig struct {
 // 1. The bucket starts full with AllowedBurst tokens.
 // 2. Each alert request removes one token from the bucket.
 // 3. Tokens are continuously added at the AlertsPerSecond rate, up to the maximum capacity.
-// 4. If the bucket is empty, requests must wait for tokens to be added.
+// 4. If the bucket does not have enough tokens, the request is rejected immediately with HTTP 429.
 //
 // # Example Configuration
 //
@@ -169,21 +159,8 @@ type RateLimitConfig struct {
 	// when not in use.
 	//
 	// This value also serves as the maximum number of alerts allowed in a single API
-	// request. Requests exceeding this limit are rejected with HTTP 400 immediately,
-	// without waiting for rate limit tokens.
+	// request. Requests exceeding this limit are rejected with HTTP 400 immediately.
 	AllowedBurst int `json:"allowedBurst" yaml:"allowedBurst"`
-
-	// MaxRequestWaitTime is the maximum duration an API request will wait for rate
-	// limit tokens to become available. If tokens are not available within this time,
-	// the request fails with HTTP 429 (Too Many Requests).
-	//
-	// For example, with AlertsPerSecond=1 and an empty bucket, a request for 5 alerts
-	// would need to wait ~5 seconds for enough tokens. If MaxRequestWaitTime is 3s,
-	// the request would fail after 3 seconds rather than waiting the full 5 seconds.
-	//
-	// Set this based on your HTTP client timeout and user experience requirements.
-	// Longer waits reduce rejected requests but increase response latency.
-	MaxRequestWaitTime time.Duration `json:"maxRequestWaitTime" yaml:"maxRequestWaitTime"`
 }
 
 // NewDefaultAPIConfig returns an APIConfig populated with sensible default values.
@@ -192,7 +169,7 @@ type RateLimitConfig struct {
 //   - JSON logging enabled for log aggregation compatibility
 //   - Verbose logging disabled to reduce noise
 //   - Port 8080 (standard non-privileged HTTP port)
-//   - Rate limiting: 1 alert/second sustained, 30 alert burst capacity, 15s max wait
+//   - Rate limiting: 1 alert/second sustained, 30 alert burst capacity
 //   - Max 100 users per alert channel (prevents accidental spam to large channels)
 //
 // The EncryptionKey is intentionally left empty and must be set before use.
@@ -207,9 +184,8 @@ func NewDefaultAPIConfig() *APIConfig {
 		ErrorReportChannelID:   "",
 		MaxUsersInAlertChannel: 100,
 		RateLimitPerAlertChannel: &RateLimitConfig{
-			AlertsPerSecond:    1,
-			AllowedBurst:       30,
-			MaxRequestWaitTime: 15 * time.Second,
+			AlertsPerSecond: 1,
+			AllowedBurst:    30,
 		},
 		SlackClient: NewDefaultSlackClientConfig(),
 	}
@@ -287,7 +263,6 @@ func (c *APIConfig) validateRestPort() error {
 // Validation ensures:
 //   - AlertsPerSecond is between 0.001 and 1000 (allowing very slow to very fast rates)
 //   - AllowedBurst is between 1 and 10,000 (at least one alert must be allowed)
-//   - MaxRequestWaitTime is between 1 second and 5 minutes (practical timeout range)
 func (c *RateLimitConfig) validate() error {
 	if c.AlertsPerSecond < MinAlertsPerSecond || c.AlertsPerSecond > MaxAlertsPerSecond {
 		return fmt.Errorf("alerts per second must be between %v and %v", MinAlertsPerSecond, MaxAlertsPerSecond)
@@ -295,10 +270,6 @@ func (c *RateLimitConfig) validate() error {
 
 	if c.AllowedBurst < MinAllowedBurst || c.AllowedBurst > MaxAllowedBurst {
 		return fmt.Errorf("allowed burst must be between %d and %d", MinAllowedBurst, MaxAllowedBurst)
-	}
-
-	if c.MaxRequestWaitTime < MinMaxRequestWaitTime || c.MaxRequestWaitTime > MaxMaxRequestWaitTime {
-		return fmt.Errorf("max request wait time must be between %v and %v", MinMaxRequestWaitTime, MaxMaxRequestWaitTime)
 	}
 
 	return nil
