@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-23
+
+### Added
+- `Ratelimit-Limit`, `Ratelimit-Remaining`, and `Ratelimit-Reset` informational headers (IETF draft `ratelimit-headers`) on every `POST /alert` response; multi-channel requests report the most constrained channel
+- Code scanning CI workflow uploading gosec and govulncheck results as SARIF to the GitHub Code Scanning dashboard
+- `govulncheck` step added to `make test`
+
+### Changed
+- Rate limiting now rejects requests **immediately** with HTTP 429 and a `Retry-After` header instead of blocking the goroutine until tokens become available; this removes request latency caused by waiting and makes back-pressure explicit to callers
+- **Breaking**: `MaxRequestWaitTime` field removed from `RateLimitConfig`; the corresponding constants (`MinMaxRequestWaitTime`, `MaxMaxRequestWaitTime`) and validation rule are also removed
+- `InfDuration` guard added to `checkRateLimit`: when `count > burst`, `ReserveN` returns `rate.InfDuration`; the reservation is cancelled and the delay is capped at 24 h so callers never observe an overflow value
+- CI: Security job now enforces gosec via `go install` (replaces Docker action); made the enforcement gate for the `Security` check
+- CI: Add path filters to push and pull_request triggers
+- README header updated to `slackmgr/core`
+- Ignore `*.sarif` files in git
+
+### Fixed
+- gosec SSA panic in CI Security job resolved by switching to stable Go toolchain
+- Go module cache re-enabled in the Security CI job
+
 ## [0.2.3] - 2026-02-20
 
 ### Changed
@@ -133,7 +153,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/slackmgr/core/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/slackmgr/core/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/slackmgr/core/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/slackmgr/core/compare/v0.2.0...v0.2.1
