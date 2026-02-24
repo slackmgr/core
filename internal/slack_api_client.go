@@ -15,6 +15,7 @@ import (
 	"github.com/slack-go/slack/socketmode"
 	"github.com/slackmgr/core/config"
 	"github.com/slackmgr/types"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -38,28 +39,49 @@ var ErrNotConnected = errors.New("client not connected: Connect() must be called
 
 type retryable interface{ Retryable() bool }
 
+// rateLimitSignaler is satisfied by any type that can record a rate-limit
+// deadline so that all callers can back off until it expires.
+type rateLimitSignaler interface {
+	Signal(ctx context.Context, until time.Time) error
+}
+
 type SlackAPIClient struct {
 	api       *slack.Client
 	logger    types.Logger
 	cache     *Cache
 	metrics   types.Metrics
 	cfg       *config.SlackClientConfig
+	gate      rateLimitSignaler   // nil = no distributed signalling
+	sem       *semaphore.Weighted // limits concurrent Slack API calls
 	connected bool
 	botUserID string
 }
 
-func NewSlackAPIClient(cacheStore cachestore.StoreInterface, cacheKeyPrefix string, logger types.Logger, metrics types.Metrics, cfg *config.SlackClientConfig) *SlackAPIClient {
+// WithRateLimitGate is a functional option that wires a RateLimitSignaler into
+// the SlackAPIClient so that a detected 429 is broadcast to all callers.
+func WithRateLimitGate(g rateLimitSignaler) func(*SlackAPIClient) {
+	return func(c *SlackAPIClient) { c.gate = g }
+}
+
+func NewSlackAPIClient(cacheStore cachestore.StoreInterface, cacheKeyPrefix string, logger types.Logger, metrics types.Metrics, cfg *config.SlackClientConfig, opts ...func(*SlackAPIClient)) *SlackAPIClient {
 	cfg.SetDefaults()
 
 	cacheKeyPrefix += "slack-api-client:"
 	cache := NewCache(cacheStore, cacheKeyPrefix, logger)
 
-	return &SlackAPIClient{
+	c := &SlackAPIClient{
 		logger:  logger,
 		cache:   cache,
 		metrics: metrics,
 		cfg:     cfg,
+		sem:     semaphore.NewWeighted(int64(cfg.Concurrency)),
 	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	return c
 }
 
 func (c *SlackAPIClient) Connect(ctx context.Context) (*slack.AuthTestResponse, error) {
@@ -145,7 +167,7 @@ func (c *SlackAPIClient) ChatPostMessage(ctx context.Context, channelID string, 
 		return ts, nil, err
 	}
 
-	ts, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f)
+	ts, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f)
 
 	return ts, err
 }
@@ -164,7 +186,7 @@ func (c *SlackAPIClient) ChatUpdateMessage(ctx context.Context, channelID string
 		return ts, nil, err
 	}
 
-	ts, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f)
+	ts, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f)
 
 	return ts, err
 }
@@ -183,7 +205,7 @@ func (c *SlackAPIClient) ChatDeleteMessage(ctx context.Context, channelID string
 		return nil, nil, err
 	}
 
-	_, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f)
+	_, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f)
 
 	return err
 }
@@ -220,7 +242,7 @@ func (c *SlackAPIClient) SendResponse(ctx context.Context, channelID, responseUR
 		return nil, nil, err
 	}
 
-	_, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f)
+	_, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f)
 
 	return err
 }
@@ -247,7 +269,7 @@ func (c *SlackAPIClient) PostEphemeral(ctx context.Context, channelID, userID st
 		return ts, nil, err
 	}
 
-	ts, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f)
+	ts, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f)
 
 	return ts, err
 }
@@ -299,7 +321,7 @@ func (c *SlackAPIClient) MessageHasReplies(ctx context.Context, channelID, ts st
 		return msgs, nil, err
 	}
 
-	msgs, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f, SlackChannelNotFoundError, SlackThreadNotFoundError)
+	msgs, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f, SlackChannelNotFoundError, SlackThreadNotFoundError)
 	if err != nil {
 		if err.Error() == SlackChannelNotFoundError || err.Error() == SlackThreadNotFoundError {
 			return false, nil
@@ -351,7 +373,7 @@ func (c *SlackAPIClient) GetChannelInfo(ctx context.Context, channelID string) (
 		return val, nil, err
 	}
 
-	channel, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f, SlackChannelNotFoundError)
+	channel, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f, SlackChannelNotFoundError)
 	unknownChannel := false
 
 	if err != nil {
@@ -415,7 +437,7 @@ func (c *SlackAPIClient) ListBotChannels(ctx context.Context) ([]*ChannelSummary
 	channels := []*ChannelSummary{}
 
 	for {
-		chs, nextCursor, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f)
+		chs, nextCursor, err := callAPI(ctx, c.logger, c.metrics, c.cfg, c.gate, c.sem, action, f)
 		if err != nil {
 			return nil, err
 		}
@@ -477,7 +499,7 @@ func (c *SlackAPIClient) GetUserInfo(ctx context.Context, userID string) (*slack
 		return val, nil, err
 	}
 
-	user, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f)
+	user, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, c.gate, c.sem, action, f)
 	if err != nil {
 		return nil, err
 	}
@@ -526,7 +548,7 @@ func (c *SlackAPIClient) ListUserGroupMembers(ctx context.Context, groupID strin
 		return val, nil, err
 	}
 
-	userIDs, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, action, f, SlackNoSuchSubTeamError)
+	userIDs, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, c.gate, c.sem, action, f, SlackNoSuchSubTeamError)
 	if err != nil {
 		if err.Error() == SlackNoSuchSubTeamError {
 			return result, nil
@@ -587,7 +609,7 @@ func (c *SlackAPIClient) GetUserIDsInChannel(ctx context.Context, channelID stri
 	}
 
 	for {
-		users, nextCursor, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, action, f, SlackChannelNotFoundError)
+		users, nextCursor, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f, SlackChannelNotFoundError)
 		if err != nil {
 			if err.Error() == SlackChannelNotFoundError {
 				return result, nil
@@ -657,13 +679,27 @@ func (c *SlackAPIClient) checkConnected() error {
 }
 
 func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics types.Metrics,
-	cfg *config.SlackClientConfig, action string, f func(ctx context.Context) (V, W, error), expectedErrors ...string,
+	cfg *config.SlackClientConfig, gate rateLimitSignaler, sem *semaphore.Weighted,
+	action string, f func(ctx context.Context) (V, W, error), expectedErrors ...string,
 ) (V, W, error) {
 	attempt := 1
 	started := time.Now()
 
 	for {
+		// Acquire a semaphore slot before the HTTP call to limit concurrency.
+		if sem != nil {
+			if err := sem.Acquire(ctx, 1); err != nil {
+				var result1 V
+				var result2 W
+				return result1, result2, err
+			}
+		}
+
 		val1, val2, err := f(ctx)
+
+		if sem != nil {
+			sem.Release(1)
+		}
 
 		metrics.Inc(slackAPICallMetric, action)
 
@@ -695,7 +731,7 @@ func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics typ
 			return result1, result2, err
 		}
 
-		if waitErr := waitForAPIError(ctx, started, logger, attempt, action, cfg, err); waitErr != nil {
+		if waitErr := waitForAPIError(ctx, started, logger, attempt, action, cfg, gate, err); waitErr != nil {
 			return result1, result2, waitErr
 		}
 
@@ -703,7 +739,7 @@ func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics typ
 	}
 }
 
-func waitForAPIError(ctx context.Context, started time.Time, logger types.Logger, attempt int, action string, cfg *config.SlackClientConfig, err error) error {
+func waitForAPIError(ctx context.Context, started time.Time, logger types.Logger, attempt int, action string, cfg *config.SlackClientConfig, gate rateLimitSignaler, err error) error {
 	var rateLimitError *slack.RateLimitedError
 
 	if errors.As(err, &rateLimitError) {
@@ -711,6 +747,13 @@ func waitForAPIError(ctx context.Context, started time.Time, logger types.Logger
 
 		if attempt >= cfg.MaxAttemptsForRateLimitError || remainingWaitTime < time.Second {
 			return fmt.Errorf("failed to call Slack API %s after %d attempts and %d seconds: rate limit error: %w", action, attempt, int(time.Since(started).Seconds()), err)
+		}
+
+		if gate != nil {
+			until := time.Now().Add(rateLimitError.RetryAfter + 2*time.Second)
+			if signalErr := gate.Signal(ctx, until); signalErr != nil {
+				logger.WithField("error", signalErr).Infof("Failed to signal rate limit gate for %s", action)
+			}
 		}
 
 		return waitForRateLimit(ctx, logger, rateLimitError, attempt, action, remainingWaitTime)

@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/slackmgr/core/manager/internal/models"
-	"golang.org/x/sync/semaphore"
 )
 
 type SlackClient interface {
@@ -13,6 +12,6 @@ type SlackClient interface {
 	Update(ctx context.Context, channelID string, allChannelIssues []*models.Issue) error
 	UpdateSingleIssueWithThrottling(ctx context.Context, issue *models.Issue, reason string, issuesInChannel int) error
 	UpdateSingleIssue(ctx context.Context, issue *models.Issue, reason string) error
-	Delete(ctx context.Context, issue *models.Issue, reason string, updateIfMessageHasReplies bool, sem *semaphore.Weighted) error
+	Delete(ctx context.Context, issue *models.Issue, reason string, updateIfMessageHasReplies bool) error
 	DeletePost(ctx context.Context, channelID, ts string) error
 }

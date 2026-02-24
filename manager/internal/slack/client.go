@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/eko/gocache/lib/v4/store"
@@ -16,7 +17,6 @@ import (
 	"github.com/slackmgr/core/manager/internal/slack/controllers"
 	"github.com/slackmgr/types"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -45,24 +45,30 @@ type FifoQueueProducer interface {
 }
 
 type Client struct {
-	api             *internal.SlackAPIClient
-	commandQueue    FifoQueueProducer
-	issueFinder     IssueFinder
-	cacheStore      store.StoreInterface
-	logger          types.Logger
-	metrics         types.Metrics
-	cfg             *config.ManagerConfig
-	managerSettings *models.ManagerSettingsWrapper
+	api                *internal.SlackAPIClient
+	commandQueue       FifoQueueProducer
+	issueFinder        IssueFinder
+	cacheStore         store.StoreInterface
+	logger             types.Logger
+	metrics            types.Metrics
+	cfg                *config.ManagerConfig
+	managerSettings    *models.ManagerSettingsWrapper
+	slackAPIClientOpts []func(*internal.SlackAPIClient)
+
+	// socketHandler is set atomically when RunSocketMode starts.
+	// Uses atomic.Pointer for safe cross-goroutine access.
+	socketHandler atomic.Pointer[controllers.SocketModeHandler]
 }
 
-func New(commandHandler FifoQueueProducer, cacheStore store.StoreInterface, logger types.Logger, metrics types.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *Client {
+func New(commandHandler FifoQueueProducer, cacheStore store.StoreInterface, logger types.Logger, metrics types.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper, slackAPIClientOpts ...func(*internal.SlackAPIClient)) *Client {
 	return &Client{
-		commandQueue:    commandHandler,
-		cacheStore:      cacheStore,
-		logger:          logger,
-		metrics:         metrics,
-		cfg:             cfg,
-		managerSettings: managerSettings,
+		commandQueue:       commandHandler,
+		cacheStore:         cacheStore,
+		logger:             logger,
+		metrics:            metrics,
+		cfg:                cfg,
+		managerSettings:    managerSettings,
+		slackAPIClientOpts: slackAPIClientOpts,
 	}
 }
 
@@ -95,7 +101,7 @@ func (c *Client) Connect(ctx context.Context) error {
 		return errors.New("channel settings must be set before connecting")
 	}
 
-	c.api = internal.NewSlackAPIClient(c.cacheStore, c.cfg.CacheKeyPrefix, c.logger, c.metrics, c.cfg.SlackClient)
+	c.api = internal.NewSlackAPIClient(c.cacheStore, c.cfg.CacheKeyPrefix, c.logger, c.metrics, c.cfg.SlackClient, c.slackAPIClientOpts...)
 
 	if _, err := c.api.Connect(ctx); err != nil {
 		return err
@@ -116,7 +122,20 @@ func (c *Client) RunSocketMode(ctx context.Context) error {
 
 	handler := controllers.NewSocketModeHandler(c, socketModeClient, c.commandQueue, c.issueFinder, c.cacheStore, c.cfg, c.managerSettings, c.logger)
 
+	// Store the handler reference so SocketModeQuiet() can report its state.
+	c.socketHandler.Store(handler)
+
 	return handler.RunEventLoop(ctx)
+}
+
+// SocketModeQuiet returns true when no Socket Mode event handlers are currently
+// in flight. Used by the rate-limit gate's ready check.
+func (c *Client) SocketModeQuiet() bool {
+	if h := c.socketHandler.Load(); h != nil {
+		return h.Quiet()
+	}
+
+	return true
 }
 
 func (c *Client) SendResponse(ctx context.Context, channelID, responseURL, responseType, text string) error {
@@ -174,7 +193,6 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 	allowIssueReordering := c.managerSettings.GetSettings().OrderIssuesBySeverity(channelID, openIssueCount)
 	atLeastOnePostDeleted := false
 
-	sem := semaphore.NewWeighted(int64(c.cfg.SlackClient.Concurrency))
 	errg, gctx := errgroup.WithContext(ctx)
 
 	for _, _issue := range issues {
@@ -183,7 +201,7 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 		// Delete Slack post when requested by the issue (for whatever reason)
 		if issue.SlackPostNeedsDelete {
 			errg.Go(func() error {
-				return c.Delete(gctx, issue, "Issue flagged with SlackPostNeedsDelete", true, sem)
+				return c.Delete(gctx, issue, "Issue flagged with SlackPostNeedsDelete", true)
 			})
 			atLeastOnePostDeleted = true
 			continue
@@ -192,7 +210,7 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 		// Delete Slack post when reordering is allowed AND issue follow up is enabled AND at least one Slack post exists where the connected issue has lower priority
 		if allowIssueReordering && issue.FollowUpEnabled() && newerSlackPostWithLowerPriorityExists(issue, issues) {
 			errg.Go(func() error {
-				return c.Delete(gctx, issue, "Issue re-ordering", true, sem)
+				return c.Delete(gctx, issue, "Issue re-ordering", true)
 			})
 			atLeastOnePostDeleted = true
 		}
@@ -265,7 +283,7 @@ func (c *Client) UpdateSingleIssueWithThrottling(ctx context.Context, issue *mod
 	return c.createOrUpdate(ctx, issue, reason, action)
 }
 
-func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string, updateIfMessageHasReplies bool, sem *semaphore.Weighted) error {
+func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string, updateIfMessageHasReplies bool) error {
 	if !issue.HasSlackPost() || issue.SlackPostID == PostIDInvalidChannel {
 		issue.RegisterSlackPostDeleted()
 		return nil
@@ -276,13 +294,6 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string,
 	if c.cfg.SlackClient.DryRun {
 		logger.Infof("DRYRUN: Slack DELETE issue %s, post %s", issue.CorrelationID, issue.SlackPostID)
 		return nil
-	}
-
-	if sem != nil {
-		if err := sem.Acquire(ctx, 1); err != nil {
-			return err
-		}
-		defer sem.Release(1)
 	}
 
 	hardDelete := true

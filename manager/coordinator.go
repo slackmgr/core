@@ -30,13 +30,14 @@ type coordinator struct {
 	logger          types.Logger
 	metrics         types.Metrics
 	webhookHandlers []WebhookHandler
+	gate            RateLimitGate
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 }
 
 func newCoordinator(db types.DB, alertQueue FifoQueue, slack SlackClient, cacheStore store.StoreInterface,
 	locker ChannelLocker, logger types.Logger, metrics types.Metrics, webhookHandlers []WebhookHandler,
-	cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper,
+	gate RateLimitGate, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper,
 ) *coordinator {
 	return &coordinator{
 		channelManagers:          make(map[string]*channelManager),
@@ -48,6 +49,7 @@ func newCoordinator(db types.DB, alertQueue FifoQueue, slack SlackClient, cacheS
 		locker:                   locker,
 		logger:                   logger,
 		metrics:                  metrics,
+		gate:                     gate,
 		cfg:                      cfg,
 		webhookHandlers:          webhookHandlers,
 		managerSettings:          managerSettings,
@@ -308,7 +310,7 @@ func (c *coordinator) findOrCreateChannelManager(ctx context.Context, channelID 
 }
 
 func (c *coordinator) createChannelManager(ctx context.Context, channelID string) (*channelManager, error) {
-	channelManager := newChannelManager(channelID, c.slack, c.db, c.locker, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings)
+	channelManager := newChannelManager(channelID, c.slack, c.db, c.locker, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings, c.gate)
 
 	// Add one to the wait group to ensure we wait for this channel manager to finish.
 	// This is important to ensure that we don't exit the coordinator while channel managers are still running.

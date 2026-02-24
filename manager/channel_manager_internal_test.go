@@ -12,7 +12,6 @@ import (
 	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/semaphore"
 )
 
 // stubSlackClient is a minimal stub implementing SlackClient for channelManager tests.
@@ -40,7 +39,7 @@ func (s *stubSlackClient) UpdateSingleIssue(_ context.Context, _ *models.Issue, 
 	return nil
 }
 
-func (s *stubSlackClient) Delete(_ context.Context, _ *models.Issue, _ string, _ bool, _ *semaphore.Weighted) error {
+func (s *stubSlackClient) Delete(_ context.Context, _ *models.Issue, _ string, _ bool) error {
 	return nil
 }
 
@@ -107,6 +106,7 @@ func newTestChannelManager(t *testing.T, channelID string, db types.DB, slackCli
 		nil, // webhook handlers — a default handler is created internally
 		&config.ManagerConfig{},
 		settings,
+		&NoopRateLimitGate{},
 	)
 }
 

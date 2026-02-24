@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/eko/gocache/lib/v4/store"
 	"github.com/slack-go/slack"
@@ -43,8 +44,13 @@ type SocketModeHandler struct {
 
 	// sem limits the number of concurrent event handlers to prevent goroutine explosion.
 	sem *semaphore.Weighted
+
 	// wg tracks in-flight handlers for graceful shutdown.
 	wg sync.WaitGroup
+
+	// inflight counts the number of handlers currently executing. Used to
+	// signal to the rate-limit gate when Socket Mode is quiet.
+	inflight atomic.Int64
 }
 
 // SocketModeHandlerFunc defines a function to handle socketmode events.
@@ -99,6 +105,12 @@ func NewSocketModeHandler(apiClient SlackAPIClient, socketModeClient SocketModeC
 	handler.registerDefaultController()
 
 	return handler
+}
+
+// Quiet returns true when no Socket Mode event handlers are currently in flight.
+// It is used by the rate-limit gate to determine when channel managers may resume.
+func (r *SocketModeHandler) Quiet() bool {
+	return r.inflight.Load() == 0
 }
 
 // RunEventLoop starts the Socket Mode event loop. It blocks until the context is cancelled or an error occurs.
@@ -280,8 +292,13 @@ func (r *SocketModeHandler) dispatchHandler(ctx context.Context, evt *socketmode
 		return
 	}
 
+	// Increment in-flight counter
+	r.inflight.Add(1)
+
 	r.wg.Go(func() {
-		defer r.sem.Release(1)
+		defer r.sem.Release(1)   // Release semaphore slot when handler completes
+		defer r.inflight.Add(-1) // Decrement in-flight counter when handler completes
+
 		defer func() {
 			if rec := recover(); rec != nil {
 				r.logger.Errorf("Panic in socket mode handler: %v", rec)

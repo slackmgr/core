@@ -13,6 +13,7 @@ import (
 	gocache_store "github.com/eko/gocache/store/go_cache/v4"
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/slackmgr/core/config"
+	coreinternal "github.com/slackmgr/core/internal"
 	"github.com/slackmgr/core/manager/internal/models"
 	slack "github.com/slackmgr/core/manager/internal/slack"
 	"github.com/slackmgr/types"
@@ -30,11 +31,12 @@ type Manager struct {
 	logger          types.Logger
 	metrics         types.Metrics
 	webhookHandlers []WebhookHandler
+	gate            RateLimitGate
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, locker ChannelLocker, logger types.Logger, metrics types.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
+func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, locker ChannelLocker, logger types.Logger, metrics types.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings, rateLimitGate RateLimitGate) *Manager {
 	if cacheStore == nil {
 		gocacheClient := gocache.New(5*time.Minute, time.Minute)
 		cacheStore = gocache_store.NewGoCache(gocacheClient)
@@ -48,6 +50,10 @@ func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore s
 		managerSettings = &config.ManagerSettings{}
 	}
 
+	if rateLimitGate == nil {
+		rateLimitGate = NewLocalRateLimitGate(logger, 0)
+	}
+
 	return &Manager{
 		db:              db,
 		alertQueue:      alertQueue,
@@ -56,6 +62,7 @@ func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore s
 		locker:          locker,
 		logger:          logger,
 		metrics:         metrics,
+		gate:            rateLimitGate,
 		cfg:             cfg,
 		managerSettings: models.NewManagerSettingsWrapper(managerSettings),
 	}
@@ -119,13 +126,15 @@ func (m *Manager) Run(ctx context.Context) error {
 		m.db = newDBCacheMiddleware(m.db, m.cacheStore, m.logger, m.cfg)
 	}
 
-	m.slackClient = slack.New(m.commandQueue, m.cacheStore, m.logger, m.metrics, m.cfg, m.managerSettings)
+	m.slackClient = slack.New(m.commandQueue, m.cacheStore, m.logger, m.metrics, m.cfg, m.managerSettings, coreinternal.WithRateLimitGate(m.gate))
 
 	if err := m.slackClient.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect Slack client: %w", err)
 	}
 
-	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.cacheStore, m.locker, m.logger, m.metrics, m.webhookHandlers, m.cfg, m.managerSettings)
+	m.gate.SetReadyCheck(m.slackClient.SocketModeQuiet)
+
+	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.cacheStore, m.locker, m.logger, m.metrics, m.webhookHandlers, m.gate, m.cfg, m.managerSettings)
 
 	if err := m.coordinator.init(ctx); err != nil {
 		return fmt.Errorf("failed to initialize coordinator: %w", err)

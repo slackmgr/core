@@ -27,6 +27,7 @@ type channelManager struct {
 	metrics         types.Metrics
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
+	gate            RateLimitGate
 	alertCh         chan *models.Alert
 	commandCh       chan *models.Command
 	keepAliveCh     chan struct{}
@@ -34,7 +35,7 @@ type channelManager struct {
 }
 
 func newChannelManager(channelID string, slackClient SlackClient, db types.DB, locker ChannelLocker, logger types.Logger, metrics types.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
-	managerSettings *models.ManagerSettingsWrapper,
+	managerSettings *models.ManagerSettingsWrapper, gate RateLimitGate,
 ) *channelManager {
 	logger = logger.WithField("channel_id", channelID)
 
@@ -53,6 +54,7 @@ func newChannelManager(channelID string, slackClient SlackClient, db types.DB, l
 		webhookHandlers: webhookHandlers,
 		cfg:             cfg,
 		managerSettings: managerSettings,
+		gate:            gate,
 		alertCh:         make(chan *models.Alert, 1000),
 		commandCh:       make(chan *models.Command, 100),
 		keepAliveCh:     make(chan struct{}, 10),
@@ -101,6 +103,12 @@ func (c *channelManager) run(ctx context.Context) {
 				return
 			}
 
+			// Wait for the rate limit gate before processing the alert. If the context is cancelled while waiting, nack the alert and exit.
+			if err := c.waitForGate(ctx); err != nil {
+				alert.Nack()
+				return
+			}
+
 			// Process the alert. Ack or nack happens inside processAlert, depending on success or type of failure.
 			if err := c.processAlert(ctx, alert); err != nil {
 				c.logger.WithFields(alert.LogFields()).Errorf("Failed to process alert: %s", err)
@@ -116,6 +124,12 @@ func (c *channelManager) run(ctx context.Context) {
 				return
 			}
 
+			// Wait for the rate limit gate before processing the command. If the context is cancelled while waiting, nack the command and exit.
+			if err := c.waitForGate(ctx); err != nil {
+				cmd.Nack()
+				return
+			}
+
 			// Process the command. Ack or nack happens inside processCmd, depending on success or type of failure.
 			// Commands are typically acked regardless of errors, except for lock acquisition failures.
 			if err := c.processCmd(ctx, cmd); err != nil {
@@ -128,6 +142,12 @@ func (c *channelManager) run(ctx context.Context) {
 				processorIsRunning = true
 			}
 		case <-processorTimeout:
+			// Wait for the rate limit gate before processing issues. If the context is cancelled while waiting, exit.
+			if err := c.waitForGate(ctx); err != nil {
+				return
+			}
+
+			// Process active issues in the channel. This includes handling escalations, archiving and Slack updates (where needed).
 			openIssues, err := c.processActiveIssues(ctx, interval)
 			if err != nil {
 				c.logger.Errorf("Failed to process active issues: %s", err)
@@ -719,7 +739,7 @@ func (c *channelManager) terminateIssue(ctx context.Context, issue *models.Issue
 
 	if issue != nil {
 		issue.RegisterTerminationRequest(cmd.UserRealName)
-		return true, c.slackClient.Delete(ctx, issue, "terminate issue request", false, nil)
+		return true, c.slackClient.Delete(ctx, issue, "terminate issue request", false)
 	}
 
 	return false, c.slackClient.DeletePost(ctx, cmd.SlackChannelID, cmd.SlackPostID)
@@ -853,7 +873,7 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 	}
 
 	// Remove the current Slack post (if any).
-	if err := c.slackClient.Delete(ctx, issue, "Issue moved between channels", false, nil); err != nil {
+	if err := c.slackClient.Delete(ctx, issue, "Issue moved between channels", false); err != nil {
 		return err
 	}
 
@@ -943,6 +963,16 @@ func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, 
 	c.logger.WithField("lock_key", lock.Key()).Debug("Channel lock obtained")
 
 	return lock, nil
+}
+
+// waitForGate blocks until the rate limit gate allows processing to resume.
+// Returns a non-nil error only when the context is cancelled.
+func (c *channelManager) waitForGate(ctx context.Context) error {
+	if c.gate == nil {
+		return nil
+	}
+
+	return c.gate.Wait(ctx)
 }
 
 // releaseLock releases the lock for the specified channel.
