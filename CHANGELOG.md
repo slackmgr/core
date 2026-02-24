@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-24
+
+### Added
+- `RateLimitGate` interface with `LocalRateLimitGate` (in-process) and `RedisRateLimitGate` (distributed) implementations; when any caller receives a Slack 429, all channel managers pause until the window expires and Socket Mode is quiet
+- Global API concurrency semaphore in `SlackAPIClient` (size = `Concurrency` config); all Slack HTTP calls are now gated, not just batch deletions in `Update()`
+- `manager.New()` accepts an optional `RateLimitGate` as its last parameter (`nil` uses `LocalRateLimitGate`)
+
+### Changed
+- **Breaking**: `SlackClient.Delete()` no longer takes a `*semaphore.Weighted` parameter; concurrency is now enforced globally inside `SlackAPIClient`
+
+### Fixed
+- Prevent duplicate issues when concurrent escalation and new-alert processing race to create the same issue in a channel
+
 ## [0.3.0] - 2026-02-23
 
 ### Added
@@ -153,7 +166,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/slackmgr/core/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/slackmgr/core/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/slackmgr/core/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/slackmgr/core/compare/v0.2.1...v0.2.2
