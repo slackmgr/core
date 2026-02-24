@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/eko/gocache/lib/v4/store"
@@ -43,11 +46,6 @@ func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore s
 
 	if managerSettings == nil {
 		managerSettings = &config.ManagerSettings{}
-	}
-
-	// Add the database cache middleware, unless explicitly skipped by the configuration.
-	if !cfg.SkipDatabaseCache {
-		db = newDBCacheMiddleware(db, cacheStore, logger, *cfg)
 	}
 
 	return &Manager{
@@ -114,6 +112,13 @@ func (m *Manager) Run(ctx context.Context) error {
 		return errors.New("alert queue and command queue must have different names")
 	}
 
+	if !m.cfg.SkipDatabaseCache {
+		if err := validateCacheStoreIsDistributed(m.cacheStore); err != nil {
+			return fmt.Errorf("invalid cache store for multi-instance deployment: %w", err)
+		}
+		m.db = newDBCacheMiddleware(m.db, m.cacheStore, m.logger, m.cfg)
+	}
+
 	m.slackClient = slack.New(m.commandQueue, m.cacheStore, m.logger, m.metrics, m.cfg, m.managerSettings)
 
 	if err := m.slackClient.Connect(ctx); err != nil {
@@ -164,6 +169,57 @@ func (m *Manager) UpdateSettings(settings *config.ManagerSettings) error {
 	m.managerSettings.SetSettings(settings)
 
 	m.logger.Infof("Manager settings updated")
+
+	return nil
+}
+
+// stripMajorVersion removes a Go module major-version suffix (/vN where N >= 2) from
+// the end of a package path, so that "pkg/v4" and "pkg/v5" both normalise to "pkg".
+// Non-version suffixes (e.g. a path component that happens to start with "v" but is
+// followed by non-numeric characters) are left untouched.
+func stripMajorVersion(pkgPath string) string {
+	if i := strings.LastIndex(pkgPath, "/v"); i >= 0 {
+		if n, err := strconv.Atoi(pkgPath[i+2:]); err == nil && n >= 2 {
+			return pkgPath[:i]
+		}
+	}
+	return pkgPath
+}
+
+// validateCacheStoreIsDistributed returns an error if the provided store is not a known
+// distributed (non-process-local) gocache store implementation. Uses a whitelist so that
+// unrecognised store types are rejected by default.
+// Only needs to be called when the DB cache middleware is active (SkipDatabaseCache=false).
+func validateCacheStoreIsDistributed(cacheStore store.StoreInterface) error {
+	t := reflect.TypeOf(cacheStore)
+
+	if t == nil {
+		return errors.New("cache store must not be nil when SkipDatabaseCache is false")
+	}
+
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	// Compare against unversioned base paths so the check stays valid across major versions.
+	// stripMajorVersion normalises "github.com/eko/gocache/store/redis/v4" →
+	// "github.com/eko/gocache/store/redis", matching v5, v6, … automatically.
+	allowedPkgPaths := map[string]bool{
+		"github.com/eko/gocache/store/redis":        true,
+		"github.com/eko/gocache/store/rediscluster": true,
+		"github.com/eko/gocache/store/rueidis":      true,
+		"github.com/eko/gocache/store/valkey":       true,
+		"github.com/eko/gocache/store/memcache":     true,
+		"github.com/eko/gocache/store/hazelcast":    true,
+	}
+
+	if !allowedPkgPaths[stripMajorVersion(t.PkgPath())] {
+		return fmt.Errorf("cache store %q (%s) is not a known distributed store; "+
+			"use one of the approved gocache store implementations (redis, rediscluster, "+
+			"rueidis, valkey, memcache, hazelcast) to ensure correctness in multi-instance "+
+			"deployments; to use a custom or in-memory store, set SkipDatabaseCache=true",
+			t.Name(), t.PkgPath())
+	}
 
 	return nil
 }

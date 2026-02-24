@@ -57,8 +57,9 @@ func (a *alwaysFailLocker) Obtain(_ context.Context, _ string, _ time.Duration, 
 type customStubDB struct {
 	stubDB
 
-	findOpenIssueFn func(ctx context.Context, channelID, correlationID string) (string, json.RawMessage, error)
-	saveAlertFn     func(ctx context.Context, alert *types.Alert) error
+	findOpenIssueFn   func(ctx context.Context, channelID, correlationID string) (string, json.RawMessage, error)
+	findMoveMappingFn func(ctx context.Context, channelID, correlationID string) (json.RawMessage, error)
+	saveAlertFn       func(ctx context.Context, alert *types.Alert) error
 }
 
 func (c *customStubDB) FindOpenIssueByCorrelationID(ctx context.Context, channelID, correlationID string) (string, json.RawMessage, error) {
@@ -67,6 +68,14 @@ func (c *customStubDB) FindOpenIssueByCorrelationID(ctx context.Context, channel
 	}
 
 	return "", nil, nil
+}
+
+func (c *customStubDB) FindMoveMapping(ctx context.Context, channelID, correlationID string) (json.RawMessage, error) {
+	if c.findMoveMappingFn != nil {
+		return c.findMoveMappingFn(ctx, channelID, correlationID)
+	}
+
+	return nil, nil
 }
 
 func (c *customStubDB) SaveAlert(ctx context.Context, alert *types.Alert) error {
@@ -144,6 +153,8 @@ func TestChannelManager_ProcessAlert_AckNack(t *testing.T) {
 		slackClient  SlackClient
 		locker       ChannelLocker
 		alertData    types.Alert
+		alertSetupFn func(alert *models.Alert)
+		assertFn     func(t *testing.T)
 		expectedAck  bool
 		expectedNack bool
 	}{
@@ -257,6 +268,39 @@ func TestChannelManager_ProcessAlert_AckNack(t *testing.T) {
 			expectedAck:  false,
 			expectedNack: true,
 		},
+		{
+			name: "find_move_mapping_error_nacks_alert",
+			db: &customStubDB{
+				findMoveMappingFn: func(_ context.Context, _, _ string) (json.RawMessage, error) {
+					return nil, errors.New("db error")
+				},
+			},
+			slackClient:  &stubSlackClient{},
+			locker:       &NoopChannelLocker{},
+			alertData:    validAlert,
+			alertSetupFn: func(alert *models.Alert) { alert.OriginalSlackChannelID = channelID },
+			expectedAck:  false,
+			expectedNack: true,
+		},
+		{
+			name: "misrouted_alert_nacked_when_move_mapping_points_elsewhere",
+			db: &customStubDB{
+				findMoveMappingFn: func(_ context.Context, _, _ string) (json.RawMessage, error) {
+					m := models.NewMoveMapping("corr-123", channelID, "C-ESCALATED", models.MoveIssueReasonEscalation)
+					b, err := json.Marshal(m)
+					if err != nil {
+						return nil, err
+					}
+					return b, nil
+				},
+			},
+			slackClient:  &stubSlackClient{},
+			locker:       &NoopChannelLocker{},
+			alertData:    validAlert,
+			alertSetupFn: func(alert *models.Alert) { alert.OriginalSlackChannelID = channelID },
+			expectedAck:  false,
+			expectedNack: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -264,12 +308,18 @@ func TestChannelManager_ProcessAlert_AckNack(t *testing.T) {
 			t.Parallel()
 
 			alert, ackCalled, nackCalled := newTestAlertFromData(t, tt.alertData)
+			if tt.alertSetupFn != nil {
+				tt.alertSetupFn(alert)
+			}
 			cm := newTestChannelManager(t, channelID, tt.db, tt.slackClient, tt.locker)
 
 			_ = cm.processAlert(context.Background(), alert)
 
 			assert.Equal(t, tt.expectedAck, *ackCalled, "ack called mismatch")
 			assert.Equal(t, tt.expectedNack, *nackCalled, "nack called mismatch")
+			if tt.assertFn != nil {
+				tt.assertFn(t)
+			}
 		})
 	}
 }

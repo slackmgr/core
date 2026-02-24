@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/eko/gocache/lib/v4/store"
+	gocache_store "github.com/eko/gocache/store/go_cache/v4"
+	gocache "github.com/patrickmn/go-cache"
 	"github.com/slackmgr/core/config"
 	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
@@ -117,4 +121,97 @@ func TestManager_Run_NilGuards(t *testing.T) {
 			assert.Equal(t, tt.expectError, err.Error())
 		})
 	}
+}
+
+// stubCacheStore is a minimal stub implementing store.StoreInterface for validation tests.
+// It is not a known distributed store, so validateCacheStoreIsDistributed must reject it.
+type stubCacheStore struct{}
+
+func (s *stubCacheStore) Get(_ context.Context, _ any) (any, error) { return nil, nil }
+func (s *stubCacheStore) GetWithTTL(_ context.Context, _ any) (any, time.Duration, error) {
+	return nil, 0, nil
+}
+func (s *stubCacheStore) Set(_ context.Context, _ any, _ any, _ ...store.Option) error { return nil }
+func (s *stubCacheStore) Delete(_ context.Context, _ any) error                        { return nil }
+func (s *stubCacheStore) Invalidate(_ context.Context, _ ...store.InvalidateOption) error {
+	return nil
+}
+func (s *stubCacheStore) Clear(_ context.Context) error { return nil }
+func (s *stubCacheStore) GetType() string               { return "stub" }
+
+func TestValidateCacheStoreIsDistributed(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		store       store.StoreInterface
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:        "nil_store_returns_error",
+			store:       nil,
+			wantErr:     true,
+			errContains: "must not be nil",
+		},
+		{
+			name:        "go_cache_store_returns_error",
+			store:       gocache_store.NewGoCache(gocache.New(5*time.Minute, time.Minute)),
+			wantErr:     true,
+			errContains: "GoCacheStore",
+		},
+		{
+			name:        "unknown_stub_store_returns_error",
+			store:       &stubCacheStore{},
+			wantErr:     true,
+			errContains: "is not a known distributed store",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateCacheStoreIsDistributed(tt.store)
+
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContains)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestManager_Run_RejectInMemoryCacheStore(t *testing.T) {
+	t.Parallel()
+
+	// When SkipDatabaseCache=false (default), passing a go-cache (in-memory) store must
+	// cause Run() to return an error immediately, preventing silent misrouting in
+	// multi-instance deployments.
+	cfg := config.NewDefaultManagerConfig()
+	cfg.SkipDatabaseCache = false
+	cfg.SlackClient.AppToken = "xapp-test"
+	cfg.SlackClient.BotToken = "xoxb-test"
+
+	gocacheClient := gocache.New(5*time.Minute, time.Minute)
+	inMemoryStore := gocache_store.NewGoCache(gocacheClient)
+
+	m := New(
+		&stubDB{},
+		&stubFifoQueue{name: "alerts"},
+		&stubFifoQueue{name: "commands"},
+		inMemoryStore,
+		&NoopChannelLocker{},
+		&mockLogger{},
+		nil,
+		cfg,
+		nil,
+	)
+
+	err := m.Run(context.Background())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid cache store for multi-instance deployment")
 }

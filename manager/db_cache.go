@@ -21,7 +21,7 @@ type dbCacheMiddleware struct {
 	moveMappingCache            *internal.Cache
 }
 
-func newDBCacheMiddleware(db types.DB, cacheStore store.StoreInterface, logger types.Logger, cfg config.ManagerConfig) *dbCacheMiddleware {
+func newDBCacheMiddleware(db types.DB, cacheStore store.StoreInterface, logger types.Logger, cfg *config.ManagerConfig) *dbCacheMiddleware {
 	cacheKeyPrefix := cfg.CacheKeyPrefix + "db-cache:"
 
 	issueHashCache := internal.NewCache(cacheStore, cacheKeyPrefix+"issueHash:", logger)

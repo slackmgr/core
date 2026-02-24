@@ -292,6 +292,31 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		return fmt.Errorf("failed to clean alert escalations: %w", err)
 	}
 
+	// Re-check move mapping inside the lock — guards against the race where the coordinator
+	// routed this alert before a concurrent escalation saved the move mapping.
+	moveMappingBody, err := c.db.FindMoveMapping(ctx, alert.OriginalSlackChannelID, alert.CorrelationID)
+	if err != nil {
+		alert.Nack()
+		return fmt.Errorf("failed to re-verify move mapping: %w", err)
+	}
+
+	if moveMappingBody != nil {
+		moveMapping := &models.MoveMapping{}
+
+		if err := json.Unmarshal(moveMappingBody, moveMapping); err != nil {
+			alert.Nack()
+			return fmt.Errorf("failed to unmarshal move mapping during re-check: %w", err)
+		}
+
+		if moveMapping.TargetChannelID != c.channelID {
+			alert.Nack()
+			c.logger.WithFields(alert.LogFields()).
+				WithField("correct_channel_id", moveMapping.TargetChannelID).
+				Info("Alert was misrouted due to concurrent escalation; re-queuing for correct channel")
+			return nil
+		}
+	}
+
 	_, issueBody, err := c.db.FindOpenIssueByCorrelationID(ctx, c.channelID, alert.CorrelationID)
 	if err != nil {
 		// Transient: database call failed; nack so the alert is retried.
