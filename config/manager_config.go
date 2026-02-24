@@ -9,6 +9,11 @@ import (
 
 var encryptionKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9]{32}$`)
 
+// DefaultKeyPrefix is the default Redis key namespace used by all slackmgr components.
+// It is applied to cache keys, queue keys, and distributed gate keys.
+// Override it when running multiple independent slackmgr deployments against the same Redis instance.
+const DefaultKeyPrefix = "slack-manager:"
+
 // Validation constants for ManagerConfig drain timeout fields.
 // Drain timeouts control how long the system waits during graceful shutdown
 // to process remaining messages before forcefully terminating.
@@ -195,7 +200,7 @@ type ManagerConfig struct {
 // The SlackClient tokens are also empty and must be configured.
 func NewDefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
-		CacheKeyPrefix:             "slack-manager:",
+		CacheKeyPrefix:             DefaultKeyPrefix,
 		Location:                   time.UTC,
 		SlackClient:                NewDefaultSlackClientConfig(),
 		CoordinatorDrainTimeout:    DefaultCoordinatorDrainTimeout,

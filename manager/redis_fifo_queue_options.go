@@ -3,6 +3,8 @@ package manager
 import (
 	"errors"
 	"time"
+
+	"github.com/slackmgr/core/config"
 )
 
 // RedisFifoQueueOption is a function that configures RedisFifoQueueOptions.
@@ -54,7 +56,7 @@ type RedisFifoQueueOptions struct {
 
 func newRedisFifoQueueOptions() *RedisFifoQueueOptions {
 	return &RedisFifoQueueOptions{
-		keyPrefix:               "slack-manager:queue",
+		keyPrefix:               config.DefaultKeyPrefix + "queue",
 		consumerGroup:           "slack-manager",
 		pollInterval:            2 * time.Second,
 		maxStreamLength:         10000,

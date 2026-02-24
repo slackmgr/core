@@ -180,7 +180,7 @@ func NewDefaultAPIConfig() *APIConfig {
 		Verbose:                false,
 		RestPort:               "8080",
 		EncryptionKey:          "",
-		CacheKeyPrefix:         "slack-manager:",
+		CacheKeyPrefix:         DefaultKeyPrefix,
 		ErrorReportChannelID:   "",
 		MaxUsersInAlertChannel: 100,
 		RateLimitPerAlertChannel: &RateLimitConfig{

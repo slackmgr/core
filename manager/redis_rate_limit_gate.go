@@ -10,8 +10,6 @@ import (
 	"github.com/slackmgr/types"
 )
 
-const defaultKeyPrefix = "slack-manager:"
-
 // signal Lua script: set key to unixMilli only if the new value is later than
 // the existing one (or if the key does not exist).
 //
@@ -39,21 +37,17 @@ type RedisRateLimitGate struct {
 }
 
 // NewRedisRateLimitGate creates a RedisRateLimitGate.
-// keyPrefix is prepended to the Redis key (default "slack-manager:").
-// Pass a positive maxDrainWait to override the default 30-second drain limit.
-func NewRedisRateLimitGate(client redis.UniversalClient, logger types.Logger, keyPrefix string, maxDrainWait time.Duration) *RedisRateLimitGate {
-	if keyPrefix == "" {
-		keyPrefix = defaultKeyPrefix
-	}
-
-	if maxDrainWait <= 0 {
-		maxDrainWait = defaultMaxDrainWait
+// Optional behaviour (key prefix, drain wait) is configured via RedisRateLimitGateOption.
+func NewRedisRateLimitGate(client redis.UniversalClient, logger types.Logger, opts ...RedisRateLimitGateOption) *RedisRateLimitGate {
+	o := newRedisRateLimitGateOptions()
+	for _, opt := range opts {
+		opt(o)
 	}
 
 	return &RedisRateLimitGate{
 		client:       client,
-		key:          keyPrefix + "rate-limit-gate",
-		maxDrainWait: maxDrainWait,
+		key:          o.keyPrefix + "rate-limit-gate",
+		maxDrainWait: o.maxDrainWait,
 		logger:       logger,
 	}
 }
