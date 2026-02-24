@@ -45,6 +45,10 @@ This ensures code quality, prevents broken releases, and maintains consistency a
 
 After every code change, check whether `README.md` needs updating. The README is the public-facing documentation and must always reflect the actual code.
 
+## Examples Repo
+
+Do **not** modify files under `../examples/` unless explicitly asked to do so. They are updated independently.
+
 ## Tagging and Releases
 
 ### Process

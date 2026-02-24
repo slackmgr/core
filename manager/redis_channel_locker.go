@@ -7,6 +7,8 @@ import (
 
 	"github.com/bsm/redislock"
 	redis "github.com/redis/go-redis/v9"
+	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/types"
 )
 
 // lockReleaseTimeout is the timeout for lock release operations.
@@ -23,8 +25,10 @@ const lockReleaseTimeout = 2 * time.Second
 // The default retry backoff is 2 seconds, but it can be configured using the WithRetryBackoff method.
 type RedisChannelLocker struct {
 	client       *redislock.Client
+	rawClient    redis.UniversalClient
 	retryBackoff time.Duration
 	keyPrefix    string
+	maxDrainWait time.Duration
 }
 
 // RedisChannelLock is an implementation of the ChannelLock interface that uses Redis locks.
@@ -39,12 +43,15 @@ type RedisChannelLock struct {
 // It takes a Redis client as an argument, which is used to communicate with the Redis server.
 // The client should be configured with the appropriate Redis server address and authentication details.
 // The RedisChannelLocker can be configured with a custom retry backoff and key prefix using the WithRetryBackoff and WithKeyPrefix methods.
-// If no custom values are provided, it defaults to a retry backoff of 2 seconds and a key prefix of "slack-manager:channel-lock:".
+// If no custom values are provided, it defaults to a retry backoff of 2 seconds and the default key prefix ("slack-manager:").
+// Lock keys have the form <keyPrefix>channel-lock:<channelID>.
 func NewRedisChannelLocker(client *redis.Client) *RedisChannelLocker {
 	return &RedisChannelLocker{
 		client:       redislock.New(client),
+		rawClient:    client,
 		retryBackoff: 2 * time.Second,
-		keyPrefix:    "slack-manager:channel-lock:",
+		keyPrefix:    config.DefaultKeyPrefix,
+		maxDrainWait: defaultMaxDrainWait,
 	}
 }
 
@@ -60,12 +67,25 @@ func (r *RedisChannelLocker) WithRetryBackoff(backoff time.Duration) *RedisChann
 	return r
 }
 
-// WithKeyPrefix sets the Redis key prefix for the locks.
-// The default prefix is "slack-manager:channel-lock:".
+// WithKeyPrefix sets the Redis key namespace shared by all keys produced by this locker and its matching gate.
+// The default prefix is "slack-manager:" (config.DefaultKeyPrefix).
 // This prefix is used to avoid conflicts with other keys in Redis.
-// An empty prefix means that the locks will have keys equal to the Slack channel ID.
+// An empty prefix means that keys will have no namespace.
 func (r *RedisChannelLocker) WithKeyPrefix(prefix string) *RedisChannelLocker {
 	r.keyPrefix = prefix
+	return r
+}
+
+// WithMaxDrainWait sets the maximum time to wait for Socket Mode to go quiet
+// after a rate-limit window has expired before resuming with fail-open behaviour.
+// If the duration is zero or negative, the default of 30 seconds is used.
+func (r *RedisChannelLocker) WithMaxDrainWait(d time.Duration) *RedisChannelLocker {
+	if d <= 0 {
+		d = defaultMaxDrainWait
+	}
+
+	r.maxDrainWait = d
+
 	return r
 }
 
@@ -91,7 +111,7 @@ func (r *RedisChannelLocker) Obtain(ctx context.Context, key string, ttl time.Du
 		RetryStrategy: retryStrategy,
 	}
 
-	key = r.keyPrefix + key
+	key = r.keyPrefix + "channel-lock:" + key
 
 	lock, err := r.client.Obtain(ctx, key, ttl, opts)
 	if err != nil {
@@ -102,6 +122,13 @@ func (r *RedisChannelLocker) Obtain(ctx context.Context, key string, ttl time.Du
 	}
 
 	return &RedisChannelLock{lock: lock}, nil
+}
+
+// newRateLimitGate returns a RedisRateLimitGate backed by the same Redis client,
+// sharing the same key prefix and drain-wait timeout as this locker.
+// This satisfies the package-private rateLimitGateFactory interface used by manager.New().
+func (r *RedisChannelLocker) newRateLimitGate(logger types.Logger) RateLimitGate { //nolint:ireturn
+	return NewRedisRateLimitGate(r.rawClient, logger, r.keyPrefix, r.maxDrainWait)
 }
 
 // Key returns the key associated with the RedisChannelLock instance.

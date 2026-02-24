@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/slackmgr/core/config"
 	"github.com/slackmgr/types"
 )
 
@@ -37,17 +38,22 @@ type RedisRateLimitGate struct {
 }
 
 // NewRedisRateLimitGate creates a RedisRateLimitGate.
-// Optional behaviour (key prefix, drain wait) is configured via RedisRateLimitGateOption.
-func NewRedisRateLimitGate(client redis.UniversalClient, logger types.Logger, opts ...RedisRateLimitGateOption) *RedisRateLimitGate {
-	o := newRedisRateLimitGateOptions()
-	for _, opt := range opts {
-		opt(o)
+// keyPrefix is prepended to the Redis key (defaults to config.DefaultKeyPrefix when empty).
+// maxDrainWait is the maximum time to wait for Socket Mode to go quiet after the rate-limit
+// window has expired; zero or negative values use the default of 30 seconds.
+func NewRedisRateLimitGate(client redis.UniversalClient, logger types.Logger, keyPrefix string, maxDrainWait time.Duration) *RedisRateLimitGate {
+	if keyPrefix == "" {
+		keyPrefix = config.DefaultKeyPrefix
+	}
+
+	if maxDrainWait <= 0 {
+		maxDrainWait = defaultMaxDrainWait
 	}
 
 	return &RedisRateLimitGate{
 		client:       client,
-		key:          o.keyPrefix + "rate-limit-gate",
-		maxDrainWait: o.maxDrainWait,
+		key:          keyPrefix + "rate-limit-gate",
+		maxDrainWait: maxDrainWait,
 		logger:       logger,
 	}
 }

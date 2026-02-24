@@ -36,7 +36,14 @@ type Manager struct {
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, locker ChannelLocker, logger types.Logger, metrics types.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings, rateLimitGate RateLimitGate) *Manager {
+// rateLimitGateFactory is a package-private interface satisfied by ChannelLocker implementations
+// that can produce a matching RateLimitGate (e.g. RedisChannelLocker → RedisRateLimitGate).
+// Lockers that do not implement this interface fall back to LocalRateLimitGate.
+type rateLimitGateFactory interface {
+	newRateLimitGate(logger types.Logger) RateLimitGate
+}
+
+func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, locker ChannelLocker, logger types.Logger, metrics types.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
 	if cacheStore == nil {
 		gocacheClient := gocache.New(5*time.Minute, time.Minute)
 		cacheStore = gocache_store.NewGoCache(gocacheClient)
@@ -50,8 +57,14 @@ func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore s
 		managerSettings = &config.ManagerSettings{}
 	}
 
-	if rateLimitGate == nil {
-		rateLimitGate = NewLocalRateLimitGate(logger, 0)
+	// If the locker implements rateLimitGateFactory, use it to create a matching RateLimitGate.
+	// This allows RedisChannelLocker to provide a RedisRateLimitGate that uses the same Redis client and configuration.
+	// If the locker does not implement rateLimitGateFactory, fall back to a LocalRateLimitGate that operates in-memory.
+	var gate RateLimitGate
+	if factory, ok := locker.(rateLimitGateFactory); ok {
+		gate = factory.newRateLimitGate(logger)
+	} else {
+		gate = NewLocalRateLimitGate(logger, 0)
 	}
 
 	return &Manager{
@@ -62,7 +75,7 @@ func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore s
 		locker:          locker,
 		logger:          logger,
 		metrics:         metrics,
-		gate:            rateLimitGate,
+		gate:            gate,
 		cfg:             cfg,
 		managerSettings: models.NewManagerSettingsWrapper(managerSettings),
 	}

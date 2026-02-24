@@ -113,7 +113,7 @@ func TestManager_Run_NilGuards(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			m := New(tt.db, tt.alertQueue, tt.commandQueue, nil, tt.locker, &mockLogger{}, nil, cfg, nil, nil)
+			m := New(tt.db, tt.alertQueue, tt.commandQueue, nil, tt.locker, &mockLogger{}, nil, cfg, nil)
 
 			err := m.Run(context.Background())
 
@@ -207,7 +207,6 @@ func TestManager_Run_RejectInMemoryCacheStore(t *testing.T) {
 		&mockLogger{},
 		nil,
 		cfg,
-		nil,
 		nil,
 	)
 
