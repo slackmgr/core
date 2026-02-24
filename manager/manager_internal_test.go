@@ -63,9 +63,16 @@ func (s *stubFifoQueue) Receive(_ context.Context, _ chan<- *types.FifoQueueItem
 func TestManager_Run_NilGuards(t *testing.T) {
 	t.Parallel()
 
+	// minimalCfg is used for tests that fail before cfg.Validate() is reached.
 	// SkipDatabaseCache must be true to prevent New() from wrapping a nil DB
 	// in the cache middleware, which would make m.db non-nil in Run().
-	cfg := &config.ManagerConfig{SkipDatabaseCache: true}
+	minimalCfg := &config.ManagerConfig{SkipDatabaseCache: true}
+
+	// validCfg is used for tests that fail after cfg.Validate() is reached.
+	validCfg := config.NewDefaultManagerConfig()
+	validCfg.SkipDatabaseCache = true
+	validCfg.SlackClient.AppToken = "xapp-test"
+	validCfg.SlackClient.BotToken = "xoxb-test"
 
 	tests := []struct {
 		name         string
@@ -73,6 +80,7 @@ func TestManager_Run_NilGuards(t *testing.T) {
 		alertQueue   FifoQueue
 		commandQueue FifoQueue
 		locker       ChannelLocker
+		cfg          *config.ManagerConfig
 		expectError  string
 	}{
 		{
@@ -81,6 +89,7 @@ func TestManager_Run_NilGuards(t *testing.T) {
 			alertQueue:   &stubFifoQueue{name: "alerts"},
 			commandQueue: &stubFifoQueue{name: "commands"},
 			locker:       &NoopChannelLocker{},
+			cfg:          minimalCfg,
 			expectError:  "database cannot be nil",
 		},
 		{
@@ -89,6 +98,7 @@ func TestManager_Run_NilGuards(t *testing.T) {
 			alertQueue:   nil,
 			commandQueue: &stubFifoQueue{name: "commands"},
 			locker:       &NoopChannelLocker{},
+			cfg:          minimalCfg,
 			expectError:  "alert queue cannot be nil",
 		},
 		{
@@ -97,6 +107,7 @@ func TestManager_Run_NilGuards(t *testing.T) {
 			alertQueue:   &stubFifoQueue{name: "alerts"},
 			commandQueue: nil,
 			locker:       &NoopChannelLocker{},
+			cfg:          minimalCfg,
 			expectError:  "command queue cannot be nil",
 		},
 		{
@@ -105,7 +116,8 @@ func TestManager_Run_NilGuards(t *testing.T) {
 			alertQueue:   &stubFifoQueue{name: "alerts"},
 			commandQueue: &stubFifoQueue{name: "commands"},
 			locker:       nil,
-			expectError:  "channel locker cannot be nil",
+			cfg:          validCfg,
+			expectError:  "channel locker cannot be nil unless IsSingleInstanceDeployment is true",
 		},
 	}
 
@@ -113,7 +125,7 @@ func TestManager_Run_NilGuards(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			m := New(tt.db, tt.alertQueue, tt.commandQueue, nil, tt.locker, &mockLogger{}, nil, cfg, nil)
+			m := New(tt.db, tt.alertQueue, tt.commandQueue, nil, tt.locker, &mockLogger{}, nil, tt.cfg, nil)
 
 			err := m.Run(context.Background())
 

@@ -127,12 +127,6 @@ func (m *Manager) Run(ctx context.Context) error {
 		return errors.New("command queue cannot be nil")
 	}
 
-	// We could create a default in-memory locker, but this decision needs to be explicit.
-	// Running the manager in a distributed environment without a proper channel locker will end badly.
-	if m.locker == nil {
-		return errors.New("channel locker cannot be nil")
-	}
-
 	if m.logger == nil {
 		return errors.New("logger cannot be nil")
 	}
@@ -143,6 +137,18 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	if err := m.cfg.Validate(); err != nil {
 		return fmt.Errorf("failed to validate configuration: %w", err)
+	}
+
+	if m.cfg.IsSingleInstanceDeployment {
+		m.logger.Info("Running in single-instance deployment mode. Multi-instance safeguards are disabled.")
+	}
+
+	if m.locker == nil {
+		if !m.cfg.IsSingleInstanceDeployment {
+			// Require an explicit locker in multi-instance deployments to prevent race conditions.
+			return errors.New("channel locker cannot be nil unless IsSingleInstanceDeployment is true")
+		}
+		m.locker = &NoopChannelLocker{}
 	}
 
 	if m.cfg.EncryptionKey == "" {
@@ -157,9 +163,14 @@ func (m *Manager) Run(ctx context.Context) error {
 		return errors.New("alert queue and command queue must have different names")
 	}
 
+	// Add the DB cache middleware if not skipped by config.
+	// In multi-instance deployments, validate that the provided cache store is a known distributed implementation
+	// to prevent subtle and hard-to-debug cache consistency issues.
 	if !m.cfg.SkipDatabaseCache {
-		if err := validateCacheStoreIsDistributed(m.cacheStore); err != nil {
-			return fmt.Errorf("invalid cache store for multi-instance deployment: %w", err)
+		if !m.cfg.IsSingleInstanceDeployment {
+			if err := validateCacheStoreIsDistributed(m.cacheStore); err != nil {
+				return fmt.Errorf("invalid cache store for multi-instance deployment: %w", err)
+			}
 		}
 		m.db = newDBCacheMiddleware(m.db, m.cacheStore, m.logger, m.cfg)
 	}

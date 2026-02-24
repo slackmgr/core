@@ -102,6 +102,18 @@ type ManagerConfig struct {
 	// against the same Redis cluster that should not share cache data.
 	CacheKeyPrefix string `json:"cacheKeyPrefix" yaml:"cacheKeyPrefix"`
 
+	// IsSingleInstanceDeployment disables certain safeguards that exist to protect
+	// correctness in multi-instance deployments. Setting this to true is ONLY safe
+	// when exactly one manager instance will be running at any given time.
+	//
+	// Specifically, setting this to true:
+	//   - Allows a nil ChannelLocker (a no-op in-process locker will be used automatically).
+	//   - Allows an in-memory cache store without requiring SkipDatabaseCache=true.
+	//
+	// WARNING: Do NOT set this to true in production environments that run more than
+	// one manager instance. Doing so will cause race conditions and data inconsistency.
+	IsSingleInstanceDeployment bool `json:"isSingleInstanceDeployment" yaml:"isSingleInstanceDeployment"`
+
 	// SkipDatabaseCache disables the in-memory database query cache when set to true.
 	// The database cache reduces load on the database by caching frequently accessed
 	// data like issue states and channel configurations.
