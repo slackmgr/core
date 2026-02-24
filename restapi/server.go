@@ -40,20 +40,20 @@ const (
 	maxRetryAfterDelay = 24 * time.Hour // cap for rate.InfDuration from ReserveN
 )
 
-// FifoQueueConsumer is the read side of a FIFO queue. It is used by the Server to
+// FifoQueueConsumer is the read side of a FIFO queue. It is used by the [Server] to
 // consume raw alert items delivered outside of the HTTP API (e.g. via a secondary
-// SQS or Redis Streams queue registered with WithRawAlertConsumer).
+// SQS or Redis Streams queue registered with [Server.WithRawAlertConsumer]).
 type FifoQueueConsumer interface {
 	Receive(ctx context.Context, sinkCh chan<- *types.FifoQueueItem) error
 }
 
-// FifoQueueProducer is the write side of a FIFO queue. The Server uses it to
+// FifoQueueProducer is the write side of a FIFO queue. The [Server] uses it to
 // dispatch processed alerts to the Manager for issue lifecycle handling.
 type FifoQueueProducer interface {
 	Send(ctx context.Context, slackChannelID, dedupID, body string) error
 }
 
-// SlackClient is the Slack API subset required by the API server for channel
+// SlackClient is the Slack API subset required by the [Server] for channel
 // validation (membership checks, user counts) and for listing managed channels.
 type SlackClient interface {
 	GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error)
@@ -66,8 +66,8 @@ type SlackClient interface {
 // monitoring systems, applies per-channel token-bucket rate limiting, and enqueues
 // them for the Manager to process into Slack issues.
 //
-// Create a Server with New and start it with Run. API settings can be updated at
-// runtime via UpdateSettings without restarting the service.
+// Create a Server with [New] and start it with [Server.Run]. API settings can be
+// updated at runtime via [Server.UpdateSettings] without restarting the service.
 type Server struct {
 	rawAlertConsumers   []FifoQueueConsumer
 	alertQueue          FifoQueueProducer
@@ -83,7 +83,7 @@ type Server struct {
 	defaultPretty       bool
 }
 
-// New creates a Server with the provided dependencies.
+// New creates a [Server] with the provided dependencies.
 //
 // Nil cacheStore defaults to an in-process go-cache instance (not suitable for
 // multi-instance deployments that require shared channel-info caching).
@@ -115,8 +115,9 @@ func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, log
 	}
 }
 
-// WithRawAlertConsumer defines an alternative alert consumer, which reads from a FIFO queue and processes the items similarly to the main rest API.
-// The consumer is started by Run(ctx), and the queue is consumed in a separate goroutine.
+// WithRawAlertConsumer registers a [FifoQueueConsumer] that reads alerts outside of
+// the HTTP API (e.g. from SQS or Redis Streams). The consumer is started by [Server.Run]
+// in a dedicated goroutine.
 //
 // Multiple raw alert consumers can be added.
 //

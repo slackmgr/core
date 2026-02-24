@@ -26,7 +26,7 @@ end
 return 1
 `)
 
-// RedisRateLimitGate is a distributed RateLimitGate backed by Redis. It is
+// RedisRateLimitGate is a distributed [RateLimitGate] backed by Redis. It is
 // suitable for multi-instance deployments where every instance must respect
 // the same rate-limit window.
 type RedisRateLimitGate struct {
@@ -37,7 +37,7 @@ type RedisRateLimitGate struct {
 	logger       types.Logger
 }
 
-// NewRedisRateLimitGate creates a RedisRateLimitGate.
+// NewRedisRateLimitGate creates a [RedisRateLimitGate].
 // keyPrefix is prepended to the Redis key (defaults to config.DefaultKeyPrefix when empty).
 // maxDrainWait is the maximum time to wait for Socket Mode to go quiet after the rate-limit
 // window has expired; zero or negative values use the default of 30 seconds.
@@ -60,7 +60,7 @@ func NewRedisRateLimitGate(client redis.UniversalClient, logger types.Logger, ke
 
 // Signal stores the rate-limit deadline in Redis using a compare-and-swap Lua script,
 // ensuring that all instances in a multi-instance deployment share the same window.
-// The key's TTL is set to expire when the window closes, so IsBlocked is self-cleaning.
+// The key's TTL is set to expire when the window closes, so [RedisRateLimitGate.IsBlocked] is self-cleaning.
 func (g *RedisRateLimitGate) Signal(ctx context.Context, until time.Time) error {
 	unixMilli := until.UnixMilli()
 	ttlMs := time.Until(until).Milliseconds()
@@ -78,7 +78,7 @@ func (g *RedisRateLimitGate) Signal(ctx context.Context, until time.Time) error 
 
 // Wait polls Redis every 500 ms until the rate-limit key disappears, then waits for
 // Socket Mode to drain. Redis errors are treated as non-blocking (fail-open) to avoid
-// stalling channel managers when Redis is temporarily unavailable.
+// stalling channel managers when Redis is temporarily unavailable. Uses [RedisRateLimitGate.IsBlocked] for polling.
 func (g *RedisRateLimitGate) Wait(ctx context.Context) error {
 	// Fast path: check if blocked at all.
 	blocked, err := g.IsBlocked(ctx)
@@ -159,7 +159,7 @@ func (g *RedisRateLimitGate) IsBlocked(ctx context.Context) (bool, error) {
 }
 
 // SetReadyCheck registers the function used to determine when Socket Mode has no
-// in-flight handlers. Called once from Manager.Run after the Slack client connects.
+// in-flight handlers. Called once from [Manager.Run] after the Slack client connects.
 func (g *RedisRateLimitGate) SetReadyCheck(fn func() bool) {
 	g.readyFn = fn
 }

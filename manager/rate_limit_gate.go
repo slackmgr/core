@@ -11,9 +11,9 @@ import (
 const defaultMaxDrainWait = 30 * time.Second
 
 // RateLimitGate coordinates a global pause across all channel managers when a
-// Slack 429 is detected. Channel managers call Wait before processing each
-// work item; the gate blocks until the rate-limit window has expired and the
-// Socket Mode handler is quiet (no in-flight event handlers).
+// Slack 429 is detected. Channel managers call [RateLimitGate.Wait] before
+// processing each work item; the gate blocks until the rate-limit window has
+// expired and the Socket Mode handler is quiet (no in-flight event handlers).
 type RateLimitGate interface {
 	// Signal records that a rate limit was hit and that callers should block
 	// until `until` has passed. Implementations extend the window if `until`
@@ -29,14 +29,14 @@ type RateLimitGate interface {
 	IsBlocked(ctx context.Context) (bool, error)
 
 	// SetReadyCheck registers a function that returns true when Socket Mode is
-	// quiet (no in-flight event handlers). Must be called once from manager.Run
+	// quiet (no in-flight event handlers). Must be called once from [Manager.Run]
 	// after the Slack client is connected.
 	SetReadyCheck(fn func() bool)
 }
 
-// LocalRateLimitGate is an in-process RateLimitGate implementation suitable
+// LocalRateLimitGate is an in-process [RateLimitGate] implementation suitable
 // for single-instance deployments. For multi-instance deployments use
-// RedisRateLimitGate so that all instances respect the same rate-limit window.
+// [RedisRateLimitGate] so that all instances respect the same rate-limit window.
 type LocalRateLimitGate struct {
 	mu           sync.RWMutex
 	blockedUntil time.Time
@@ -45,7 +45,7 @@ type LocalRateLimitGate struct {
 	logger       types.Logger
 }
 
-// NewLocalRateLimitGate creates a LocalRateLimitGate.
+// NewLocalRateLimitGate creates a [LocalRateLimitGate].
 // Pass a positive maxDrainWait to override the default 30-second Socket Mode
 // drain limit; zero or negative values use the default.
 func NewLocalRateLimitGate(logger types.Logger, maxDrainWait time.Duration) *LocalRateLimitGate {
@@ -143,7 +143,7 @@ func (g *LocalRateLimitGate) IsBlocked(_ context.Context) (bool, error) {
 }
 
 // SetReadyCheck registers the function used to determine when Socket Mode has no
-// in-flight handlers. Called once from Manager.Run after the Slack client connects.
+// in-flight handlers. Called once from [Manager.Run] after the Slack client connects.
 func (g *LocalRateLimitGate) SetReadyCheck(fn func() bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -151,7 +151,7 @@ func (g *LocalRateLimitGate) SetReadyCheck(fn func() bool) {
 	g.readyFn = fn
 }
 
-// NoopRateLimitGate is a no-op RateLimitGate for tests and single-instance
+// NoopRateLimitGate is a no-op [RateLimitGate] for tests and single-instance
 // deployments that do not need distributed rate-limit coordination.
 type NoopRateLimitGate struct{}
 

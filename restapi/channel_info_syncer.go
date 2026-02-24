@@ -13,11 +13,11 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-// ChannelInfoProvider supplies Slack channel metadata to the API server for
+// ChannelInfoProvider supplies Slack channel metadata to the [Server] for
 // request validation and channel listing.
 type ChannelInfoProvider interface {
-	// GetChannelInfo returns metadata for the given Slack channel ID. The result is
-	// served from an internal cache and refreshed periodically in the background.
+	// GetChannelInfo returns [ChannelInfo] for the given Slack channel ID. The result
+	// is served from an internal cache and refreshed periodically in the background.
 	// A cache miss triggers a direct Slack API lookup.
 	GetChannelInfo(ctx context.Context, channel string) (*ChannelInfo, error)
 
@@ -47,7 +47,7 @@ type managedChannelsData struct {
 	byName map[string]*internal.ChannelSummary
 }
 
-// ChannelInfo contains information about a Slack channel.
+// ChannelInfo contains information about a Slack channel. Returned by [ChannelInfoProvider.GetChannelInfo].
 type ChannelInfo struct {
 	ChannelExists      bool
 	ChannelIsArchived  bool

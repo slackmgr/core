@@ -17,12 +17,12 @@ import (
 // This should be shorter than the drain timeouts (default 3-5s) since this is a simple Redis DEL operation.
 const lockReleaseTimeout = 2 * time.Second
 
-// RedisChannelLocker is an implementation of the ChannelLocker interface that uses Redis for distributed locking.
+// RedisChannelLocker is an implementation of the [ChannelLocker] interface that uses Redis for distributed locking.
 // It allows multiple instances of the manager to coordinate access to channels, ensuring that only one instance can perform
 // operations on a channel at a time.
 // The locker uses a key prefix to avoid conflicts with other locks in Redis.
 // It also supports retry backoff for obtaining locks, allowing for configurable retry strategies.
-// The default retry backoff is 2 seconds, but it can be configured using the WithRetryBackoff method.
+// The default retry backoff is 2 seconds, but it can be configured using [RedisChannelLocker.WithRetryBackoff].
 type RedisChannelLocker struct {
 	client       *redislock.Client
 	rawClient    redis.UniversalClient
@@ -31,18 +31,18 @@ type RedisChannelLocker struct {
 	maxDrainWait time.Duration
 }
 
-// RedisChannelLock is an implementation of the ChannelLock interface that uses Redis locks.
+// RedisChannelLock is an implementation of the [ChannelLock] interface that uses Redis locks.
 // It represents a lock on a specific channel.
-// It is returned by the RedisChannelLocker when a lock is successfully obtained.
-// The lock can be released using the Release method, which will remove the lock from Redis.
+// It is returned by [RedisChannelLocker] when a lock is successfully obtained.
+// The lock can be released using [RedisChannelLock.Release], which will remove the lock from Redis.
 type RedisChannelLock struct {
 	lock *redislock.Lock
 }
 
-// NewRedisChannelLocker creates a new RedisChannelLocker instance.
+// NewRedisChannelLocker creates a new [RedisChannelLocker] instance.
 // It takes a Redis client as an argument, which is used to communicate with the Redis server.
 // The client should be configured with the appropriate Redis server address and authentication details.
-// The RedisChannelLocker can be configured with a custom retry backoff and key prefix using the WithRetryBackoff and WithKeyPrefix methods.
+// The RedisChannelLocker can be configured with a custom retry backoff and key prefix using [RedisChannelLocker.WithRetryBackoff] and [RedisChannelLocker.WithKeyPrefix].
 // If no custom values are provided, it defaults to a retry backoff of 2 seconds and the default key prefix ("slack-manager:").
 // Lock keys have the form <keyPrefix>channel-lock:<channelID>.
 func NewRedisChannelLocker(client *redis.Client) *RedisChannelLocker {
@@ -91,8 +91,8 @@ func (r *RedisChannelLocker) WithMaxDrainWait(d time.Duration) *RedisChannelLock
 
 // Obtain tries to obtain a lock for the given key (channel ID) with a specified TTL (time to live).
 // It uses a retry strategy based on the configured retry backoff and max wait duration.
-// If the lock is successfully obtained, it returns a RedisChannelLock instance.
-// If the lock cannot be obtained within the max wait duration, it returns ErrChannelLockUnavailable.
+// If the lock is successfully obtained, it returns a [RedisChannelLock] instance.
+// If the lock cannot be obtained within the max wait duration, it returns [ErrChannelLockUnavailable].
 // The key is prefixed with the configured key prefix to avoid conflicts with other locks in Redis.
 func (r *RedisChannelLocker) Obtain(ctx context.Context, key string, ttl time.Duration, maxWait time.Duration) (ChannelLock, error) { //nolint:ireturn
 	var retryStrategy redislock.RetryStrategy
@@ -132,7 +132,7 @@ func (r *RedisChannelLocker) newRateLimitGate(logger types.Logger) RateLimitGate
 }
 
 // Key returns the full Redis key of the lock, including its namespace prefix and
-// channel ID segment. Returns an empty string if the lock has been released.
+// channel ID segment. Returns an empty string if [RedisChannelLock.Release] has been called.
 func (l *RedisChannelLock) Key() string {
 	if l.lock == nil {
 		return ""

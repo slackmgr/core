@@ -27,11 +27,12 @@ type SlackClient interface {
 	UpdateSingleIssueWithThrottling(ctx context.Context, issue *models.Issue, reason string, issuesInChannel int) error
 
 	// UpdateSingleIssue updates the Slack message for one issue without throttling.
+	// Use [SlackClient.UpdateSingleIssueWithThrottling] when processing incoming alerts.
 	UpdateSingleIssue(ctx context.Context, issue *models.Issue, reason string) error
 
 	// Delete removes an issue's Slack message. When updateIfMessageHasReplies is true
 	// and the post already has thread replies, the message is replaced with a tombstone
-	// instead of being deleted outright.
+	// instead of being deleted outright. To delete an arbitrary post use [SlackClient.DeletePost].
 	Delete(ctx context.Context, issue *models.Issue, reason string, updateIfMessageHasReplies bool) error
 
 	// DeletePost deletes an arbitrary Slack message identified by channelID and timestamp.

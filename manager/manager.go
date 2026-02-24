@@ -24,8 +24,8 @@ import (
 // issues. It connects to Slack via Socket Mode, coordinates per-channel workers,
 // and persists issue state through the injected database.
 //
-// Create a Manager with New and start it with Run. Settings can be updated at
-// runtime via UpdateSettings without restarting the service.
+// Create a Manager with [New] and start it with [Manager.Run]. Settings can be
+// updated at runtime via [Manager.UpdateSettings] without restarting the service.
 type Manager struct {
 	db              types.DB
 	slackClient     *slack.Client
@@ -49,16 +49,16 @@ type rateLimitGateFactory interface {
 	newRateLimitGate(logger types.Logger) RateLimitGate
 }
 
-// New creates a Manager with the provided dependencies.
+// New creates a [Manager] with the provided dependencies.
 //
 // Nil cacheStore defaults to an in-process go-cache instance (not suitable for
 // multi-instance deployments unless SkipDatabaseCache is true).
 // Nil metrics defaults to a no-op implementation.
 // Nil managerSettings defaults to zero-value settings.
 //
-// The RateLimitGate is chosen automatically from the locker: RedisChannelLocker
-// produces a RedisRateLimitGate sharing the same Redis client and key prefix;
-// all other lockers fall back to LocalRateLimitGate.
+// The [RateLimitGate] is chosen automatically from the locker: [RedisChannelLocker]
+// produces a [RedisRateLimitGate] sharing the same Redis client and key prefix;
+// all other lockers fall back to [LocalRateLimitGate].
 func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, locker ChannelLocker, logger types.Logger, metrics types.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
 	if cacheStore == nil {
 		gocacheClient := gocache.New(5*time.Minute, time.Minute)
@@ -97,10 +97,10 @@ func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore s
 	}
 }
 
-// RegisterWebhookHandler adds a WebhookHandler that is consulted whenever an issue
-// has a webhook callback configured. Handlers are tried in registration order; the
-// first one whose ShouldHandleWebhook returns true handles the call. Returns the
-// Manager to allow method chaining.
+// RegisterWebhookHandler adds a [WebhookHandler] that is consulted whenever an
+// issue has a webhook callback configured. Handlers are tried in registration
+// order; the first one whose ShouldHandleWebhook returns true handles the call.
+// Returns the [Manager] to allow method chaining.
 func (m *Manager) RegisterWebhookHandler(handler WebhookHandler) *Manager {
 	m.webhookHandlers = append(m.webhookHandlers, handler)
 	return m
