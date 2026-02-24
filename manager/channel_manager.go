@@ -55,8 +55,8 @@ func newChannelManager(channelID string, slackClient SlackClient, db types.DB, l
 		cfg:             cfg,
 		managerSettings: managerSettings,
 		gate:            gate,
-		alertCh:         make(chan *models.Alert, 1000),
-		commandCh:       make(chan *models.Command, 100),
+		alertCh:         make(chan *models.Alert, 10),
+		commandCh:       make(chan *models.Command, 10),
 		keepAliveCh:     make(chan struct{}, 10),
 	}
 

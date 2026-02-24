@@ -155,8 +155,8 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	m.slackClient.SetIssueFinder(m.coordinator)
 
-	alertCh := make(chan models.InFlightMessage, 1000)
-	commandCh := make(chan models.InFlightMessage, 1000)
+	alertCh := make(chan models.InFlightMessage, 50)
+	commandCh := make(chan models.InFlightMessage, 50)
 
 	errg, ctx := errgroup.WithContext(ctx)
 
