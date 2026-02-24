@@ -59,6 +59,8 @@ func NewLocalRateLimitGate(logger types.Logger, maxDrainWait time.Duration) *Loc
 	}
 }
 
+// Signal records a rate-limit deadline. The blocked window is extended if until
+// is later than any previously recorded deadline.
 func (g *LocalRateLimitGate) Signal(_ context.Context, until time.Time) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -70,6 +72,8 @@ func (g *LocalRateLimitGate) Signal(_ context.Context, until time.Time) error {
 	return nil
 }
 
+// Wait blocks until the rate-limit window has expired and Socket Mode is quiet.
+// Returns immediately when the gate is not blocked.
 func (g *LocalRateLimitGate) Wait(ctx context.Context) error {
 	// Fast path: not blocked.
 	g.mu.RLock()
@@ -130,6 +134,7 @@ func (g *LocalRateLimitGate) Wait(ctx context.Context) error {
 	return nil
 }
 
+// IsBlocked reports whether the rate-limit window is currently active.
 func (g *LocalRateLimitGate) IsBlocked(_ context.Context) (bool, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -137,6 +142,8 @@ func (g *LocalRateLimitGate) IsBlocked(_ context.Context) (bool, error) {
 	return time.Now().Before(g.blockedUntil), nil
 }
 
+// SetReadyCheck registers the function used to determine when Socket Mode has no
+// in-flight handlers. Called once from Manager.Run after the Slack client connects.
 func (g *LocalRateLimitGate) SetReadyCheck(fn func() bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -148,7 +155,14 @@ func (g *LocalRateLimitGate) SetReadyCheck(fn func() bool) {
 // deployments that do not need distributed rate-limit coordination.
 type NoopRateLimitGate struct{}
 
+// Signal is a no-op; the gate never records a rate-limit deadline.
 func (n *NoopRateLimitGate) Signal(_ context.Context, _ time.Time) error { return nil }
-func (n *NoopRateLimitGate) Wait(_ context.Context) error                { return nil }
-func (n *NoopRateLimitGate) IsBlocked(_ context.Context) (bool, error)   { return false, nil }
-func (n *NoopRateLimitGate) SetReadyCheck(_ func() bool)                 {}
+
+// Wait is a no-op; the gate never blocks callers.
+func (n *NoopRateLimitGate) Wait(_ context.Context) error { return nil }
+
+// IsBlocked always returns false; the gate is never blocking.
+func (n *NoopRateLimitGate) IsBlocked(_ context.Context) (bool, error) { return false, nil }
+
+// SetReadyCheck is a no-op; the gate does not use a ready-check function.
+func (n *NoopRateLimitGate) SetReadyCheck(_ func() bool) {}

@@ -40,14 +40,21 @@ const (
 	maxRetryAfterDelay = 24 * time.Hour // cap for rate.InfDuration from ReserveN
 )
 
+// FifoQueueConsumer is the read side of a FIFO queue. It is used by the Server to
+// consume raw alert items delivered outside of the HTTP API (e.g. via a secondary
+// SQS or Redis Streams queue registered with WithRawAlertConsumer).
 type FifoQueueConsumer interface {
 	Receive(ctx context.Context, sinkCh chan<- *types.FifoQueueItem) error
 }
 
+// FifoQueueProducer is the write side of a FIFO queue. The Server uses it to
+// dispatch processed alerts to the Manager for issue lifecycle handling.
 type FifoQueueProducer interface {
 	Send(ctx context.Context, slackChannelID, dedupID, body string) error
 }
 
+// SlackClient is the Slack API subset required by the API server for channel
+// validation (membership checks, user counts) and for listing managed channels.
 type SlackClient interface {
 	GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error)
 	GetUserIDsInChannel(ctx context.Context, channelID string) (map[string]struct{}, error)
@@ -55,6 +62,12 @@ type SlackClient interface {
 	ListBotChannels(ctx context.Context) ([]*internal.ChannelSummary, error)
 }
 
+// Server is the Slack Manager REST API server. It accepts alerts from external
+// monitoring systems, applies per-channel token-bucket rate limiting, and enqueues
+// them for the Manager to process into Slack issues.
+//
+// Create a Server with New and start it with Run. API settings can be updated at
+// runtime via UpdateSettings without restarting the service.
 type Server struct {
 	rawAlertConsumers   []FifoQueueConsumer
 	alertQueue          FifoQueueProducer
@@ -70,6 +83,12 @@ type Server struct {
 	defaultPretty       bool
 }
 
+// New creates a Server with the provided dependencies.
+//
+// Nil cacheStore defaults to an in-process go-cache instance (not suitable for
+// multi-instance deployments that require shared channel-info caching).
+// Nil metrics defaults to a no-op implementation.
+// Nil settings defaults to zero-value APISettings.
 func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, logger types.Logger, metrics types.Metrics, cfg *config.APIConfig, settings *config.APISettings) *Server {
 	if cacheStore == nil {
 		gocacheClient := gocache.New(5*time.Minute, time.Minute)
@@ -298,6 +317,10 @@ func (s *Server) Run(ctx context.Context) error {
 	return nil
 }
 
+// UpdateSettings hot-reloads API settings without restarting. The new settings are
+// validated before being applied; if validation fails the existing settings remain
+// active and an error is returned. Passing nil replaces the current settings with
+// zero-value defaults.
 func (s *Server) UpdateSettings(settings *config.APISettings) error {
 	if settings == nil {
 		settings = &config.APISettings{}

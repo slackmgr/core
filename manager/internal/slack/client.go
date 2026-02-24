@@ -237,7 +237,7 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 		}
 
 		// We may temporarily ignore issues with too much activity (to reduce risk of rate limit trouble)
-		if c.throttleIssue(issue, action, len(issues)) {
+		if c.throttleIssue(issue, action, openIssueCount) {
 			c.logger.WithFields(issue.LogFields()).Info("Throttle Slack post")
 			continue
 		}
@@ -826,7 +826,8 @@ func getTextBlocks(alertText, statusEmoji string, method postUpdateMethod) []sla
 }
 
 func (c *Client) throttleIssue(issue *models.Issue, action models.SlackAction, issuesInChannel int) bool {
-	// Don't throttle if total number of open issues in channel is less than the configured minimum
+	// Don't throttle if the number of active (non-info, non-resolved) issues in the channel
+	// is less than the configured minimum
 	if issuesInChannel < c.managerSettings.GetSettings().MinIssueCountForThrottle {
 		return false
 	}
@@ -854,11 +855,14 @@ func (c *Client) throttleIssue(issue *models.Issue, action models.SlackAction, i
 	// Find the duration since the last Slack post for this issue
 	timeSinceLastPost := time.Since(issue.SlackPostUpdated)
 
-	// Calculate throttle limit as (2 x alert count) seconds
-	limit := time.Duration(2*issue.AlertCount) * time.Second
+	// Calculate throttle limit as [alert count] seconds
+	// This means that issues with more alerts are throttled for longer periods
+	limit := time.Duration(issue.AlertCount) * time.Second
 
-	// Limit is never more than the configured upper limit
+	// Find the upper limit for throttling from the manager settings
 	upperLimitInSettings := time.Second * time.Duration(c.managerSettings.GetSettings().MaxThrottleDurationSeconds)
+
+	// Limit should not be higher than the upper limit defined in the manager settings
 	if limit > upperLimitInSettings {
 		limit = upperLimitInSettings
 	}
@@ -868,6 +872,6 @@ func (c *Client) throttleIssue(issue *models.Issue, action models.SlackAction, i
 		limit /= 2
 	}
 
-	// Throttle if the time since the last Slack post is smaller than the limit
+	// Throttle if the time since the last Slack post is smaller than the calculated limit
 	return timeSinceLastPost < limit
 }

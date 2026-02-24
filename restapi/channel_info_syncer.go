@@ -13,10 +13,20 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-// ChannelInfoProvider defines the interface for channel information operations.
+// ChannelInfoProvider supplies Slack channel metadata to the API server for
+// request validation and channel listing.
 type ChannelInfoProvider interface {
+	// GetChannelInfo returns metadata for the given Slack channel ID. The result is
+	// served from an internal cache and refreshed periodically in the background.
+	// A cache miss triggers a direct Slack API lookup.
 	GetChannelInfo(ctx context.Context, channel string) (*ChannelInfo, error)
+
+	// MapChannelNameToIDIfNeeded converts a human-readable channel name (e.g. "alerts")
+	// to its Slack channel ID. If the input is already a channel ID, it is returned
+	// unchanged. This allows alert clients to use either form interchangeably.
 	MapChannelNameToIDIfNeeded(channelName string) string
+
+	// ManagedChannels returns the current list of Slack channels the bot is a member of.
 	ManagedChannels() []*internal.ChannelSummary
 }
 
@@ -106,8 +116,6 @@ func (c *channelInfoSyncer) Run(ctx context.Context) error {
 	}
 }
 
-// MapChannelNameToIDIfNeeded maps a channel name to a channel ID, if needed. It the input value is a channel ID, it is returned unchanged.
-// This ensures that alert clients may use both channel names and channel IDs interchangeably.
 func (c *channelInfoSyncer) MapChannelNameToIDIfNeeded(channelName string) string {
 	if channelName == "" {
 		return ""

@@ -1,5 +1,8 @@
 package config
 
+// IssueReaction identifies the action triggered by a Slack emoji reaction on an issue
+// message. Each constant maps a semantic name to the string value stored in the
+// database and matched against user-configured reaction settings.
 type IssueReaction string
 
 const (

@@ -140,9 +140,9 @@ const (
 	MaxMinIssueCountForThrottle = 100
 
 	// DefaultMaxThrottleDurationSeconds is the maximum delay between updates to a single issue.
-	// 90 seconds provides meaningful batching during storms while ensuring updates are
+	// 60 seconds provides meaningful batching during storms while ensuring updates are
 	// eventually delivered within a reasonable timeframe.
-	DefaultMaxThrottleDurationSeconds = 90
+	DefaultMaxThrottleDurationSeconds = 60
 
 	// MinMaxThrottleDurationSeconds is the minimum allowed maximum throttle duration.
 	// At least 1 second is required for throttling to have any effect.
@@ -331,7 +331,7 @@ type ManagerSettings struct {
 	// MaxThrottleDurationSeconds is the maximum delay (in seconds) between updates to
 	// a single issue when throttling is active. The actual delay scales with alert count
 	// but never exceeds this value. After this duration, updates are always allowed.
-	// Default: 90. Must be between 1 and 600 seconds.
+	// Default: 60. Must be between 1 and 600 seconds.
 	MaxThrottleDurationSeconds int `json:"maxThrottleDurationSeconds" yaml:"maxThrottleDurationSeconds"`
 
 	// AlwaysShowOptionButtons controls whether interactive action buttons are permanently

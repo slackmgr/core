@@ -58,6 +58,9 @@ func NewRedisRateLimitGate(client redis.UniversalClient, logger types.Logger, ke
 	}
 }
 
+// Signal stores the rate-limit deadline in Redis using a compare-and-swap Lua script,
+// ensuring that all instances in a multi-instance deployment share the same window.
+// The key's TTL is set to expire when the window closes, so IsBlocked is self-cleaning.
 func (g *RedisRateLimitGate) Signal(ctx context.Context, until time.Time) error {
 	unixMilli := until.UnixMilli()
 	ttlMs := time.Until(until).Milliseconds()
@@ -73,6 +76,9 @@ func (g *RedisRateLimitGate) Signal(ctx context.Context, until time.Time) error 
 	return nil
 }
 
+// Wait polls Redis every 500 ms until the rate-limit key disappears, then waits for
+// Socket Mode to drain. Redis errors are treated as non-blocking (fail-open) to avoid
+// stalling channel managers when Redis is temporarily unavailable.
 func (g *RedisRateLimitGate) Wait(ctx context.Context) error {
 	// Fast path: check if blocked at all.
 	blocked, err := g.IsBlocked(ctx)
@@ -130,6 +136,8 @@ func (g *RedisRateLimitGate) Wait(ctx context.Context) error {
 	return nil
 }
 
+// IsBlocked reads the rate-limit key from Redis and reports whether the stored
+// deadline is still in the future. Returns false on Redis errors (fail-open).
 func (g *RedisRateLimitGate) IsBlocked(ctx context.Context) (bool, error) {
 	val, err := g.client.Get(ctx, g.key).Result()
 	if errors.Is(err, redis.Nil) {
@@ -150,6 +158,8 @@ func (g *RedisRateLimitGate) IsBlocked(ctx context.Context) (bool, error) {
 	return time.Now().Before(time.UnixMilli(unixMilli)), nil
 }
 
+// SetReadyCheck registers the function used to determine when Socket Mode has no
+// in-flight handlers. Called once from Manager.Run after the Slack client connects.
 func (g *RedisRateLimitGate) SetReadyCheck(fn func() bool) {
 	g.readyFn = fn
 }

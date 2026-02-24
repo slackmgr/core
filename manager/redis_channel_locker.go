@@ -131,7 +131,8 @@ func (r *RedisChannelLocker) newRateLimitGate(logger types.Logger) RateLimitGate
 	return NewRedisRateLimitGate(r.rawClient, logger, r.keyPrefix, r.maxDrainWait)
 }
 
-// Key returns the key associated with the RedisChannelLock instance.
+// Key returns the full Redis key of the lock, including its namespace prefix and
+// channel ID segment. Returns an empty string if the lock has been released.
 func (l *RedisChannelLock) Key() string {
 	if l.lock == nil {
 		return ""

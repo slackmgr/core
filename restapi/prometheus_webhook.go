@@ -2,6 +2,8 @@ package restapi
 
 import "time"
 
+// PrometheusWebhook is the JSON payload sent by Prometheus Alertmanager to the
+// /prometheus-alert endpoint. It follows the Alertmanager webhook v4 format.
 type PrometheusWebhook struct {
 	Version           string             `json:"version,omitempty"`
 	GroupKey          string             `json:"groupKey,omitempty"`
@@ -15,6 +17,7 @@ type PrometheusWebhook struct {
 	Alerts            []*PrometheusAlert `json:"alerts,omitempty"`
 }
 
+// PrometheusAlert is a single alert entry within a PrometheusWebhook payload.
 type PrometheusAlert struct {
 	Status       string            `json:"status,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`

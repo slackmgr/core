@@ -20,6 +20,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// Manager processes alerts from an alert queue and manages the lifecycle of Slack
+// issues. It connects to Slack via Socket Mode, coordinates per-channel workers,
+// and persists issue state through the injected database.
+//
+// Create a Manager with New and start it with Run. Settings can be updated at
+// runtime via UpdateSettings without restarting the service.
 type Manager struct {
 	db              types.DB
 	slackClient     *slack.Client
@@ -43,6 +49,16 @@ type rateLimitGateFactory interface {
 	newRateLimitGate(logger types.Logger) RateLimitGate
 }
 
+// New creates a Manager with the provided dependencies.
+//
+// Nil cacheStore defaults to an in-process go-cache instance (not suitable for
+// multi-instance deployments unless SkipDatabaseCache is true).
+// Nil metrics defaults to a no-op implementation.
+// Nil managerSettings defaults to zero-value settings.
+//
+// The RateLimitGate is chosen automatically from the locker: RedisChannelLocker
+// produces a RedisRateLimitGate sharing the same Redis client and key prefix;
+// all other lockers fall back to LocalRateLimitGate.
 func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, locker ChannelLocker, logger types.Logger, metrics types.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
 	if cacheStore == nil {
 		gocacheClient := gocache.New(5*time.Minute, time.Minute)
@@ -81,11 +97,20 @@ func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore s
 	}
 }
 
+// RegisterWebhookHandler adds a WebhookHandler that is consulted whenever an issue
+// has a webhook callback configured. Handlers are tried in registration order; the
+// first one whose ShouldHandleWebhook returns true handles the call. Returns the
+// Manager to allow method chaining.
 func (m *Manager) RegisterWebhookHandler(handler WebhookHandler) *Manager {
 	m.webhookHandlers = append(m.webhookHandlers, handler)
 	return m
 }
 
+// Run starts the Manager and blocks until ctx is cancelled or a fatal error occurs.
+// It validates configuration, connects to Slack via Socket Mode, initialises the
+// coordinator and per-channel managers, and starts the alert and command queue
+// consumers. All goroutines are managed with an errgroup; any single fatal error
+// triggers a shutdown of the entire group.
 func (m *Manager) Run(ctx context.Context) error {
 	m.logger.Info("Manager started")
 	defer m.logger.Info("Manager exited")
@@ -179,6 +204,10 @@ func (m *Manager) Run(ctx context.Context) error {
 	return errg.Wait()
 }
 
+// UpdateSettings hot-reloads manager settings without restarting. The new settings
+// are validated before being applied; if validation fails the existing settings remain
+// active and an error is returned. Passing nil replaces the current settings with
+// zero-value defaults.
 func (m *Manager) UpdateSettings(settings *config.ManagerSettings) error {
 	if settings == nil {
 		settings = &config.ManagerSettings{}
