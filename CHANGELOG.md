@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-02-24
+
+### Added
+- `config.ManagerConfig.IsSingleInstanceDeployment` flag; when true, a nil `ChannelLocker` is accepted and multi-instance safeguards are skipped
+
+### Changed
+- **Breaking**: `manager.New()` reduced from 9 positional parameters to 5 required ones (`db`, `alertQueue`, `commandQueue`, `logger`, `cfg`); optional dependencies (`cacheStore`, `locker`, `metrics`, `managerSettings`) are now set via chainable `WithCacheStore`, `WithLocker`, `WithMetrics`, and `WithSettings` methods
+- **Breaking**: `restapi.New()` reduced from 6 positional parameters to 3 required ones (`alertQueue`, `logger`, `cfg`); optional dependencies (`cacheStore`, `metrics`, `settings`) are now set via chainable `WithCacheStore`, `WithMetrics`, and `WithSettings` methods
+- **Breaking**: `manager.New()` no longer accepts a `RateLimitGate` parameter; the gate is derived automatically from the locker via `WithLocker()` — `RedisChannelLocker` produces a `RedisRateLimitGate`, all other lockers fall back to `LocalRateLimitGate`
+- All `With*` methods treat `nil` as a no-op, consistent with the existing `RegisterWebhookHandler` and `WithRawAlertConsumer` patterns
+- Default go-cache store is now applied lazily in `Run()` rather than eagerly in `New()`, so callers that chain `WithCacheStore` do not allocate a discarded instance
+- Reduce default throttle duration; throttle is now gated on active issue count rather than a fixed timer
+- Reduce channel buffer sizes in coordinator and queue consumers
+
+### Fixed
+- Rate-limit throttle now counts only active (non-archived) issues, preventing over-throttling when most issues in a channel are already resolved
+
 ## [0.4.1] - 2026-02-24
 
 ### Changed
@@ -172,7 +189,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/slackmgr/core/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/slackmgr/core/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/slackmgr/core/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/slackmgr/core/compare/v0.2.3...v0.3.0
