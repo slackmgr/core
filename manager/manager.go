@@ -49,51 +49,23 @@ type rateLimitGateFactory interface {
 	newRateLimitGate(logger types.Logger) RateLimitGate
 }
 
-// New creates a [Manager] with the provided dependencies.
+// New creates a [Manager] with the five required dependencies.
 //
-// Nil cacheStore defaults to an in-process go-cache instance (not suitable for
-// multi-instance deployments unless SkipDatabaseCache is true).
-// Nil metrics defaults to a no-op implementation.
-// Nil managerSettings defaults to zero-value settings.
-//
-// The [RateLimitGate] is chosen automatically from the locker: [RedisChannelLocker]
-// produces a [RedisRateLimitGate] sharing the same Redis client and key prefix;
-// all other lockers fall back to [LocalRateLimitGate].
-func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore store.StoreInterface, locker ChannelLocker, logger types.Logger, metrics types.Metrics, cfg *config.ManagerConfig, managerSettings *config.ManagerSettings) *Manager {
-	if cacheStore == nil {
-		gocacheClient := gocache.New(5*time.Minute, time.Minute)
-		cacheStore = gocache_store.NewGoCache(gocacheClient)
-	}
-
-	if metrics == nil {
-		metrics = &types.NoopMetrics{}
-	}
-
-	if managerSettings == nil {
-		managerSettings = &config.ManagerSettings{}
-	}
-
-	// If the locker implements rateLimitGateFactory, use it to create a matching RateLimitGate.
-	// This allows RedisChannelLocker to provide a RedisRateLimitGate that uses the same Redis client and configuration.
-	// If the locker does not implement rateLimitGateFactory, fall back to a LocalRateLimitGate that operates in-memory.
-	var gate RateLimitGate
-	if factory, ok := locker.(rateLimitGateFactory); ok {
-		gate = factory.newRateLimitGate(logger)
-	} else {
-		gate = NewLocalRateLimitGate(logger, 0)
-	}
-
+// Optional dependencies can be configured via method chaining before calling [Manager.Run]:
+//   - [Manager.WithCacheStore] — sets the cache store (defaults to in-process go-cache, unsuitable for multi-instance)
+//   - [Manager.WithLocker] — sets the distributed channel locker and matching [RateLimitGate]
+//   - [Manager.WithMetrics] — sets the metrics implementation (defaults to no-op)
+//   - [Manager.WithSettings] — sets the initial manager settings (defaults to zero-value)
+func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, logger types.Logger, cfg *config.ManagerConfig) *Manager {
 	return &Manager{
 		db:              db,
 		alertQueue:      alertQueue,
 		commandQueue:    commandQueue,
-		cacheStore:      cacheStore,
-		locker:          locker,
 		logger:          logger,
-		metrics:         metrics,
-		gate:            gate,
 		cfg:             cfg,
-		managerSettings: models.NewManagerSettingsWrapper(managerSettings),
+		metrics:         &types.NoopMetrics{},
+		gate:            NewLocalRateLimitGate(logger, 0),
+		managerSettings: models.NewManagerSettingsWrapper(&config.ManagerSettings{}),
 	}
 }
 
@@ -103,6 +75,54 @@ func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, cacheStore s
 // Returns the [Manager] to allow method chaining.
 func (m *Manager) RegisterWebhookHandler(handler WebhookHandler) *Manager {
 	m.webhookHandlers = append(m.webhookHandlers, handler)
+	return m
+}
+
+// WithCacheStore sets the cache store. If not called, [Manager.Run] defaults to an
+// in-process go-cache instance (unsuitable for multi-instance deployments unless
+// SkipDatabaseCache is true in the config). Passing nil is a no-op.
+func (m *Manager) WithCacheStore(cacheStore store.StoreInterface) *Manager {
+	if cacheStore == nil {
+		return m
+	}
+	m.cacheStore = cacheStore
+	return m
+}
+
+// WithLocker sets the [ChannelLocker] and recalculates the [RateLimitGate].
+// [RedisChannelLocker] produces a [RedisRateLimitGate]; all other lockers fall
+// back to [LocalRateLimitGate]. Passing nil is a no-op.
+func (m *Manager) WithLocker(locker ChannelLocker) *Manager {
+	if locker == nil {
+		return m
+	}
+	m.locker = locker
+	if factory, ok := locker.(rateLimitGateFactory); ok {
+		m.gate = factory.newRateLimitGate(m.logger)
+	} else {
+		m.gate = NewLocalRateLimitGate(m.logger, 0)
+	}
+	return m
+}
+
+// WithMetrics sets the metrics implementation. If not called, a no-op
+// implementation is used. Passing nil is a no-op.
+func (m *Manager) WithMetrics(metrics types.Metrics) *Manager {
+	if metrics == nil {
+		return m
+	}
+	m.metrics = metrics
+	return m
+}
+
+// WithSettings sets the initial manager settings. If not called, zero-value
+// settings are used. For runtime updates after [Manager.Run] is started, use
+// [Manager.UpdateSettings] instead. Passing nil is a no-op.
+func (m *Manager) WithSettings(settings *config.ManagerSettings) *Manager {
+	if settings == nil {
+		return m
+	}
+	m.managerSettings = models.NewManagerSettingsWrapper(settings)
 	return m
 }
 
@@ -161,6 +181,11 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	if m.alertQueue.Name() == m.commandQueue.Name() {
 		return errors.New("alert queue and command queue must have different names")
+	}
+
+	if m.cacheStore == nil {
+		gocacheClient := gocache.New(5*time.Minute, time.Minute)
+		m.cacheStore = gocache_store.NewGoCache(gocacheClient)
 	}
 
 	// Add the DB cache middleware if not skipped by config.

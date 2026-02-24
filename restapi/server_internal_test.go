@@ -175,7 +175,7 @@ func newTestServer(t *testing.T) (*Server, *mockFifoQueueProducer, *mockChannelI
 		},
 	}
 
-	server := New(queue, nil, logger, nil, cfg, nil)
+	server := New(queue, logger, cfg)
 	server.setChannelInfoProvider(channelInfo)
 	server.apiSettings = &config.APISettings{}
 

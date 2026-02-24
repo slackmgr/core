@@ -125,7 +125,7 @@ func TestManager_Run_NilGuards(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			m := New(tt.db, tt.alertQueue, tt.commandQueue, nil, tt.locker, &mockLogger{}, nil, tt.cfg, nil)
+			m := New(tt.db, tt.alertQueue, tt.commandQueue, &mockLogger{}, tt.cfg).WithLocker(tt.locker)
 
 			err := m.Run(context.Background())
 
@@ -210,17 +210,9 @@ func TestManager_Run_RejectInMemoryCacheStore(t *testing.T) {
 	gocacheClient := gocache.New(5*time.Minute, time.Minute)
 	inMemoryStore := gocache_store.NewGoCache(gocacheClient)
 
-	m := New(
-		&stubDB{},
-		&stubFifoQueue{name: "alerts"},
-		&stubFifoQueue{name: "commands"},
-		inMemoryStore,
-		&NoopChannelLocker{},
-		&mockLogger{},
-		nil,
-		cfg,
-		nil,
-	)
+	m := New(&stubDB{}, &stubFifoQueue{name: "alerts"}, &stubFifoQueue{name: "commands"}, &mockLogger{}, cfg).
+		WithCacheStore(inMemoryStore).
+		WithLocker(&NoopChannelLocker{})
 
 	err := m.Run(context.Background())
 

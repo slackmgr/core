@@ -90,8 +90,11 @@ func main() {
         SlackClient:   &config.SlackClientConfig{BotToken: "xoxb-...", AppToken: "xapp-..."},
     }
 
-    server := restapi.New(alertProducer, nil, logger, metrics, apiCfg, nil)
-    mgr := manager.New(db, alertQueue, commandQueue, nil, locker, logger, metrics, managerCfg, nil)
+    server := restapi.New(alertProducer, logger, apiCfg).
+        WithMetrics(metrics)
+    mgr := manager.New(db, alertQueue, commandQueue, logger, managerCfg).
+        WithLocker(locker).
+        WithMetrics(metrics)
 
     g, ctx := errgroup.WithContext(ctx)
     g.Go(func() error { return server.Run(ctx) })

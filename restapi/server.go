@@ -83,34 +83,20 @@ type Server struct {
 	defaultPretty       bool
 }
 
-// New creates a [Server] with the provided dependencies.
+// New creates a [Server] with the three required dependencies.
 //
-// Nil cacheStore defaults to an in-process go-cache instance (not suitable for
-// multi-instance deployments that require shared channel-info caching).
-// Nil metrics defaults to a no-op implementation.
-// Nil settings defaults to zero-value APISettings.
-func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, logger types.Logger, metrics types.Metrics, cfg *config.APIConfig, settings *config.APISettings) *Server {
-	if cacheStore == nil {
-		gocacheClient := gocache.New(5*time.Minute, time.Minute)
-		cacheStore = gocache_store.NewGoCache(gocacheClient)
-	}
-
-	if metrics == nil {
-		metrics = &types.NoopMetrics{}
-	}
-
-	if settings == nil {
-		settings = &config.APISettings{}
-	}
-
+// Optional dependencies can be configured via method chaining before calling [Server.Run]:
+//   - [Server.WithCacheStore] — sets the cache store (defaults to in-process go-cache, unsuitable for multi-instance)
+//   - [Server.WithMetrics] — sets the metrics implementation (defaults to no-op)
+//   - [Server.WithSettings] — sets the initial API settings (defaults to zero-value)
+func New(alertQueue FifoQueueProducer, logger types.Logger, cfg *config.APIConfig) *Server {
 	return &Server{
 		alertQueue:        alertQueue,
 		limitersByChannel: make(map[string]*rate.Limiter),
 		limitersLock:      &sync.Mutex{},
-		cacheStore:        cacheStore,
 		logger:            logger,
-		metrics:           metrics,
-		apiSettings:       settings,
+		metrics:           &types.NoopMetrics{},
+		apiSettings:       &config.APISettings{},
 		cfg:               cfg,
 	}
 }
@@ -126,6 +112,38 @@ func New(alertQueue FifoQueueProducer, cacheStore cachestore.StoreInterface, log
 // The queue item body must be a single JSON-serialized types.Alert. Prometheus webhooks are not supported here.
 func (s *Server) WithRawAlertConsumer(consumer FifoQueueConsumer) *Server {
 	s.rawAlertConsumers = append(s.rawAlertConsumers, consumer)
+	return s
+}
+
+// WithCacheStore sets the cache store. If not called, [Server.Run] defaults to an
+// in-process go-cache instance (unsuitable for multi-instance deployments that
+// require shared channel-info caching). Passing nil is a no-op.
+func (s *Server) WithCacheStore(cacheStore cachestore.StoreInterface) *Server {
+	if cacheStore == nil {
+		return s
+	}
+	s.cacheStore = cacheStore
+	return s
+}
+
+// WithMetrics sets the metrics implementation. If not called, a no-op
+// implementation is used. Passing nil is a no-op.
+func (s *Server) WithMetrics(metrics types.Metrics) *Server {
+	if metrics == nil {
+		return s
+	}
+	s.metrics = metrics
+	return s
+}
+
+// WithSettings sets the initial API settings. If not called, zero-value settings
+// are used. For runtime updates after [Server.Run] is started, use
+// [Server.UpdateSettings] instead. Passing nil is a no-op.
+func (s *Server) WithSettings(settings *config.APISettings) *Server {
+	if settings == nil {
+		return s
+	}
+	s.apiSettings = settings
 	return s
 }
 
@@ -155,6 +173,11 @@ func (s *Server) Run(ctx context.Context) error {
 
 	if err := s.apiSettings.InitAndValidate(s.logger); err != nil {
 		return fmt.Errorf("failed to initialize API settings: %w", err)
+	}
+
+	if s.cacheStore == nil {
+		gocacheClient := gocache.New(5*time.Minute, time.Minute)
+		s.cacheStore = gocache_store.NewGoCache(gocacheClient)
 	}
 
 	// Initialize Slack API client if not already set
