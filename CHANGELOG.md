@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-02-24
+
+### Changed
+- `NewRedisRateLimitGate` now accepts variadic `RedisRateLimitGateOption` instead of positional `keyPrefix` and `maxDrainWait` parameters; use `WithRateLimitGateKeyPrefix` and `WithRateLimitGateMaxDrainWait` to override defaults
+- `config.DefaultKeyPrefix` exported as the single source of truth for the `"slack-manager:"` Redis key namespace; `NewDefaultAPIConfig`, `NewDefaultManagerConfig`, and both Redis options constructors now reference it
+
 ## [0.4.0] - 2026-02-24
 
 ### Added
@@ -166,7 +172,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/slackmgr/core/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/slackmgr/core/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/slackmgr/core/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/slackmgr/core/compare/v0.2.2...v0.2.3
