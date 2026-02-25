@@ -9,10 +9,40 @@ import (
 
 var encryptionKeyRegex = regexp.MustCompile(`^[a-zA-Z0-9]{32}$`)
 
+// cacheKeyPrefixRegex allows letters, digits, dots, underscores, colons, and hyphens.
+// These are the characters that are safe and conventional in Redis key namespacing,
+// while avoiding spaces, control characters, and other characters that cause issues
+// with redis-cli, monitoring tooling, and key-slot hashing in Redis Cluster.
+var cacheKeyPrefixRegex = regexp.MustCompile(`^[a-zA-Z0-9._:-]+$`)
+
+// metricsPrefixRegex enforces the Prometheus metric name character set for the prefix.
+// Prometheus metric names must match [a-zA-Z_:][a-zA-Z0-9_:]*, but colons are reserved
+// for recording rules, so client library metrics should use [a-zA-Z_][a-zA-Z0-9_]*.
+// An empty prefix is always valid (it disables prefixing entirely).
+var metricsPrefixRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
 // DefaultKeyPrefix is the default Redis key namespace used by all slackmgr components.
 // It is applied to cache keys, queue keys, and distributed gate keys.
 // Override it when running multiple independent slackmgr deployments against the same Redis instance.
 const DefaultKeyPrefix = "slack-manager:"
+
+// DefaultMetricsPrefix is the default prefix prepended to all metric names registered by
+// the Manager. It namespaces slackmgr metrics so they are easy to identify and filter
+// in dashboards. Set MetricsPrefix to an empty string to disable prefixing.
+const DefaultMetricsPrefix = "slackmgr_"
+
+// Validation constants for prefix fields shared by both APIConfig and ManagerConfig.
+const (
+	// MaxCacheKeyPrefixLen is the maximum allowed length for CacheKeyPrefix.
+	// Long prefixes waste Redis memory and complicate key inspection; 100 characters
+	// is generous enough to accommodate any realistic multi-deployment naming scheme.
+	MaxCacheKeyPrefixLen = 100
+
+	// MaxMetricsPrefixLen is the maximum allowed length for MetricsPrefix.
+	// Prometheus has no hard limit on metric name length, but names beyond this length
+	// become impractical in dashboards and alerting rules.
+	MaxMetricsPrefixLen = 64
+)
 
 // Validation constants for ManagerConfig drain timeout fields.
 // Drain timeouts control how long the system waits during graceful shutdown
@@ -77,11 +107,14 @@ const (
 //
 // # Graceful Shutdown
 //
-// The drain timeout settings control graceful shutdown behavior. During shutdown:
-//  1. The coordinator stops accepting new messages and drains its internal channels
-//  2. Each channel manager drains its internal buffers
-//  3. Messages that cannot be processed within the timeout are left in the queue
-//     for reprocessing by another instance (in a multi-instance deployment)
+// The drain timeout settings bound the nacking phase that runs after the context is
+// cancelled. During shutdown:
+//  1. The coordinator nacks any messages still buffered in its internal channels,
+//     returning them to the external queue immediately without further processing.
+//  2. Each channel manager does the same for its own internal buffers.
+//  3. Because each drain loop exits as soon as its channels are empty (via a default
+//     select case), the timeout is only reached if the internal channels are heavily
+//     backlogged at shutdown time. In normal operation both drains complete instantly.
 type ManagerConfig struct {
 	// EncryptionKey is a 32-character alphanumeric key used for AES-256 encryption of
 	// sensitive data in alert payloads. This key must be identical to the key configured
@@ -101,6 +134,14 @@ type ManagerConfig struct {
 	// Use different prefixes only if running multiple independent Slack Manager deployments
 	// against the same Redis cluster that should not share cache data.
 	CacheKeyPrefix string `json:"cacheKeyPrefix" yaml:"cacheKeyPrefix"`
+
+	// MetricsPrefix is prepended to all metric names registered by the Manager, including
+	// Slack API metrics, queue metrics, and channel manager metrics. This namespaces
+	// slackmgr metrics so they are easy to identify and filter in dashboards.
+	//
+	// Defaults to "slackmgr_" (e.g. "slackmgr_slack_api_call_total").
+	// Set to an empty string to disable prefixing and keep bare metric names.
+	MetricsPrefix string `json:"metricsPrefix" yaml:"metricsPrefix"`
 
 	// IsSingleInstanceDeployment disables certain safeguards that exist to protect
 	// correctness in multi-instance deployments. Setting this to true is ONLY safe
@@ -143,30 +184,33 @@ type ManagerConfig struct {
 	// for detailed documentation of each field.
 	SlackClient *SlackClientConfig `json:"slackClient" yaml:"slackClient"`
 
-	// CoordinatorDrainTimeout is the maximum time the coordinator waits during shutdown
-	// to drain messages from its internal channels before terminating.
+	// CoordinatorDrainTimeout is the maximum time the coordinator spends nacking
+	// buffered messages during shutdown.
 	//
-	// During graceful shutdown, the coordinator:
-	//  1. Stops accepting new messages from the queue
-	//  2. Attempts to deliver all buffered messages to channel managers
-	//  3. Waits up to this timeout for channel managers to acknowledge receipt
+	// When the context is cancelled, the coordinator exits its main processing loop and
+	// immediately nacks any messages still sitting in its internal alert and command
+	// channels, returning them to the external queue for reprocessing. No message
+	// delivery to channel managers occurs during this phase.
 	//
-	// Messages not delivered within this timeout remain in the external queue and will
-	// be reprocessed by another Manager instance (or the same instance after restart).
+	// Because the drain loop exits as soon as both channels are empty (via a default
+	// select case), this timeout is only reached if the internal channels are heavily
+	// backlogged at shutdown time. In normal operation the drain completes instantly.
 	//
 	// Default: 5 seconds. Must be between 2 seconds and 5 minutes.
 	CoordinatorDrainTimeout time.Duration `json:"coordinatorDrainTimeout" yaml:"coordinatorDrainTimeout"`
 
-	// ChannelManagerDrainTimeout is the maximum time each channel manager waits during
-	// shutdown to process messages from its internal buffer before terminating.
+	// ChannelManagerDrainTimeout is the maximum time each channel manager spends
+	// nacking buffered messages during shutdown.
 	//
-	// During graceful shutdown, each channel manager:
-	//  1. Stops accepting new messages from the coordinator
-	//  2. Processes all buffered messages (creating issues, updating Slack, etc.)
-	//  3. Acknowledges processed messages to remove them from the queue
+	// When the context is cancelled, each channel manager exits its run loop and
+	// immediately nacks any messages still sitting in its internal alert and command
+	// channels, returning them to the external queue for reprocessing. No processing
+	// occurs during this phase — messages are not passed to issue creation or Slack API
+	// logic; they are simply returned to the queue.
 	//
-	// Messages not processed within this timeout are negatively acknowledged (nack'd)
-	// and will be redelivered to the queue for reprocessing.
+	// Because the drain loop exits as soon as both channels are empty (via a default
+	// select case), this timeout is only reached if the internal channels are heavily
+	// backlogged at shutdown time. In normal operation the drain completes instantly.
 	//
 	// Default: 3 seconds. Must be between 2 seconds and 5 minutes.
 	ChannelManagerDrainTimeout time.Duration `json:"channelManagerDrainTimeout" yaml:"channelManagerDrainTimeout"`
@@ -213,6 +257,7 @@ type ManagerConfig struct {
 func NewDefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
 		CacheKeyPrefix:             DefaultKeyPrefix,
+		MetricsPrefix:              DefaultMetricsPrefix,
 		Location:                   time.UTC,
 		SlackClient:                NewDefaultSlackClientConfig(),
 		CoordinatorDrainTimeout:    DefaultCoordinatorDrainTimeout,
@@ -228,7 +273,8 @@ func NewDefaultManagerConfig() *ManagerConfig {
 //
 // Validation includes:
 //   - EncryptionKey: if non-empty, must be exactly 32 alphanumeric characters
-//   - CacheKeyPrefix: must not be empty (required for cache namespacing)
+//   - CacheKeyPrefix: required; max 100 chars; only letters, digits, '.', '_', ':', '-'
+//   - MetricsPrefix: if non-empty, must be a valid Prometheus name prefix (letters, digits, '_'; max 64 chars)
 //   - Location: must not be nil
 //   - SlackClient: must not be nil, and must pass its own validation
 //   - CoordinatorDrainTimeout: must be between 2 seconds and 5 minutes
@@ -240,8 +286,12 @@ func (c *ManagerConfig) Validate() error {
 		return fmt.Errorf("encryption key must be a %d character alphanumeric string", EncryptionKeyLength)
 	}
 
-	if c.CacheKeyPrefix == "" {
-		return errors.New("cache key prefix is required")
+	if err := validateCacheKeyPrefix(c.CacheKeyPrefix); err != nil {
+		return err
+	}
+
+	if err := validateMetricsPrefix(c.MetricsPrefix); err != nil {
+		return err
 	}
 
 	if c.Location == nil {
@@ -270,6 +320,46 @@ func (c *ManagerConfig) Validate() error {
 
 	if c.SocketModeDrainTimeout < MinDrainTimeout || c.SocketModeDrainTimeout > MaxDrainTimeout {
 		return fmt.Errorf("socket mode drain timeout must be between %v and %v", MinDrainTimeout, MaxDrainTimeout)
+	}
+
+	return nil
+}
+
+// validateCacheKeyPrefix checks that a Redis cache key prefix is non-empty, within
+// [MaxCacheKeyPrefixLen] characters, and contains only characters that are safe and
+// conventional in Redis key naming: letters, digits, '.', '_', ':', and '-'.
+func validateCacheKeyPrefix(prefix string) error {
+	if prefix == "" {
+		return errors.New("cache key prefix is required")
+	}
+
+	if len(prefix) > MaxCacheKeyPrefixLen {
+		return fmt.Errorf("cache key prefix must not exceed %d characters", MaxCacheKeyPrefixLen)
+	}
+
+	if !cacheKeyPrefixRegex.MatchString(prefix) {
+		return errors.New("cache key prefix may only contain letters, digits, '.', '_', ':', or '-'")
+	}
+
+	return nil
+}
+
+// validateMetricsPrefix checks that a Prometheus metrics prefix is either empty
+// (disabling prefixing) or a valid Prometheus metric name component: must start with
+// a letter or underscore, contain only letters, digits, or underscores, and not exceed
+// [MaxMetricsPrefixLen] characters. Colons are intentionally excluded because the
+// Prometheus data model reserves them for recording rules.
+func validateMetricsPrefix(prefix string) error {
+	if prefix == "" {
+		return nil
+	}
+
+	if len(prefix) > MaxMetricsPrefixLen {
+		return fmt.Errorf("metrics prefix must not exceed %d characters", MaxMetricsPrefixLen)
+	}
+
+	if !metricsPrefixRegex.MatchString(prefix) {
+		return errors.New("metrics prefix must start with a letter or underscore and contain only letters, digits, or underscores")
 	}
 
 	return nil

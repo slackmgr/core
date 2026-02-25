@@ -35,6 +35,7 @@ type RedisRateLimitGate struct {
 	readyFn      func() bool
 	maxDrainWait time.Duration
 	logger       types.Logger
+	metrics      types.Metrics
 }
 
 // NewRedisRateLimitGate creates a [RedisRateLimitGate].
@@ -71,6 +72,10 @@ func (g *RedisRateLimitGate) Signal(ctx context.Context, until time.Time) error 
 
 	if err := signalScript.Run(ctx, g.client, []string{g.key}, unixMilli, ttlMs).Err(); err != nil && !errors.Is(err, redis.Nil) {
 		return fmt.Errorf("redis rate limit gate signal: %w", err)
+	}
+
+	if g.metrics != nil {
+		g.metrics.Inc(rateLimitGateSignalsTotalMetric)
 	}
 
 	return nil
@@ -123,6 +128,11 @@ func (g *RedisRateLimitGate) Wait(ctx context.Context) error {
 	for !g.readyFn() {
 		if time.Now().After(drainDeadline) {
 			g.logger.Info("Rate limit gate: Socket Mode drain wait exceeded, resuming (fail-open)")
+
+			if g.metrics != nil {
+				g.metrics.Inc(rateLimitGateDrainTimeoutTotalMetric)
+			}
+
 			return nil
 		}
 
@@ -162,4 +172,12 @@ func (g *RedisRateLimitGate) IsBlocked(ctx context.Context) (bool, error) {
 // in-flight handlers. Called once from [Manager.Run] after the Slack client connects.
 func (g *RedisRateLimitGate) SetReadyCheck(fn func() bool) {
 	g.readyFn = fn
+}
+
+// connectMetrics registers gate metrics against m and stores m for future use.
+// Called once from [Manager.Run] after the metrics implementation is confirmed.
+func (g *RedisRateLimitGate) connectMetrics(m types.Metrics) {
+	g.metrics = m
+	m.RegisterCounter(rateLimitGateSignalsTotalMetric, "Total number of times the rate limit gate was signaled")
+	m.RegisterCounter(rateLimitGateDrainTimeoutTotalMetric, "Total number of times the Socket Mode drain wait timed out during rate limit recovery")
 }

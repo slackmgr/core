@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ func TestNewDefaultManagerConfig(t *testing.T) {
 
 	assert.Empty(t, cfg.EncryptionKey)
 	assert.Equal(t, "slack-manager:", cfg.CacheKeyPrefix)
+	assert.Equal(t, config.DefaultMetricsPrefix, cfg.MetricsPrefix)
 	assert.False(t, cfg.SkipDatabaseCache)
 	assert.Equal(t, time.UTC, cfg.Location)
 	require.NotNil(t, cfg.SlackClient)
@@ -80,6 +82,63 @@ func TestManagerConfig_Validate(t *testing.T) {
 				c.CacheKeyPrefix = ""
 			},
 			expectError: "cache key prefix is required",
+		},
+		{
+			name: "cache key prefix too long",
+			modify: func(c *config.ManagerConfig) {
+				c.CacheKeyPrefix = strings.Repeat("a", config.MaxCacheKeyPrefixLen+1)
+			},
+			expectError: "cache key prefix must not exceed 100 characters",
+		},
+		{
+			name: "cache key prefix with space",
+			modify: func(c *config.ManagerConfig) {
+				c.CacheKeyPrefix = "my prefix:"
+			},
+			expectError: "cache key prefix may only contain letters, digits, '.', '_', ':', or '-'",
+		},
+		{
+			name: "cache key prefix with at sign",
+			modify: func(c *config.ManagerConfig) {
+				c.CacheKeyPrefix = "my@prefix:"
+			},
+			expectError: "cache key prefix may only contain letters, digits, '.', '_', ':', or '-'",
+		},
+		// MetricsPrefix validation
+		{
+			name: "empty metrics prefix is valid",
+			modify: func(c *config.ManagerConfig) {
+				c.MetricsPrefix = ""
+			},
+			expectError: "",
+		},
+		{
+			name: "metrics prefix too long",
+			modify: func(c *config.ManagerConfig) {
+				c.MetricsPrefix = strings.Repeat("a", config.MaxMetricsPrefixLen+1)
+			},
+			expectError: "metrics prefix must not exceed 64 characters",
+		},
+		{
+			name: "metrics prefix starts with digit",
+			modify: func(c *config.ManagerConfig) {
+				c.MetricsPrefix = "1invalid_"
+			},
+			expectError: "metrics prefix must start with a letter or underscore and contain only letters, digits, or underscores",
+		},
+		{
+			name: "metrics prefix contains hyphen",
+			modify: func(c *config.ManagerConfig) {
+				c.MetricsPrefix = "slackmgr-"
+			},
+			expectError: "metrics prefix must start with a letter or underscore and contain only letters, digits, or underscores",
+		},
+		{
+			name: "metrics prefix contains colon",
+			modify: func(c *config.ManagerConfig) {
+				c.MetricsPrefix = "slackmgr:"
+			},
+			expectError: "metrics prefix must start with a letter or underscore and contain only letters, digits, or underscores",
 		},
 		// Location validation
 		{
@@ -318,6 +377,61 @@ func TestManagerConfig_Validate_Order(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Equal(t, "slack client config is required", err.Error())
+	})
+}
+
+func TestManagerConfig_Validate_PrefixVariations(t *testing.T) {
+	t.Parallel()
+
+	// CacheKeyPrefix valid variants
+	t.Run("cache key prefix with colon separator", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.CacheKeyPrefix = "slack-manager:"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("cache key prefix with underscore and dot", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.CacheKeyPrefix = "my_app.v2:"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("cache key prefix at max length", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.CacheKeyPrefix = strings.Repeat("a", config.MaxCacheKeyPrefixLen)
+		assert.NoError(t, cfg.Validate())
+	})
+
+	// MetricsPrefix valid variants
+	t.Run("metrics prefix with trailing underscore", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.MetricsPrefix = "slackmgr_"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("metrics prefix starting with underscore", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.MetricsPrefix = "_internal_"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("metrics prefix with digits in body", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.MetricsPrefix = "myapp2_"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("metrics prefix at max length", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.MetricsPrefix = strings.Repeat("a", config.MaxMetricsPrefixLen)
+		assert.NoError(t, cfg.Validate())
 	})
 }
 

@@ -87,6 +87,14 @@ type APIConfig struct {
 	// multiple independent Slack Manager instances against the same Redis cluster.
 	CacheKeyPrefix string `json:"cacheKeyPrefix" yaml:"cacheKeyPrefix"`
 
+	// MetricsPrefix is prepended to all metric names registered by the API server,
+	// including the HTTP request duration histogram and Slack API metrics. This
+	// namespaces slackmgr metrics so they are easy to identify and filter in dashboards.
+	//
+	// Defaults to "slackmgr_" (e.g. "slackmgr_http_server_request_duration_seconds").
+	// Set to an empty string to disable prefixing and keep bare metric names.
+	MetricsPrefix string `json:"metricsPrefix" yaml:"metricsPrefix"`
+
 	// ErrorReportChannelID is the Slack channel where the API posts error reports for
 	// failed requests (4xx and 5xx responses). This is useful for monitoring API health
 	// and debugging integration issues. Leave empty to disable error reporting.
@@ -181,6 +189,7 @@ func NewDefaultAPIConfig() *APIConfig {
 		RestPort:               "8080",
 		EncryptionKey:          "",
 		CacheKeyPrefix:         DefaultKeyPrefix,
+		MetricsPrefix:          DefaultMetricsPrefix,
 		ErrorReportChannelID:   "",
 		MaxUsersInAlertChannel: 100,
 		RateLimitPerAlertChannel: &RateLimitConfig{
@@ -198,7 +207,8 @@ func NewDefaultAPIConfig() *APIConfig {
 // Validation includes:
 //   - RestPort: must be a valid port number (1-65535)
 //   - EncryptionKey: if non-empty, must be exactly 32 alphanumeric characters
-//   - CacheKeyPrefix: must not be empty
+//   - CacheKeyPrefix: required; max 100 chars; only letters, digits, '.', '_', ':', '-'
+//   - MetricsPrefix: if non-empty, must be a valid Prometheus name prefix (letters, digits, '_'; max 64 chars)
 //   - MaxUsersInAlertChannel: must be between 1 and 10,000
 //   - RateLimitPerAlertChannel: must not be nil, and all fields must be valid
 //   - SlackClient: must not be nil, and must pass its own validation
@@ -211,8 +221,12 @@ func (c *APIConfig) Validate() error {
 		return fmt.Errorf("encryption key must be a %d character alphanumeric string", EncryptionKeyLength)
 	}
 
-	if c.CacheKeyPrefix == "" {
-		return errors.New("cache key prefix is required")
+	if err := validateCacheKeyPrefix(c.CacheKeyPrefix); err != nil {
+		return err
+	}
+
+	if err := validateMetricsPrefix(c.MetricsPrefix); err != nil {
+		return err
 	}
 
 	if c.MaxUsersInAlertChannel < MinMaxUsersInAlertChannel || c.MaxUsersInAlertChannel > MaxMaxUsersInAlertChannel {

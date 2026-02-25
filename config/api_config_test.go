@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/slackmgr/core/config"
@@ -18,6 +19,7 @@ func TestNewDefaultAPIConfig(t *testing.T) {
 	assert.Equal(t, "8080", cfg.RestPort)
 	assert.Empty(t, cfg.EncryptionKey)
 	assert.Equal(t, "slack-manager:", cfg.CacheKeyPrefix)
+	assert.Equal(t, config.DefaultMetricsPrefix, cfg.MetricsPrefix)
 	assert.Empty(t, cfg.ErrorReportChannelID)
 	assert.Equal(t, 100, cfg.MaxUsersInAlertChannel)
 
@@ -106,6 +108,63 @@ func TestAPIConfig_Validate(t *testing.T) {
 				c.CacheKeyPrefix = ""
 			},
 			expectError: "cache key prefix is required",
+		},
+		{
+			name: "cache key prefix too long",
+			modify: func(c *config.APIConfig) {
+				c.CacheKeyPrefix = strings.Repeat("a", config.MaxCacheKeyPrefixLen+1)
+			},
+			expectError: "cache key prefix must not exceed 100 characters",
+		},
+		{
+			name: "cache key prefix with space",
+			modify: func(c *config.APIConfig) {
+				c.CacheKeyPrefix = "my prefix:"
+			},
+			expectError: "cache key prefix may only contain letters, digits, '.', '_', ':', or '-'",
+		},
+		{
+			name: "cache key prefix with at sign",
+			modify: func(c *config.APIConfig) {
+				c.CacheKeyPrefix = "my@prefix:"
+			},
+			expectError: "cache key prefix may only contain letters, digits, '.', '_', ':', or '-'",
+		},
+		// MetricsPrefix validation
+		{
+			name: "empty metrics prefix is valid",
+			modify: func(c *config.APIConfig) {
+				c.MetricsPrefix = ""
+			},
+			expectError: "",
+		},
+		{
+			name: "metrics prefix too long",
+			modify: func(c *config.APIConfig) {
+				c.MetricsPrefix = strings.Repeat("a", config.MaxMetricsPrefixLen+1)
+			},
+			expectError: "metrics prefix must not exceed 64 characters",
+		},
+		{
+			name: "metrics prefix starts with digit",
+			modify: func(c *config.APIConfig) {
+				c.MetricsPrefix = "1invalid_"
+			},
+			expectError: "metrics prefix must start with a letter or underscore and contain only letters, digits, or underscores",
+		},
+		{
+			name: "metrics prefix contains hyphen",
+			modify: func(c *config.APIConfig) {
+				c.MetricsPrefix = "slackmgr-"
+			},
+			expectError: "metrics prefix must start with a letter or underscore and contain only letters, digits, or underscores",
+		},
+		{
+			name: "metrics prefix contains colon",
+			modify: func(c *config.APIConfig) {
+				c.MetricsPrefix = "slackmgr:"
+			},
+			expectError: "metrics prefix must start with a letter or underscore and contain only letters, digits, or underscores",
 		},
 		// MaxUsersInAlertChannel validation
 		{
@@ -221,6 +280,54 @@ func TestAPIConfig_Validate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAPIConfig_Validate_PrefixVariations(t *testing.T) {
+	t.Parallel()
+
+	// CacheKeyPrefix valid variants
+	t.Run("cache key prefix with colon separator", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.CacheKeyPrefix = "slack-manager:"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("cache key prefix with underscore and dot", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.CacheKeyPrefix = "my_app.v2:"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("cache key prefix at max length", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.CacheKeyPrefix = strings.Repeat("a", config.MaxCacheKeyPrefixLen)
+		assert.NoError(t, cfg.Validate())
+	})
+
+	// MetricsPrefix valid variants
+	t.Run("metrics prefix with trailing underscore", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.MetricsPrefix = "slackmgr_"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("metrics prefix starting with underscore", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.MetricsPrefix = "_internal_"
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("metrics prefix at max length", func(t *testing.T) {
+		t.Parallel()
+		cfg := validAPIConfig()
+		cfg.MetricsPrefix = strings.Repeat("a", config.MaxMetricsPrefixLen)
+		assert.NoError(t, cfg.Validate())
+	})
 }
 
 func TestAPIConfig_Validate_BoundaryValues(t *testing.T) {

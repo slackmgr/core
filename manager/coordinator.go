@@ -14,6 +14,8 @@ import (
 	"github.com/slackmgr/types"
 )
 
+const activeChannelManagersMetric = "active_channel_managers"
+
 type coordinator struct {
 	// channelManagers holds the active channel managers, keyed by Slack channel ID.
 	// No locking is required, since all access happen via the synchronous coordinator run loop.
@@ -39,6 +41,9 @@ func newCoordinator(db types.DB, alertQueue FifoQueue, slack SlackClient, cacheS
 	locker ChannelLocker, logger types.Logger, metrics types.Metrics, webhookHandlers []WebhookHandler,
 	gate RateLimitGate, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper,
 ) *coordinator {
+	metrics.RegisterGauge(activeChannelManagersMetric, "Number of active channel manager goroutines")
+	metrics.Set(activeChannelManagersMetric, 0)
+
 	return &coordinator{
 		channelManagers:          make(map[string]*channelManager),
 		channelManagersWaitGroup: &sync.WaitGroup{},
@@ -311,6 +316,8 @@ func (c *coordinator) findOrCreateChannelManager(ctx context.Context, channelID 
 
 func (c *coordinator) createChannelManager(ctx context.Context, channelID string) (*channelManager, error) {
 	channelManager := newChannelManager(channelID, c.slack, c.db, c.locker, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings, c.gate)
+
+	c.metrics.Inc(activeChannelManagersMetric)
 
 	// Add one to the wait group to ensure we wait for this channel manager to finish.
 	// This is important to ensure that we don't exit the coordinator while channel managers are still running.

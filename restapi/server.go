@@ -29,7 +29,8 @@ import (
 )
 
 const (
-	httpRequestMetric = "http_server_request_duration_seconds"
+	httpRequestMetric  = "http_server_request_duration_seconds"
+	httpInFlightMetric = "http_server_requests_in_flight"
 )
 
 const (
@@ -180,6 +181,10 @@ func (s *Server) Run(ctx context.Context) error {
 		s.cacheStore = gocache_store.NewGoCache(gocacheClient)
 	}
 
+	// Wrap the metrics implementation with the configured prefix so all internal metric
+	// names are automatically namespaced (e.g. "slackmgr_http_server_request_duration_seconds").
+	s.metrics = internal.NewPrefixedMetrics(s.metrics, s.cfg.MetricsPrefix)
+
 	// Initialize Slack API client if not already set
 	if s.slackClient == nil {
 		slackAPI := internal.NewSlackAPIClient(s.cacheStore, s.cfg.CacheKeyPrefix, s.logger, s.metrics, s.cfg.SlackClient)
@@ -202,10 +207,12 @@ func (s *Server) Run(ctx context.Context) error {
 		s.channelInfoProvider = channelInfoSyncer
 	}
 
-	// Register prometheus histogram metric for HTTP request durations
+	// Register HTTP server metrics.
 	metricsLabels := []string{"path", "method", "status"}
-	s.metrics.RegisterHistogram(httpRequestMetric, "The duration of incoming HTTP server requests in seconds",
+	s.metrics.RegisterHistogram(httpRequestMetric, "Duration of incoming HTTP server requests in seconds",
 		[]float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}, metricsLabels...)
+	s.metrics.RegisterGauge(httpInFlightMetric, "Number of HTTP requests currently being processed")
+	s.metrics.Set(httpInFlightMetric, 0)
 
 	// Set release mode to mute a few annoying startup logs.
 	// The actual runtime mode is set below, depending on config.
@@ -233,7 +240,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	// Add recovery middleware to recover from any panics and write a 500 if there was one.
-	// We add this *after* the metrcics and logging middleware, so that calls that trigger a panic are still logged and measured.
+	// We add this *after* the metrics and logging middleware, so that calls that trigger a panic are still logged and measured.
 	// We just need to make sure that the metrics and logging middleware don't themselves panic...
 	engine.Use(s.recoveryMiddleware())
 
@@ -639,9 +646,13 @@ func (s *Server) jsonLogMiddleware() gin.HandlerFunc {
 	}
 }
 
-// metricsMiddleware is a Gin middleware that records HTTP request durations and status codes for Prometheus metrics.
+// metricsMiddleware is a Gin middleware that records HTTP request durations, status
+// codes, and the number of in-flight requests.
 func (s *Server) metricsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		s.metrics.Add(httpInFlightMetric, 1)
+		defer s.metrics.Add(httpInFlightMetric, -1)
+
 		start := time.Now()
 
 		c.Next() // process request

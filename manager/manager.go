@@ -188,6 +188,19 @@ func (m *Manager) Run(ctx context.Context) error {
 		m.cacheStore = gocache_store.NewGoCache(gocacheClient)
 	}
 
+	// Wrap the metrics implementation with the configured prefix so all internal metric
+	// names are automatically namespaced (e.g. "slackmgr_slack_api_call").
+	m.metrics = coreinternal.NewPrefixedMetrics(m.metrics, m.cfg.MetricsPrefix)
+
+	// Wire metrics into the rate limit gate (if it supports it), so gate-level counters
+	// are emitted with the same prefix as all other manager metrics.
+	type metricsConnector interface {
+		connectMetrics(m types.Metrics)
+	}
+	if mc, ok := m.gate.(metricsConnector); ok {
+		mc.connectMetrics(m.metrics)
+	}
+
 	// Add the DB cache middleware if not skipped by config.
 	// In multi-instance deployments, validate that the provided cache store is a known distributed implementation
 	// to prevent subtle and hard-to-debug cache consistency issues.
@@ -197,7 +210,7 @@ func (m *Manager) Run(ctx context.Context) error {
 				return fmt.Errorf("invalid cache store for multi-instance deployment: %w", err)
 			}
 		}
-		m.db = newDBCacheMiddleware(m.db, m.cacheStore, m.logger, m.cfg)
+		m.db = newDBCacheMiddleware(m.db, m.cacheStore, m.logger, m.metrics, m.cfg)
 	}
 
 	m.slackClient = slack.New(m.commandQueue, m.cacheStore, m.logger, m.metrics, m.cfg, m.managerSettings, coreinternal.WithRateLimitGate(m.gate))

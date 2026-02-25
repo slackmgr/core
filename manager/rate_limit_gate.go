@@ -8,6 +8,11 @@ import (
 	"github.com/slackmgr/types"
 )
 
+const (
+	rateLimitGateSignalsTotalMetric      = "rate_limit_gate_signals_total"
+	rateLimitGateDrainTimeoutTotalMetric = "rate_limit_gate_drain_timeout_total"
+)
+
 const defaultMaxDrainWait = 30 * time.Second
 
 // RateLimitGate coordinates a global pause across all channel managers when a
@@ -43,6 +48,7 @@ type LocalRateLimitGate struct {
 	readyFn      func() bool
 	maxDrainWait time.Duration
 	logger       types.Logger
+	metrics      types.Metrics
 }
 
 // NewLocalRateLimitGate creates a [LocalRateLimitGate].
@@ -63,10 +69,16 @@ func NewLocalRateLimitGate(logger types.Logger, maxDrainWait time.Duration) *Loc
 // is later than any previously recorded deadline.
 func (g *LocalRateLimitGate) Signal(_ context.Context, until time.Time) error {
 	g.mu.Lock()
-	defer g.mu.Unlock()
 
 	if until.After(g.blockedUntil) {
 		g.blockedUntil = until
+	}
+
+	m := g.metrics
+	g.mu.Unlock()
+
+	if m != nil {
+		m.Inc(rateLimitGateSignalsTotalMetric)
 	}
 
 	return nil
@@ -110,6 +122,7 @@ func (g *LocalRateLimitGate) Wait(ctx context.Context) error {
 	// Phase 2: wait for Socket Mode to be quiet (poll every 100 ms).
 	g.mu.RLock()
 	fn := g.readyFn
+	m := g.metrics
 	g.mu.RUnlock()
 
 	if fn == nil {
@@ -121,6 +134,11 @@ func (g *LocalRateLimitGate) Wait(ctx context.Context) error {
 	for !fn() {
 		if time.Now().After(drainDeadline) {
 			g.logger.Info("Rate limit gate: Socket Mode drain wait exceeded, resuming (fail-open)")
+
+			if m != nil {
+				m.Inc(rateLimitGateDrainTimeoutTotalMetric)
+			}
+
 			return nil
 		}
 
@@ -149,6 +167,17 @@ func (g *LocalRateLimitGate) SetReadyCheck(fn func() bool) {
 	defer g.mu.Unlock()
 
 	g.readyFn = fn
+}
+
+// connectMetrics registers gate metrics against m and stores m for future use.
+// Called once from [Manager.Run] after the metrics implementation is confirmed.
+func (g *LocalRateLimitGate) connectMetrics(m types.Metrics) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.metrics = m
+	m.RegisterCounter(rateLimitGateSignalsTotalMetric, "Total number of times the rate limit gate was signaled")
+	m.RegisterCounter(rateLimitGateDrainTimeoutTotalMetric, "Total number of times the Socket Mode drain wait timed out during rate limit recovery")
 }
 
 // NoopRateLimitGate is a no-op [RateLimitGate] for tests and single-instance

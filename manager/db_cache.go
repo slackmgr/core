@@ -14,25 +14,31 @@ import (
 	"github.com/slackmgr/types"
 )
 
+const dbCacheRequestsTotalMetric = "db_cache_requests_total"
+
 type dbCacheMiddleware struct {
 	db                          types.DB
 	issueHashCache              *internal.Cache
 	channelProcessingStateCache *internal.Cache
 	moveMappingCache            *internal.Cache
+	metrics                     types.Metrics
 }
 
-func newDBCacheMiddleware(db types.DB, cacheStore store.StoreInterface, logger types.Logger, cfg *config.ManagerConfig) *dbCacheMiddleware {
+func newDBCacheMiddleware(db types.DB, cacheStore store.StoreInterface, logger types.Logger, metrics types.Metrics, cfg *config.ManagerConfig) *dbCacheMiddleware {
 	cacheKeyPrefix := cfg.CacheKeyPrefix + "db-cache:"
 
 	issueHashCache := internal.NewCache(cacheStore, cacheKeyPrefix+"issueHash:", logger)
 	channelProcessinStateCache := internal.NewCache(cacheStore, cacheKeyPrefix+"channelProcessingState:", logger)
 	moveMappingCache := internal.NewCache(cacheStore, cacheKeyPrefix+"moveMapping:", logger)
 
+	metrics.RegisterCounter(dbCacheRequestsTotalMetric, "Total number of DB cache lookups by operation and result", "operation", "result")
+
 	return &dbCacheMiddleware{
 		db:                          db,
 		issueHashCache:              issueHashCache,
 		channelProcessingStateCache: channelProcessinStateCache,
 		moveMappingCache:            moveMappingCache,
+		metrics:                     metrics,
 	}
 }
 
@@ -78,8 +84,11 @@ func (d *dbCacheMiddleware) SaveIssues(ctx context.Context, issues ...types.Issu
 
 		// No point in updating db if the issue has not changed.
 		if existingHash, ok := d.issueHashCache.Get(ctx, cacheKey); ok && existingHash == issueHash {
+			d.metrics.Inc(dbCacheRequestsTotalMetric, "issue_hash", "hit")
 			continue
 		}
+
+		d.metrics.Inc(dbCacheRequestsTotalMetric, "issue_hash", "miss")
 
 		// The issue has changed, so we need to update it in the database.
 		issuesToUpdate = append(issuesToUpdate, issue)
@@ -201,11 +210,16 @@ func (d *dbCacheMiddleware) FindMoveMapping(ctx context.Context, channelID, corr
 	cacheKey := moveMappingCacheKey(channelID, correlationID)
 
 	if mapping, ok := d.moveMappingCache.Get(ctx, cacheKey); ok {
+		d.metrics.Inc(dbCacheRequestsTotalMetric, "move_mapping", "hit")
+
 		if mapping != "" {
 			return json.RawMessage(mapping), nil
 		}
+
 		return nil, nil
 	}
+
+	d.metrics.Inc(dbCacheRequestsTotalMetric, "move_mapping", "miss")
 
 	mapping, err := d.db.FindMoveMapping(ctx, channelID, correlationID)
 	if err != nil {
@@ -259,6 +273,8 @@ func (d *dbCacheMiddleware) SaveChannelProcessingState(ctx context.Context, stat
 
 func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, channelID string) (*types.ChannelProcessingState, error) {
 	if cachedJSONBody, ok := d.channelProcessingStateCache.Get(ctx, channelID); ok {
+		d.metrics.Inc(dbCacheRequestsTotalMetric, "processing_state", "hit")
+
 		var state types.ChannelProcessingState
 
 		if err := json.Unmarshal([]byte(cachedJSONBody), &state); err != nil {
@@ -267,6 +283,8 @@ func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, chan
 
 		return &state, nil
 	}
+
+	d.metrics.Inc(dbCacheRequestsTotalMetric, "processing_state", "miss")
 
 	state, err := d.db.FindChannelProcessingState(ctx, channelID)
 	if err != nil {
