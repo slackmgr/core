@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-02-25
+
+### Added
+- `config.InfoChannelSettings.TemplateContent` field as an alternative to `TemplatePath`; supports both plain and standard base64-encoded (RFC 4648) Go template strings with transparent auto-detection. Preferred over `TemplatePath` in environments where file mounts are inconvenient (e.g. Kubernetes — embed the template directly in the settings ConfigMap)
+- Expanded metrics instrumentation across `manager` and `restapi` packages
+
+### Changed
+- Added unit tests for `views.GreetingView`, `views.WebhookInputView`, and `views.InfoChannelView`
+
 ## [0.5.1] - 2026-02-24
 
 ### Changed
@@ -194,7 +203,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/slackmgr/core/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/slackmgr/core/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/slackmgr/core/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/slackmgr/core/compare/v0.4.0...v0.4.1
