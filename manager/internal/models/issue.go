@@ -122,9 +122,9 @@ func NewIssue(alert *Alert, logger types.Logger) *Issue {
 
 	if alert.IssueFollowUpEnabled {
 		if alert.Severity == types.AlertResolved {
-			issue.ResolveTime = alert.Timestamp
+			issue.ResolveTime = now
 		} else {
-			issue.ResolveTime = alert.Timestamp.Add(issue.AutoResolvePeriod)
+			issue.ResolveTime = now.Add(issue.AutoResolvePeriod)
 		}
 
 		if alert.NotificationDelaySeconds > 0 {
@@ -209,9 +209,9 @@ func (issue *Issue) AddAlert(alert *Alert, logger types.Logger) bool {
 	issue.Archived = false
 
 	if alert.Severity == types.AlertInfo || alert.Severity == types.AlertResolved {
-		issue.ResolveTime = alert.Timestamp
+		issue.ResolveTime = issue.LastAlertReceived
 	} else {
-		issue.ResolveTime = alert.Timestamp.Add(issue.AutoResolvePeriod)
+		issue.ResolveTime = issue.LastAlertReceived.Add(issue.AutoResolvePeriod)
 	}
 
 	if alert.NotificationDelaySeconds > 0 {
@@ -330,7 +330,7 @@ func (issue *Issue) RegisterUnresolveRequest() {
 
 	issue.IsEmojiResolved = false
 	issue.ResolvedByUser = ""
-	issue.ResolveTime = issue.LastAlert.Timestamp.Add(issue.AutoResolvePeriod)
+	issue.ResolveTime = nowFunc().UTC().Add(issue.AutoResolvePeriod)
 	issue.SlackPostNeedsUpdate = true
 
 	issue.setArchivingTime()
@@ -499,11 +499,11 @@ func (issue *Issue) LogFields() map[string]any {
 		"correlation_id":       correlationID,
 		"channel_id":           issue.LastAlert.SlackChannelID,
 		"channel_name":         issue.LastAlert.SlackChannelName,
-		"last_alert_timestamp": issue.LastAlert.Timestamp.Format(time.RFC3339),
-		"last_alert_received":  issue.LastAlertReceived.Format(time.RFC3339),
+		"last_alert_timestamp": issue.LastAlert.Timestamp.UTC().Format(time.RFC3339),
+		"last_alert_received":  issue.LastAlertReceived.UTC().Format(time.RFC3339),
 		"alert_count":          issue.AlertCount,
-		"resolve_time":         issue.ResolveTime.Format(time.RFC3339),
-		"archive_time":         issue.ArchiveTime.Format(time.RFC3339),
+		"resolve_time":         issue.ResolveTime.UTC().Format(time.RFC3339),
+		"archive_time":         issue.ArchiveTime.UTC().Format(time.RFC3339),
 		"slack_post_id":        issue.SlackPostID,
 		"follow_up_enabled":    issue.LastAlert.IssueFollowUpEnabled,
 	}
@@ -646,8 +646,8 @@ func (issue *Issue) setArchivingTime() {
 		return
 	}
 
-	// All other issues are archived after AutoResolvePeriod+ArchivingDelay, measured from the last alert
-	issue.ArchiveTime = issue.LastAlert.Timestamp.Add(issue.AutoResolvePeriod + issue.ArchiveDelay)
+	// All other issues are archived after AutoResolvePeriod+ArchivingDelay, measured from last alert received
+	issue.ArchiveTime = issue.LastAlertReceived.Add(issue.AutoResolvePeriod + issue.ArchiveDelay)
 }
 
 // sanitizeSlackMentions ensures that no illegal mentions are present, and that mentions are muted when required

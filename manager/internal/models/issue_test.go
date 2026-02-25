@@ -93,7 +93,7 @@ func TestNewIssue(t *testing.T) {
 		issue := NewIssue(alert, logger)
 
 		require.NotNil(t, issue)
-		expectedResolveTime := alert.Timestamp.Add(time.Duration(alert.AutoResolveSeconds) * time.Second)
+		expectedResolveTime := fixedTime.Add(time.Duration(alert.AutoResolveSeconds) * time.Second)
 		assert.Equal(t, expectedResolveTime, issue.ResolveTime)
 	})
 
@@ -109,7 +109,7 @@ func TestNewIssue(t *testing.T) {
 		issue := NewIssue(alert, logger)
 
 		require.NotNil(t, issue)
-		assert.Equal(t, alert.Timestamp, issue.ResolveTime)
+		assert.Equal(t, fixedTime, issue.ResolveTime)
 	})
 
 	t.Run("disables follow-up for info severity", func(t *testing.T) {
@@ -956,7 +956,6 @@ func TestIssue_RegisterUnresolveRequest(t *testing.T) {
 		cleanup := setTestTime(fixedTime)
 		defer cleanup()
 
-		alertTime := fixedTime.Add(-time.Hour)
 		issue := &Issue{
 			IsEmojiResolved:   true,
 			ResolvedByUser:    "user123",
@@ -964,7 +963,7 @@ func TestIssue_RegisterUnresolveRequest(t *testing.T) {
 			AutoResolvePeriod: 2 * time.Hour,
 			LastAlert: &Alert{
 				Alert: types.Alert{
-					Timestamp:            alertTime,
+					Timestamp:            fixedTime.Add(-time.Hour),
 					IssueFollowUpEnabled: true,
 				},
 			},
@@ -974,7 +973,7 @@ func TestIssue_RegisterUnresolveRequest(t *testing.T) {
 
 		assert.False(t, issue.IsEmojiResolved)
 		assert.Empty(t, issue.ResolvedByUser)
-		expectedResolveTime := alertTime.Add(2 * time.Hour)
+		expectedResolveTime := fixedTime.Add(2 * time.Hour)
 		assert.Equal(t, expectedResolveTime, issue.ResolveTime)
 		assert.True(t, issue.SlackPostNeedsUpdate)
 	})
