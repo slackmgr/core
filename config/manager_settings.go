@@ -544,9 +544,23 @@ type InfoChannelSettings struct {
 	ID string `json:"channelId" yaml:"channelId"`
 
 	// TemplatePath is the file path to a Go template file used to render content
-	// for this info channel. The template has access to system status data and is
-	// re-rendered periodically. Required.
+	// for this info channel. Either TemplatePath or TemplateContent must be set.
+	// TemplateContent takes precedence if both are provided.
 	TemplatePath string `json:"templatePath" yaml:"templatePath"`
+
+	// TemplateContent is the Go template used to render content for this info
+	// channel. Takes precedence over TemplatePath when both are set. Prefer
+	// this over TemplatePath when running in environments where mounting files
+	// is inconvenient (e.g. Kubernetes — embed the template in the settings
+	// ConfigMap instead of mounting a separate volume).
+	//
+	// Accepts either a plain template string or a standard base64-encoded
+	// (RFC 4648, with padding) template string. Base64 is detected automatically
+	// and decoded before rendering, which is convenient when the template
+	// contains characters that are awkward to embed in YAML (e.g. braces,
+	// quotes). Plain templates and base64 templates are both supported and
+	// can be used interchangeably.
+	TemplateContent string `json:"templateContent" yaml:"templateContent"`
 }
 
 // Clone creates a deep copy of the ManagerSettings by marshaling to JSON and back.
@@ -770,6 +784,7 @@ func (s *ManagerSettings) InitAndValidate() error {
 	for i, a := range s.InfoChannels {
 		a.ID = strings.TrimSpace(a.ID)
 		a.TemplatePath = strings.TrimSpace(a.TemplatePath)
+		a.TemplateContent = strings.TrimSpace(a.TemplateContent)
 
 		if a.ID == "" {
 			return fmt.Errorf("infoChannels[%d].id cannot be empty", i)
@@ -783,8 +798,8 @@ func (s *ManagerSettings) InitAndValidate() error {
 			return fmt.Errorf("infoChannels[%d].id %q is already configured as an alert channel", i, a.ID)
 		}
 
-		if a.TemplatePath == "" {
-			return fmt.Errorf("infoChannels[%d].templatePath cannot be empty", i)
+		if a.TemplatePath == "" && a.TemplateContent == "" {
+			return fmt.Errorf("infoChannels[%d]: templatePath or templateContent must be set", i)
 		}
 
 		s.infoChannels[a.ID] = a

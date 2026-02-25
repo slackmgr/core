@@ -25,7 +25,7 @@ type Alert struct {
 
 // NewAlertFromQueueItem creates a new Alert instance from a FifoQueueItem.
 // It unmarshals the JSON body of the queue item into an Alert struct.
-func NewAlertFromQueueItem(queueItem *types.FifoQueueItem) (InFlightMessage, error) { //nolint:ireturn
+func NewAlertFromQueueItem(queueItem *types.FifoQueueItem) (InFlightMessage, error) { //nolint:ireturn // constructor must return the InFlightMessage interface
 	if len(queueItem.Body) == 0 {
 		return nil, errors.New("alert body is empty")
 	}

@@ -57,7 +57,7 @@ func (c *greetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 	infoChannelConfig, isInfoChannel := c.managerSettings.GetSettings().GetInfoChannelConfig(joinedEvent.Channel)
 
 	if isInfoChannel {
-		blocks, err := views.InfoChannelView(infoChannelConfig.TemplatePath, userInfo.RealName)
+		blocks, err := views.InfoChannelView(infoChannelConfig.TemplateContent, infoChannelConfig.TemplatePath, userInfo.RealName)
 		if err != nil {
 			logger.Errorf("Failed to generate view: %s", err)
 			return

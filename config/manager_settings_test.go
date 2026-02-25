@@ -412,9 +412,23 @@ func TestManagerSettings_InitAndValidate_InfoChannels(t *testing.T) {
 		expectError string
 	}{
 		{
-			name: "valid channel",
+			name: "valid channel with templatePath",
 			channels: []*config.InfoChannelSettings{
 				{ID: "C123456789", TemplatePath: "/path/to/template"},
+			},
+			expectError: "",
+		},
+		{
+			name: "valid channel with templateContent",
+			channels: []*config.InfoChannelSettings{
+				{ID: "C123456789", TemplateContent: `{"blocks":[]}`},
+			},
+			expectError: "",
+		},
+		{
+			name: "valid channel with both templatePath and templateContent",
+			channels: []*config.InfoChannelSettings{
+				{ID: "C123456789", TemplatePath: "/path/to/template", TemplateContent: `{"blocks":[]}`},
 			},
 			expectError: "",
 		},
@@ -426,11 +440,11 @@ func TestManagerSettings_InitAndValidate_InfoChannels(t *testing.T) {
 			expectError: "infoChannels[0].id cannot be empty",
 		},
 		{
-			name: "empty template path",
+			name: "neither templatePath nor templateContent set",
 			channels: []*config.InfoChannelSettings{
-				{ID: "C123456789", TemplatePath: ""},
+				{ID: "C123456789"},
 			},
-			expectError: "infoChannels[0].templatePath cannot be empty",
+			expectError: "infoChannels[0]: templatePath or templateContent must be set",
 		},
 	}
 

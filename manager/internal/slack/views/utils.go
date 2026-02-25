@@ -40,3 +40,19 @@ func renderTemplateFromPath(filename string, args any) (bytes.Buffer, error) {
 
 	return tpl, nil
 }
+
+func renderTemplateFromString(content string, args any) (bytes.Buffer, error) {
+	var tpl bytes.Buffer
+
+	t, err := template.New("").Parse(content)
+	if err != nil {
+		return tpl, err
+	}
+
+	err = t.Execute(&tpl, args)
+	if err != nil {
+		return tpl, err
+	}
+
+	return tpl, nil
+}
