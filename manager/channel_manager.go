@@ -17,9 +17,8 @@ const (
 	alertsTotal = "alerts_processed_total"
 
 	// Queue processing metrics
-	queueMessagesAckedTotalMetric  = "queue_messages_acked_total"
-	queueMessagesNackedTotalMetric = "queue_messages_nacked_total"
-	queueMessageProcessingDuration = "queue_message_processing_duration_seconds"
+	queueMessagesProcessedTotalMetric = "queue_messages_processed_total"
+	queueMessageProcessingDuration    = "queue_message_processing_duration_seconds"
 
 	// processActiveIssues metrics
 	processActiveIssuesDurationMetric = "process_active_issues_duration_seconds"
@@ -104,8 +103,7 @@ func newChannelManager(channelID string, slackClient SlackClient, db types.DB, l
 	metrics.RegisterCounter(alertsTotal, "Total number of handled alerts", "channel")
 
 	// Queue processing
-	metrics.RegisterCounter(queueMessagesAckedTotalMetric, "Total number of queue messages successfully acknowledged", "queue_type")
-	metrics.RegisterCounter(queueMessagesNackedTotalMetric, "Total number of queue messages negatively acknowledged", "queue_type", "reason")
+	metrics.RegisterCounter(queueMessagesProcessedTotalMetric, "Total number of queue messages processed, labelled by result (acked or nack reason)", "queue_type", "result")
 	metrics.RegisterHistogram(queueMessageProcessingDuration, "Time from message received to ack or nack in seconds", durationBuckets, "queue_type")
 
 	// processActiveIssues
@@ -158,7 +156,7 @@ func (c *channelManager) run(ctx context.Context) {
 			// Wait for the rate limit gate before processing the alert. If the context is cancelled while waiting, nack the alert and exit.
 			if err := c.waitForGate(ctx); err != nil {
 				alert.Nack()
-				c.metrics.Inc(queueMessagesNackedTotalMetric, "alert", "gate_timeout")
+				c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "gate_timeout")
 				c.metrics.Observe(queueMessageProcessingDuration, time.Since(msgStart).Seconds(), "alert")
 				return
 			}
@@ -185,7 +183,7 @@ func (c *channelManager) run(ctx context.Context) {
 			// Wait for the rate limit gate before processing the command. If the context is cancelled while waiting, nack the command and exit.
 			if err := c.waitForGate(ctx); err != nil {
 				cmd.Nack()
-				c.metrics.Inc(queueMessagesNackedTotalMetric, "command", "gate_timeout")
+				c.metrics.Inc(queueMessagesProcessedTotalMetric, "command", "gate_timeout")
 				c.metrics.Observe(queueMessageProcessingDuration, time.Since(msgStart).Seconds(), "command")
 				return
 			}
@@ -340,7 +338,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	lock, err := c.obtainLock(ctx, c.channelID, 5*time.Minute, 30*time.Second)
 	if err != nil {
 		alert.Nack()
-		c.metrics.Inc(queueMessagesNackedTotalMetric, "alert", "lock_timeout")
+		c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "lock_timeout")
 		return fmt.Errorf("failed to obtain lock for channel %s after 30 seconds: %w", c.channelID, err)
 	}
 
@@ -355,7 +353,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		// This really should not happen, since the API is expected to reject such alerts before queuing them.
 		// Ack the alert to remove it from the queue, and log the error for debugging.
 		alert.Ack()
-		c.metrics.Inc(queueMessagesAckedTotalMetric, "alert")
+		c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "acked")
 		return fmt.Errorf("alert is invalid: %w", err)
 	}
 
@@ -365,7 +363,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	if len(alert.Webhooks) > 0 && c.cfg.EncryptionKey == "" {
 		c.logger.WithFields(alert.LogFields()).Error("Ignoring alert with webhook payloads: no encryption key is configured")
 		alert.Ack()
-		c.metrics.Inc(queueMessagesAckedTotalMetric, "alert")
+		c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "acked")
 		return nil
 	}
 
@@ -374,7 +372,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	if err := c.cleanAlertEscalations(ctx, alert, logger); err != nil {
 		// Transient: Slack API call failed; nack so the alert is retried.
 		alert.Nack()
-		c.metrics.Inc(queueMessagesNackedTotalMetric, "alert", "slack_error")
+		c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "slack_error")
 		return fmt.Errorf("failed to clean alert escalations: %w", err)
 	}
 
@@ -383,7 +381,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	moveMappingBody, err := c.db.FindMoveMapping(ctx, alert.OriginalSlackChannelID, alert.CorrelationID)
 	if err != nil {
 		alert.Nack()
-		c.metrics.Inc(queueMessagesNackedTotalMetric, "alert", "db_error")
+		c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "db_error")
 		return fmt.Errorf("failed to re-verify move mapping: %w", err)
 	}
 
@@ -392,13 +390,13 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 
 		if err := json.Unmarshal(moveMappingBody, moveMapping); err != nil {
 			alert.Nack()
-			c.metrics.Inc(queueMessagesNackedTotalMetric, "alert", "db_error")
+			c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "db_error")
 			return fmt.Errorf("failed to unmarshal move mapping during re-check: %w", err)
 		}
 
 		if moveMapping.TargetChannelID != c.channelID {
 			alert.Nack()
-			c.metrics.Inc(queueMessagesNackedTotalMetric, "alert", "move_race")
+			c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "move_race")
 			c.logger.WithFields(alert.LogFields()).
 				WithField("correct_channel_id", moveMapping.TargetChannelID).
 				Info("Alert was misrouted due to concurrent escalation; re-queuing for correct channel")
@@ -410,7 +408,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	if err != nil {
 		// Transient: database call failed; nack so the alert is retried.
 		alert.Nack()
-		c.metrics.Inc(queueMessagesNackedTotalMetric, "alert", "db_error")
+		c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "db_error")
 		return fmt.Errorf("failed to find open issue by correlation ID: %w", err)
 	}
 
@@ -420,28 +418,28 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		if err := json.Unmarshal(issueBody, issue); err != nil {
 			// Non-retryable: the issue record in the DB is corrupt; retrying hits the same data.
 			alert.Ack()
-			c.metrics.Inc(queueMessagesAckedTotalMetric, "alert")
+			c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "acked")
 			return fmt.Errorf("failed to unmarshal issue body: %w", err)
 		}
 
 		if issue.LastAlert == nil {
 			// Non-retryable: corrupt DB state that retrying cannot repair.
 			alert.Ack()
-			c.metrics.Inc(queueMessagesAckedTotalMetric, "alert")
+			c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "acked")
 			return errors.New("issue has nil LastAlert after unmarshal")
 		}
 
 		if err := c.addAlertToExistingIssue(ctx, issue, alert); err != nil {
 			// Transient: database or Slack API call failed; nack so the alert is retried.
 			alert.Nack()
-			c.metrics.Inc(queueMessagesNackedTotalMetric, "alert", "db_error")
+			c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "db_error")
 			return fmt.Errorf("failed to add alert to existing issue: %w", err)
 		}
 	} else {
 		if err := c.createNewIssue(ctx, alert, logger); err != nil {
 			// Transient: database or Slack API call failed; nack so the alert is retried.
 			alert.Nack()
-			c.metrics.Inc(queueMessagesNackedTotalMetric, "alert", "db_error")
+			c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "db_error")
 			return fmt.Errorf("failed to create new issue: %w", err)
 		}
 	}
@@ -449,13 +447,13 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	if err := c.db.SaveAlert(ctx, &alert.Alert); err != nil {
 		// Transient: database call failed; nack so the alert is retried.
 		alert.Nack()
-		c.metrics.Inc(queueMessagesNackedTotalMetric, "alert", "db_error")
+		c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "db_error")
 		return fmt.Errorf("failed to save alert to database: %w", err)
 	}
 
 	// Ack the alert to remove it from the queue, since it has been successfully processed.
 	alert.Ack()
-	c.metrics.Inc(queueMessagesAckedTotalMetric, "alert")
+	c.metrics.Inc(queueMessagesProcessedTotalMetric, "alert", "acked")
 
 	return nil
 }
@@ -490,7 +488,7 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 	lock, err := c.obtainLock(ctx, c.channelID, 5*time.Minute, 30*time.Second)
 	if err != nil {
 		cmd.Nack() // Nack the command if we fail to obtain the lock. This is the only case where we nack a command.
-		c.metrics.Inc(queueMessagesNackedTotalMetric, "command", "lock_timeout")
+		c.metrics.Inc(queueMessagesProcessedTotalMetric, "command", "lock_timeout")
 		return fmt.Errorf("failed to obtain lock for channel %s after 30 seconds: %w", c.channelID, err)
 	}
 
@@ -500,7 +498,7 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 	// The command is acked after processing, regardless of any errors. Commands are attempted exactly once.
 	defer func() {
 		cmd.Ack()
-		c.metrics.Inc(queueMessagesAckedTotalMetric, "command")
+		c.metrics.Inc(queueMessagesProcessedTotalMetric, "command", "acked")
 	}()
 
 	logger := c.logger.WithFields(cmd.LogFields())

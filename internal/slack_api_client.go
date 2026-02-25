@@ -131,7 +131,7 @@ func (c *SlackAPIClient) Connect(ctx context.Context) (*slack.AuthTestResponse, 
 	c.metrics.RegisterCounter(slackAPICallsTotalMetric, "Total outbound HTTP calls made to the Slack API", "slack_action")
 	c.metrics.RegisterCounter(slackAPIErrorsTotalMetric, "Total Slack API call errors by error type", "slack_action", "error_type")
 	c.metrics.RegisterCounter(slackAPIRetriesTotalMetric, "Total Slack API retry attempts after a recoverable error", "slack_action", "error_type")
-	c.metrics.RegisterHistogram(slackAPIRateLimitDurationMetric, "Retry-After duration in seconds from Slack 429 responses", []float64{1, 5, 10, 30, 60, 120, 300}, "slack_action")
+	c.metrics.RegisterHistogram(slackAPIRateLimitDurationMetric, "Retry-After duration in seconds from Slack 429 responses", []float64{1, 5, 10, 30, 60, 120, 300})
 
 	httpClient := &http.Client{
 		Timeout: time.Duration(c.cfg.HTTPTimeoutSeconds) * time.Second,
@@ -774,7 +774,7 @@ func waitForAPIError(ctx context.Context, started time.Time, logger types.Logger
 			return fmt.Errorf("failed to call Slack API %s after %d attempts and %d seconds: rate limit error: %w", action, attempt, int(time.Since(started).Seconds()), err)
 		}
 
-		metrics.Observe(slackAPIRateLimitDurationMetric, rateLimitError.RetryAfter.Seconds(), action)
+		metrics.Observe(slackAPIRateLimitDurationMetric, rateLimitError.RetryAfter.Seconds())
 
 		if gate != nil {
 			until := time.Now().Add(rateLimitError.RetryAfter + 2*time.Second)

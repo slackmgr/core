@@ -317,7 +317,7 @@ func (c *coordinator) findOrCreateChannelManager(ctx context.Context, channelID 
 func (c *coordinator) createChannelManager(ctx context.Context, channelID string) (*channelManager, error) {
 	channelManager := newChannelManager(channelID, c.slack, c.db, c.locker, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings, c.gate)
 
-	c.metrics.Inc(activeChannelManagersMetric)
+	c.metrics.Add(activeChannelManagersMetric, 1)
 
 	// Add one to the wait group to ensure we wait for this channel manager to finish.
 	// This is important to ensure that we don't exit the coordinator while channel managers are still running.
