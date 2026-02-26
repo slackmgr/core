@@ -623,11 +623,7 @@ func (s *Server) jsonLogMiddleware() gin.HandlerFunc {
 			path = path + "?" + raw
 		}
 
-		msg := c.Errors.String()
-
-		if msg == "" {
-			msg = "Request"
-		}
+		errors := c.Errors.String()
 
 		status := c.Writer.Status()
 
@@ -638,10 +634,14 @@ func (s *Server) jsonLogMiddleware() gin.HandlerFunc {
 			WithField("path", path).
 			WithField("status", status)
 
+		if errors != "" {
+			logger = logger.WithField("errors", errors)
+		}
+
 		if status >= 500 {
-			logger.Error(msg)
+			logger.Error("Request")
 		} else {
-			logger.Info(msg)
+			logger.Info("Request")
 		}
 	}
 }

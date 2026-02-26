@@ -210,7 +210,7 @@ func (c *coordinator) drainChannels(alertCh <-chan models.InFlightMessage, comma
 		default:
 			// No more messages available (channels empty or closed)
 			if drained > 0 {
-				c.logger.Infof("Drained %d messages from coordinator channels", drained)
+				c.logger.WithField("count", drained).Info("Drained messages from coordinator channels")
 			}
 			return
 		}

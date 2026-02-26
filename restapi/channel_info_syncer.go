@@ -73,7 +73,7 @@ func (c *channelInfoSyncer) Init(ctx context.Context) error {
 
 	data := c.managedChannels.Load()
 	if data != nil {
-		c.logger.Infof("Found %d channels managed by Slack Manager", len(data.list))
+		c.logger.WithField("count", len(data.list)).Info("Found channels managed by Slack Manager")
 	}
 
 	return nil

@@ -103,7 +103,7 @@ func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*types.Alert {
 
 		// If the severity is invalid, log it and use the default value 'error'.
 		if !types.SeverityIsValid(severity) {
-			s.logger.Infof("Invalid severity '%s' in Prometheus alert, using default value 'error'", severity)
+			s.logger.WithField("severity", severity).Info("Invalid severity in Prometheus alert, using default value 'error'")
 			severity = types.AlertError
 		}
 

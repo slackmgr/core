@@ -506,7 +506,7 @@ func TestSocketModeHandler_interactionDispatcher_InvalidData(t *testing.T) {
 	cfg := newTestManagerConfig()
 	logger := &mockLogger{}
 	logger.On("Debug", mock.Anything).Maybe()
-	logger.On("Infof", mock.Anything, mock.Anything).Once()
+	logger.On("Info", mock.Anything).Once()
 
 	handler := NewSocketModeHandler(
 		&mockSlackAPIClient{},
@@ -584,7 +584,7 @@ func TestSocketModeHandler_eventAPIDispatcher_InvalidData(t *testing.T) {
 	cfg := newTestManagerConfig()
 	logger := &mockLogger{}
 	logger.On("Debug", mock.Anything).Maybe()
-	logger.On("Infof", mock.Anything, mock.Anything).Once()
+	logger.On("Info", mock.Anything).Once()
 
 	handler := NewSocketModeHandler(
 		&mockSlackAPIClient{},
@@ -614,7 +614,7 @@ func TestSocketModeHandler_slashCommandDispatcher_InvalidData(t *testing.T) {
 	cfg := newTestManagerConfig()
 	logger := &mockLogger{}
 	logger.On("Debug", mock.Anything).Maybe()
-	logger.On("Infof", mock.Anything, mock.Anything).Once()
+	logger.On("Info", mock.Anything).Once()
 
 	handler := NewSocketModeHandler(
 		&mockSlackAPIClient{},

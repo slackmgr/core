@@ -156,7 +156,7 @@ func (c *Client) OpenModal(ctx context.Context, triggerID string, request slack.
 
 func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error) {
 	if c.cfg.SlackClient.DryRun {
-		c.logger.Infof("DRYRUN: Slack post ephemeral message to user %s in channel %s", userID, channelID)
+		c.logger.WithField("user_id", userID).WithField("channel_id", channelID).Info("DRYRUN: Slack post ephemeral message")
 		return "", nil
 	}
 
@@ -243,7 +243,7 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 		}
 
 		if c.cfg.SlackClient.DryRun {
-			c.logger.Infof("DRYRUN: Slack %s issue %s", action, issue.CorrelationID)
+			c.logger.WithFields(issue.LogFields()).WithField("action", action).Info("DRYRUN: Slack issue action")
 			continue
 		}
 
@@ -292,7 +292,7 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string,
 	logger := c.logger.WithFields(issue.LogFields()).WithField("post_update_reason", reason)
 
 	if c.cfg.SlackClient.DryRun {
-		logger.Infof("DRYRUN: Slack DELETE issue %s, post %s", issue.CorrelationID, issue.SlackPostID)
+		logger.Info("DRYRUN: Slack delete issue")
 		return nil
 	}
 
@@ -341,7 +341,7 @@ func (c *Client) DeletePost(ctx context.Context, channelID, ts string) error {
 	}
 
 	if c.cfg.SlackClient.DryRun {
-		c.logger.Infof("DRYRUN: Slack DELETE post %s", ts)
+		c.logger.WithField("slack_post_id", ts).Info("DRYRUN: Slack delete post")
 		return nil
 	}
 
@@ -494,12 +494,11 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, reason string,
 	postID, err := c.api.ChatUpdateMessage(ctx, issue.LastAlert.SlackChannelID, options...)
 	if err != nil {
 		logger = logger.WithField("reason", err.Error())
-		errMsg := fmt.Sprintf("Failed to update Slack post for issue %s in channel %s: %s", issue.CorrelationID, issue.LastAlert.SlackChannelID, err.Error())
 
 		// Channel not found or channel is archived.
 		// Log error and use dummy post ID to avoid further updates on this issue.
 		if err.Error() == SlackErrChannelNotFound || err.Error() == SlackErrIsArchived {
-			logger.Error(errMsg)
+			logger.Error("Failed to update Slack post (channel not found or archived)")
 			issue.RegisterSlackPostCreatedOrUpdated(PostIDInvalidChannel, action)
 			return nil
 		}
@@ -507,7 +506,7 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, reason string,
 		// Message not found or some other possibly transient message error.
 		// Log info and reset post ID.
 		if err.Error() == "message_not_found" || err.Error() == "cant_update_message" {
-			logger.Info(errMsg)
+			logger.Info("Failed to update Slack post (transient)")
 			issue.RegisterSlackPostDeleted()
 			return nil
 		}
@@ -515,7 +514,7 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, reason string,
 		// Invalid blocks means something is wrong with the message formatting, i.e. a bug in this application.
 		// Log error and register the issue as invalid.
 		if err.Error() == "invalid_blocks" {
-			logger.Error(errMsg)
+			logger.Error("Failed to update Slack post (invalid blocks)")
 			issue.RegisterSlackPostInvalidBlocks()
 			return nil
 		}
@@ -523,7 +522,7 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, reason string,
 		// Slack App integration is not in channel. Should only happen in race conditions, since the alert API checks this.
 		// Log error and reset post ID.
 		if err.Error() == "not_in_channel" {
-			logger.Error(errMsg)
+			logger.Error("Failed to update Slack post (not in channel)")
 			issue.RegisterSlackPostDeleted()
 			return nil
 		}

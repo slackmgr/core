@@ -279,7 +279,7 @@ func (s *Server) handleAlertsTest(c *gin.Context) {
 		return
 	}
 
-	s.logger.Infof("BODY: %s", string(body))
+	s.logger.WithField("body", string(body)).Info("Received alert body")
 
 	c.Status(http.StatusNoContent)
 }

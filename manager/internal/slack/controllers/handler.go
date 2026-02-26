@@ -363,7 +363,7 @@ func (r *SocketModeHandler) interactionDispatcher(ctx context.Context, evt *sock
 
 	interaction, ok := evt.Data.(slack.InteractionCallback)
 	if !ok {
-		r.logger.Infof("Ignored %+v", evt)
+		r.logger.WithField("event_type", string(evt.Type)).Info("Ignored interaction event: unexpected data type")
 		return false
 	}
 
@@ -400,7 +400,7 @@ func (r *SocketModeHandler) eventAPIDispatcher(ctx context.Context, evt *socketm
 
 	eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 	if !ok {
-		r.logger.Infof("Ignored %+v", evt)
+		r.logger.WithField("event_type", string(evt.Type)).Info("Ignored event API event: unexpected data type")
 		return false
 	}
 
@@ -424,7 +424,7 @@ func (r *SocketModeHandler) slashCommandDispatcher(ctx context.Context, evt *soc
 	var ishandled bool
 	slashCommandEvent, ok := evt.Data.(slack.SlashCommand)
 	if !ok {
-		r.logger.Infof("Ignored %+v", evt)
+		r.logger.WithField("event_type", string(evt.Type)).Info("Ignored slash command event: unexpected data type")
 		return false
 	}
 

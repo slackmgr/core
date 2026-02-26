@@ -763,7 +763,7 @@ func waitForAPIError(ctx context.Context, started time.Time, logger types.Logger
 		if gate != nil {
 			until := time.Now().Add(rateLimitError.RetryAfter + 2*time.Second)
 			if signalErr := gate.Signal(ctx, until); signalErr != nil {
-				logger.WithField("error", signalErr).Infof("Failed to signal rate limit gate for %s", action)
+				logger.WithField("error", signalErr).WithField("action", action).Info("Failed to signal rate limit gate")
 			}
 		}
 
@@ -792,7 +792,7 @@ func waitForAPIError(ctx context.Context, started time.Time, logger types.Logger
 func waitForRateLimit(ctx context.Context, logger types.Logger, err *slack.RateLimitedError, attempt int, action string, remainingWaitTime time.Duration) error {
 	wait := min(err.RetryAfter+2*time.Second, remainingWaitTime)
 
-	logger.Infof("Slack API rate limit exceeded when calling %s - waiting %v before trying again (attempt %d)", action, wait, attempt)
+	logger.WithField("action", action).WithField("wait", wait).WithField("attempt", attempt).Info("Slack API rate limit exceeded, waiting before retry")
 
 	return sleep(ctx, wait)
 }
@@ -800,7 +800,7 @@ func waitForRateLimit(ctx context.Context, logger types.Logger, err *slack.RateL
 func waitForTransientError(ctx context.Context, logger types.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
 	wait := min(time.Duration(attempt)*time.Second, remainingWaitTime)
 
-	logger.Infof("Slack transient error %s when calling %s - waiting %v before trying again (attempt %d)", err, action, wait, attempt)
+	logger.WithField("error", err).WithField("action", action).WithField("wait", wait).WithField("attempt", attempt).Info("Slack transient error, waiting before retry")
 
 	return sleep(ctx, wait)
 }
@@ -808,7 +808,7 @@ func waitForTransientError(ctx context.Context, logger types.Logger, err error, 
 func waitForFatalError(ctx context.Context, logger types.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
 	wait := min(time.Duration(attempt)*time.Second*2, remainingWaitTime)
 
-	logger.Infof("Slack fatal error %s when calling %s - waiting %v before trying again (attempt %d)", err, action, wait, attempt)
+	logger.WithField("error", err).WithField("action", action).WithField("wait", wait).WithField("attempt", attempt).Info("Slack fatal error, waiting before retry")
 
 	return sleep(ctx, wait)
 }

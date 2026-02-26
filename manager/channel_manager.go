@@ -304,7 +304,7 @@ func (c *channelManager) drainChannels() {
 		default:
 			// No more messages available
 			if drained > 0 {
-				c.logger.Infof("Drained %d messages from channel manager buffers", drained)
+				c.logger.WithField("count", drained).Info("Drained messages from channel manager buffers")
 			}
 			return
 		}
@@ -493,7 +493,7 @@ func (c *channelManager) cleanAlertEscalations(ctx context.Context, alert *model
 		}
 
 		if !validChannel {
-			logger.Infof("Ignoring alert escalation move to invalid channel %s: %s", escalation.MoveToChannel, reason)
+			logger.WithField("target_slack_channel_id", escalation.MoveToChannel).WithField("reason", reason).Info("Ignoring alert escalation move to invalid channel")
 			escalation.MoveToChannel = ""
 		}
 	}
