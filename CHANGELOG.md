@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-02-26
+
+### Changed
+- Requires `github.com/slackmgr/types` v0.4.0; all `types.Metrics` call sites updated to renamed methods (`CounterAdd`, `CounterInc`, `GaugeSet`, `GaugeAdd`)
+- `db_cache_requests_total` and rate limit gate counters are now pre-warmed at startup so all label combinations appear at `/metrics` immediately
+- `slack_client_requests_total` and `slack_client_cache_hits_total` replaced by `slack_client_cache_requests_total{slack_action, result="hit|miss"}`; hit ratio is now a direct PromQL ratio without subtraction
+- `queue_messages_acked_total` and `queue_messages_nacked_total` replaced by `queue_messages_processed_total{queue_type, result}`; result values are `success`, `discarded`, `slack_error`, `db_error`, `move_race`, `lock_timeout`, `gate_timeout`
+- `slack_api_rate_limit_duration_seconds` histogram `slack_action` label removed to reduce cardinality
+
+### Fixed
+- `active_channel_managers` gauge now correctly reflects the number of active channel managers (was a no-op due to using the wrong metrics method)
+- `ResolveTime` and `ArchiveTime` are now calculated from `LastAlertReceived` instead of `alert.Timestamp`, preventing premature archiving for stale-timestamped alerts
+- Log timestamps (`last_alert_timestamp`, `resolve_time`, `archive_time`) normalized to UTC, eliminating mixed-timezone output in structured logs
+
 ## [0.6.0] - 2026-02-25
 
 ### Added
@@ -203,7 +217,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/slackmgr/core/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/slackmgr/core/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/slackmgr/core/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/slackmgr/core/compare/v0.4.1...v0.5.0
