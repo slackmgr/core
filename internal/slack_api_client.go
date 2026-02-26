@@ -183,7 +183,7 @@ func (c *SlackAPIClient) ChatPostMessage(ctx context.Context, channelID string, 
 
 	action := "chat.post"
 
-	c.metrics.Inc(slackClientRequestsTotalMetric, action)
+	c.metrics.CounterInc(slackClientRequestsTotalMetric, action)
 
 	f := func(ctx context.Context) (string, any, error) {
 		_, ts, _, err := c.api.SendMessageContext(ctx, channelID, options...)
@@ -202,7 +202,7 @@ func (c *SlackAPIClient) ChatUpdateMessage(ctx context.Context, channelID string
 
 	action := "chat.update"
 
-	c.metrics.Inc(slackClientRequestsTotalMetric, action)
+	c.metrics.CounterInc(slackClientRequestsTotalMetric, action)
 
 	f := func(ctx context.Context) (string, any, error) {
 		_, ts, _, err := c.api.SendMessageContext(ctx, channelID, options...)
@@ -221,7 +221,7 @@ func (c *SlackAPIClient) ChatDeleteMessage(ctx context.Context, channelID string
 
 	action := "chat.delete"
 
-	c.metrics.Inc(slackClientRequestsTotalMetric, action)
+	c.metrics.CounterInc(slackClientRequestsTotalMetric, action)
 
 	f := func(ctx context.Context) (any, any, error) {
 		_, _, _, err := c.api.SendMessageContext(ctx, channelID, slack.MsgOptionDelete(ts))
@@ -256,7 +256,7 @@ func (c *SlackAPIClient) SendResponse(ctx context.Context, channelID, responseUR
 
 	action := "chat.responseURL"
 
-	c.metrics.Inc(slackClientRequestsTotalMetric, action)
+	c.metrics.CounterInc(slackClientRequestsTotalMetric, action)
 
 	options := []slack.MsgOption{slack.MsgOptionResponseURL(responseURL, responseType), slack.MsgOptionText(text, false)}
 
@@ -285,7 +285,7 @@ func (c *SlackAPIClient) PostEphemeral(ctx context.Context, channelID, userID st
 
 	action := "chat.postEphemeral"
 
-	c.metrics.Inc(slackClientRequestsTotalMetric, action)
+	c.metrics.CounterInc(slackClientRequestsTotalMetric, action)
 
 	f := func(ctx context.Context) (string, any, error) {
 		ts, err := c.api.PostEphemeralContext(ctx, channelID, userID, options...)
@@ -308,7 +308,7 @@ func (c *SlackAPIClient) OpenModal(ctx context.Context, triggerID string, reques
 
 	action := "views.open"
 
-	c.metrics.Inc(slackClientRequestsTotalMetric, action)
+	c.metrics.CounterInc(slackClientRequestsTotalMetric, action)
 
 	_, err := c.api.OpenViewContext(ctx, triggerID, request)
 
@@ -330,7 +330,7 @@ func (c *SlackAPIClient) MessageHasReplies(ctx context.Context, channelID, ts st
 
 	action := "conversations.replies"
 
-	c.metrics.Inc(slackClientRequestsTotalMetric, action)
+	c.metrics.CounterInc(slackClientRequestsTotalMetric, action)
 
 	params := &slack.GetConversationRepliesParameters{
 		ChannelID: channelID,
@@ -366,12 +366,12 @@ func (c *SlackAPIClient) GetChannelInfo(ctx context.Context, channelID string) (
 
 	action := "conversations.info"
 
-	c.metrics.Inc(slackClientRequestsTotalMetric, action)
+	c.metrics.CounterInc(slackClientRequestsTotalMetric, action)
 
 	cacheKey := "GetChannelInfo:" + channelID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.Inc(slackClientCacheHitsTotalMetric, action)
+		c.metrics.CounterInc(slackClientCacheHitsTotalMetric, action)
 
 		// If we cached a ChannelNotFoundError, return it as an error
 		if val == SlackChannelNotFoundError {
@@ -431,12 +431,12 @@ func (c *SlackAPIClient) ListBotChannels(ctx context.Context) ([]*ChannelSummary
 
 	action := "users.conversations"
 
-	c.metrics.Inc(slackClientRequestsTotalMetric, action)
+	c.metrics.CounterInc(slackClientRequestsTotalMetric, action)
 
 	cacheKey := "ListBotChannels"
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.Inc(slackClientCacheHitsTotalMetric, action)
+		c.metrics.CounterInc(slackClientCacheHitsTotalMetric, action)
 
 		channels := []*ChannelSummary{}
 
@@ -501,12 +501,12 @@ func (c *SlackAPIClient) GetUserInfo(ctx context.Context, userID string) (*slack
 
 	action := "users.info"
 
-	c.metrics.Inc(slackClientRequestsTotalMetric, action)
+	c.metrics.CounterInc(slackClientRequestsTotalMetric, action)
 
 	cacheKey := "GetUserInfo:" + userID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.Inc(slackClientCacheHitsTotalMetric, action)
+		c.metrics.CounterInc(slackClientCacheHitsTotalMetric, action)
 
 		user := slack.User{}
 
@@ -548,12 +548,12 @@ func (c *SlackAPIClient) ListUserGroupMembers(ctx context.Context, groupID strin
 
 	action := "usergroups.users.list"
 
-	c.metrics.Inc(slackClientRequestsTotalMetric, action)
+	c.metrics.CounterInc(slackClientRequestsTotalMetric, action)
 
 	cacheKey := "ListUserGroupMembers:" + groupID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.Inc(slackClientCacheHitsTotalMetric, action)
+		c.metrics.CounterInc(slackClientCacheHitsTotalMetric, action)
 
 		var result map[string]struct{}
 
@@ -604,12 +604,12 @@ func (c *SlackAPIClient) GetUserIDsInChannel(ctx context.Context, channelID stri
 
 	action := "conversations.members"
 
-	c.metrics.Inc(slackClientRequestsTotalMetric, action)
+	c.metrics.CounterInc(slackClientRequestsTotalMetric, action)
 
 	cacheKey := "GetUserIDsInChannel:" + channelID
 
 	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.Inc(slackClientCacheHitsTotalMetric, action)
+		c.metrics.CounterInc(slackClientCacheHitsTotalMetric, action)
 
 		var result map[string]struct{}
 
@@ -724,7 +724,7 @@ func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics typ
 			sem.Release(1)
 		}
 
-		metrics.Inc(slackAPICallsTotalMetric, action)
+		metrics.CounterInc(slackAPICallsTotalMetric, action)
 
 		logger.
 			WithField("action", action).
@@ -749,7 +749,7 @@ func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics typ
 		}
 
 		errType := classifySlackError(err)
-		metrics.Inc(slackAPIErrorsTotalMetric, action, errType)
+		metrics.CounterInc(slackAPIErrorsTotalMetric, action, errType)
 
 		if isNonRetryableError(err) {
 			return result1, result2, err
@@ -759,7 +759,7 @@ func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics typ
 			return result1, result2, waitErr
 		}
 
-		metrics.Inc(slackAPIRetriesTotalMetric, action, errType)
+		metrics.CounterInc(slackAPIRetriesTotalMetric, action, errType)
 		attempt++
 	}
 }

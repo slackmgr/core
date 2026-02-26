@@ -75,7 +75,7 @@ func (g *RedisRateLimitGate) Signal(ctx context.Context, until time.Time) error 
 	}
 
 	if g.metrics != nil {
-		g.metrics.Inc(rateLimitGateSignalsTotalMetric)
+		g.metrics.CounterInc(rateLimitGateSignalsTotalMetric)
 	}
 
 	return nil
@@ -130,7 +130,7 @@ func (g *RedisRateLimitGate) Wait(ctx context.Context) error {
 			g.logger.Info("Rate limit gate: Socket Mode drain wait exceeded, resuming (fail-open)")
 
 			if g.metrics != nil {
-				g.metrics.Inc(rateLimitGateDrainTimeoutTotalMetric)
+				g.metrics.CounterInc(rateLimitGateDrainTimeoutTotalMetric)
 			}
 
 			return nil
@@ -180,4 +180,6 @@ func (g *RedisRateLimitGate) connectMetrics(m types.Metrics) {
 	g.metrics = m
 	m.RegisterCounter(rateLimitGateSignalsTotalMetric, "Total number of times the rate limit gate was signaled")
 	m.RegisterCounter(rateLimitGateDrainTimeoutTotalMetric, "Total number of times the Socket Mode drain wait timed out during rate limit recovery")
+	m.CounterAdd(rateLimitGateSignalsTotalMetric, 0)
+	m.CounterAdd(rateLimitGateDrainTimeoutTotalMetric, 0)
 }

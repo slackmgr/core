@@ -35,16 +35,20 @@ func (p *prefixedMetrics) RegisterHistogram(name, help string, buckets []float64
 	p.inner.RegisterHistogram(p.prefix+name, help, buckets, labels...)
 }
 
-func (p *prefixedMetrics) Add(name string, value float64, labelValues ...string) {
-	p.inner.Add(p.prefix+name, value, labelValues...)
+func (p *prefixedMetrics) CounterAdd(name string, value float64, labelValues ...string) {
+	p.inner.CounterAdd(p.prefix+name, value, labelValues...)
 }
 
-func (p *prefixedMetrics) Inc(name string, labelValues ...string) {
-	p.inner.Inc(p.prefix+name, labelValues...)
+func (p *prefixedMetrics) CounterInc(name string, labelValues ...string) {
+	p.inner.CounterInc(p.prefix+name, labelValues...)
 }
 
-func (p *prefixedMetrics) Set(name string, value float64, labelValues ...string) {
-	p.inner.Set(p.prefix+name, value, labelValues...)
+func (p *prefixedMetrics) GaugeSet(name string, value float64, labelValues ...string) {
+	p.inner.GaugeSet(p.prefix+name, value, labelValues...)
+}
+
+func (p *prefixedMetrics) GaugeAdd(name string, value float64, labelValues ...string) {
+	p.inner.GaugeAdd(p.prefix+name, value, labelValues...)
 }
 
 func (p *prefixedMetrics) Observe(name string, value float64, labelValues ...string) {

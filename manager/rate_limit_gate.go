@@ -78,7 +78,7 @@ func (g *LocalRateLimitGate) Signal(_ context.Context, until time.Time) error {
 	g.mu.Unlock()
 
 	if m != nil {
-		m.Inc(rateLimitGateSignalsTotalMetric)
+		m.CounterInc(rateLimitGateSignalsTotalMetric)
 	}
 
 	return nil
@@ -136,7 +136,7 @@ func (g *LocalRateLimitGate) Wait(ctx context.Context) error {
 			g.logger.Info("Rate limit gate: Socket Mode drain wait exceeded, resuming (fail-open)")
 
 			if m != nil {
-				m.Inc(rateLimitGateDrainTimeoutTotalMetric)
+				m.CounterInc(rateLimitGateDrainTimeoutTotalMetric)
 			}
 
 			return nil
@@ -178,6 +178,8 @@ func (g *LocalRateLimitGate) connectMetrics(m types.Metrics) {
 	g.metrics = m
 	m.RegisterCounter(rateLimitGateSignalsTotalMetric, "Total number of times the rate limit gate was signaled")
 	m.RegisterCounter(rateLimitGateDrainTimeoutTotalMetric, "Total number of times the Socket Mode drain wait timed out during rate limit recovery")
+	m.CounterAdd(rateLimitGateSignalsTotalMetric, 0)
+	m.CounterAdd(rateLimitGateDrainTimeoutTotalMetric, 0)
 }
 
 // NoopRateLimitGate is a no-op [RateLimitGate] for tests and single-instance

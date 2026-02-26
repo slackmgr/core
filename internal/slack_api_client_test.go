@@ -37,12 +37,11 @@ func newMockMetrics() *mockMetrics {
 func (m *mockMetrics) RegisterCounter(name, help string, labelNames ...string)                  {}
 func (m *mockMetrics) RegisterGauge(name, help string, labelNames ...string)                    {}
 func (m *mockMetrics) RegisterHistogram(name, help string, buckets []float64, labels ...string) {}
-func (m *mockMetrics) Inc(name string, labelValues ...string)                                   { m.counters[name]++ }
-func (m *mockMetrics) Dec(name string, labelValues ...string)                                   {}
-func (m *mockMetrics) Add(name string, val float64, labelValues ...string)                      {}
-func (m *mockMetrics) Set(name string, val float64, labelValues ...string)                      {}
+func (m *mockMetrics) CounterAdd(name string, val float64, labelValues ...string)               {}
+func (m *mockMetrics) CounterInc(name string, labelValues ...string)                            { m.counters[name]++ }
+func (m *mockMetrics) GaugeSet(name string, val float64, labelValues ...string)                 {}
+func (m *mockMetrics) GaugeAdd(name string, val float64, labelValues ...string)                 {}
 func (m *mockMetrics) Observe(name string, val float64, labelValues ...string)                  {}
-func (m *mockMetrics) Handler() any                                                             { return nil }
 
 func newTestClient() *internal.SlackAPIClient {
 	gocacheClient := gocache.New(5*time.Minute, time.Minute)

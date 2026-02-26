@@ -33,6 +33,12 @@ func newDBCacheMiddleware(db types.DB, cacheStore store.StoreInterface, logger t
 
 	metrics.RegisterCounter(dbCacheRequestsTotalMetric, "Total number of DB cache lookups by operation and result", "operation", "result")
 
+	for _, op := range []string{"issue_hash", "move_mapping", "processing_state"} {
+		for _, result := range []string{"hit", "miss"} {
+			metrics.CounterAdd(dbCacheRequestsTotalMetric, 0, op, result)
+		}
+	}
+
 	return &dbCacheMiddleware{
 		db:                          db,
 		issueHashCache:              issueHashCache,
@@ -84,11 +90,11 @@ func (d *dbCacheMiddleware) SaveIssues(ctx context.Context, issues ...types.Issu
 
 		// No point in updating db if the issue has not changed.
 		if existingHash, ok := d.issueHashCache.Get(ctx, cacheKey); ok && existingHash == issueHash {
-			d.metrics.Inc(dbCacheRequestsTotalMetric, "issue_hash", "hit")
+			d.metrics.CounterInc(dbCacheRequestsTotalMetric, "issue_hash", "hit")
 			continue
 		}
 
-		d.metrics.Inc(dbCacheRequestsTotalMetric, "issue_hash", "miss")
+		d.metrics.CounterInc(dbCacheRequestsTotalMetric, "issue_hash", "miss")
 
 		// The issue has changed, so we need to update it in the database.
 		issuesToUpdate = append(issuesToUpdate, issue)
@@ -210,7 +216,7 @@ func (d *dbCacheMiddleware) FindMoveMapping(ctx context.Context, channelID, corr
 	cacheKey := moveMappingCacheKey(channelID, correlationID)
 
 	if mapping, ok := d.moveMappingCache.Get(ctx, cacheKey); ok {
-		d.metrics.Inc(dbCacheRequestsTotalMetric, "move_mapping", "hit")
+		d.metrics.CounterInc(dbCacheRequestsTotalMetric, "move_mapping", "hit")
 
 		if mapping != "" {
 			return json.RawMessage(mapping), nil
@@ -219,7 +225,7 @@ func (d *dbCacheMiddleware) FindMoveMapping(ctx context.Context, channelID, corr
 		return nil, nil
 	}
 
-	d.metrics.Inc(dbCacheRequestsTotalMetric, "move_mapping", "miss")
+	d.metrics.CounterInc(dbCacheRequestsTotalMetric, "move_mapping", "miss")
 
 	mapping, err := d.db.FindMoveMapping(ctx, channelID, correlationID)
 	if err != nil {
@@ -273,7 +279,7 @@ func (d *dbCacheMiddleware) SaveChannelProcessingState(ctx context.Context, stat
 
 func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, channelID string) (*types.ChannelProcessingState, error) {
 	if cachedJSONBody, ok := d.channelProcessingStateCache.Get(ctx, channelID); ok {
-		d.metrics.Inc(dbCacheRequestsTotalMetric, "processing_state", "hit")
+		d.metrics.CounterInc(dbCacheRequestsTotalMetric, "processing_state", "hit")
 
 		var state types.ChannelProcessingState
 
@@ -284,7 +290,7 @@ func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, chan
 		return &state, nil
 	}
 
-	d.metrics.Inc(dbCacheRequestsTotalMetric, "processing_state", "miss")
+	d.metrics.CounterInc(dbCacheRequestsTotalMetric, "processing_state", "miss")
 
 	state, err := d.db.FindChannelProcessingState(ctx, channelID)
 	if err != nil {

@@ -212,7 +212,7 @@ func (s *Server) Run(ctx context.Context) error {
 	s.metrics.RegisterHistogram(httpRequestMetric, "Duration of incoming HTTP server requests in seconds",
 		[]float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}, metricsLabels...)
 	s.metrics.RegisterGauge(httpInFlightMetric, "Number of HTTP requests currently being processed")
-	s.metrics.Set(httpInFlightMetric, 0)
+	s.metrics.GaugeSet(httpInFlightMetric, 0)
 
 	// Set release mode to mute a few annoying startup logs.
 	// The actual runtime mode is set below, depending on config.
@@ -650,8 +650,8 @@ func (s *Server) jsonLogMiddleware() gin.HandlerFunc {
 // codes, and the number of in-flight requests.
 func (s *Server) metricsMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		s.metrics.Add(httpInFlightMetric, 1)
-		defer s.metrics.Add(httpInFlightMetric, -1)
+		s.metrics.GaugeAdd(httpInFlightMetric, 1)
+		defer s.metrics.GaugeAdd(httpInFlightMetric, -1)
 
 		start := time.Now()
 
