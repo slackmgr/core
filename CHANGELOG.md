@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-02-26
+
+### Changed
+- Runtime `Info` log statements now use static message strings with dynamic values in structured fields; `"event"` field renamed to `"event_type"` in socket mode internal event logs for consistency
+
 ## [0.7.0] - 2026-02-26
 
 ### Changed
@@ -217,7 +222,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/slackmgr/core/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/slackmgr/core/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/slackmgr/core/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/slackmgr/core/compare/v0.5.0...v0.5.1
