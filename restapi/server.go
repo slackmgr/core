@@ -82,6 +82,7 @@ type Server struct {
 	apiSettings         *config.APISettings
 	cfg                 *config.APIConfig
 	defaultPretty       bool
+	hooks               ServerHooks
 }
 
 // New creates a [Server] with the three required dependencies.
@@ -148,6 +149,14 @@ func (s *Server) WithSettings(settings *config.APISettings) *Server {
 	return s
 }
 
+// WithHooks registers optional lifecycle callbacks for startup, readiness, and
+// shutdown probe support. See [ServerHooks] for the available hooks and when
+// they fire.
+func (s *Server) WithHooks(hooks ServerHooks) *Server {
+	s.hooks = hooks
+	return s
+}
+
 // Run starts the HTTP server and handles incoming requests. It also initializes the Slack API client and the channel info syncer.
 // If raw alert consumers are set, it will start dedicated consumers for those queues.
 //
@@ -205,6 +214,14 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 
 		s.channelInfoProvider = channelInfoSyncer
+	}
+
+	if s.hooks.OnStartup != nil {
+		s.hooks.OnStartup()
+	}
+
+	if s.hooks.OnShutdown != nil {
+		defer s.hooks.OnShutdown()
 	}
 
 	// Register HTTP server metrics.
@@ -323,29 +340,46 @@ func (s *Server) Run(ctx context.Context) error {
 		})
 	}
 
+	readyCh := make(chan struct{})
+
 	errg.Go(func() error {
-		return srv.ListenAndServe()
+		ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", srv.Addr)
+		if err != nil {
+			return err
+		}
+
+		close(readyCh)
+
+		return srv.Serve(ln)
 	})
 
 	errg.Go(func() error {
+		select {
+		case <-readyCh:
+			if s.hooks.OnReady != nil {
+				s.hooks.OnReady()
+			}
+		case <-ctx.Done():
+			// Shutdown before port was bound; skip OnReady.
+		}
+
 		<-ctx.Done()
 
-		if err := srv.Close(); err != nil {
-			s.logger.Errorf("Failed to close http server: %s", err)
+		if s.hooks.OnNotReady != nil {
+			s.hooks.OnNotReady()
+		}
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(s.cfg.ShutdownTimeoutMs)*time.Millisecond)
+		defer cancel()
+
+		if err := srv.Shutdown(shutdownCtx); err != nil { //nolint:contextcheck // ctx is already cancelled here; a fresh context is required for the shutdown deadline.
+			s.logger.Errorf("Failed to shut down http server: %s", err)
 		}
 
 		return ctx.Err()
 	})
 
-	if err := errg.Wait(); err != nil {
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-
-		return err
-	}
-
-	return nil
+	return errg.Wait()
 }
 
 // UpdateSettings hot-reloads API settings without restarting. The new settings are
@@ -394,51 +428,58 @@ func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueCons
 	})
 
 	errg.Go(func() error {
-		for item := range queueCh {
-			logger := s.logger.WithField("message_id", item.MessageID).WithField("channel_id", item.SlackChannelID)
-			logger.Debug("Alert received")
-
-			var alert *types.Alert
-
-			// Unmarshal the alert from the queue item body.
-			// If the alert is invalid, we *ack* the message to avoid re-processing it.
-			if err := json.Unmarshal([]byte(item.Body), &alert); err != nil {
-				logger.Errorf("Failed to json unmarshal queued alert: %s", err)
-
-				if item.Ack != nil {
-					item.Ack()
-					logger.Debug("Alert acked")
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case item, ok := <-queueCh:
+				if !ok {
+					return nil
 				}
 
-				continue
-			}
+				logger := s.logger.WithField("message_id", item.MessageID).WithField("channel_id", item.SlackChannelID)
+				logger.Debug("Alert received")
 
-			// Process the alert.
-			// If processing fails with a retryable error, we *nack* the message, thus allowing it to be re-processed later.
-			if err := s.processQueuedAlert(ctx, alert); err != nil {
-				logger.Errorf("Failed to process queued alert: %s", err)
+				var alert *types.Alert
 
-				var pErr *processingError
+				// Unmarshal the alert from the queue item body.
+				// If the alert is invalid, we *ack* the message to avoid re-processing it.
+				if err := json.Unmarshal([]byte(item.Body), &alert); err != nil {
+					logger.Errorf("Failed to json unmarshal queued alert: %s", err)
 
-				if errors.As(err, &pErr) && pErr.IsRetryable() {
-					if item.Nack != nil {
-						item.Nack()
-						logger.Debug("Alert nacked")
+					if item.Ack != nil {
+						item.Ack()
+						logger.Debug("Alert acked")
 					}
 
 					continue
 				}
-			}
 
-			// At this point, the alert has been processed successfully OR it failed with a non-retryable error.
-			// In both cases, we ack the message to avoid re-processing it.
-			if item.Ack != nil {
-				item.Ack()
-				logger.Debug("Alert acked")
+				// Process the alert.
+				// If processing fails with a retryable error, we *nack* the message, thus allowing it to be re-processed later.
+				if err := s.processQueuedAlert(ctx, alert); err != nil {
+					logger.Errorf("Failed to process queued alert: %s", err)
+
+					var pErr *processingError
+
+					if errors.As(err, &pErr) && pErr.IsRetryable() {
+						if item.Nack != nil {
+							item.Nack()
+							logger.Debug("Alert nacked")
+						}
+
+						continue
+					}
+				}
+
+				// At this point, the alert has been processed successfully OR it failed with a non-retryable error.
+				// In both cases, we ack the message to avoid re-processing it.
+				if item.Ack != nil {
+					item.Ack()
+					logger.Debug("Alert acked")
+				}
 			}
 		}
-
-		return nil
 	})
 
 	return errg.Wait()

@@ -30,6 +30,23 @@ const (
 	MaxMaxUsersInAlertChannel = 10000
 )
 
+// Validation constants for shutdown timeout.
+const (
+	// MinShutdownTimeoutMs is the minimum allowed HTTP server shutdown timeout, in milliseconds.
+	// 500 ms gives in-flight requests a brief window to complete before connections are closed.
+	MinShutdownTimeoutMs = 500
+
+	// MaxShutdownTimeoutMs is the maximum allowed HTTP server shutdown timeout, in milliseconds.
+	// 30 seconds matches the per-handler timeout; waiting longer than that is not useful
+	// because no handler can still be running.
+	MaxShutdownTimeoutMs = 30_000
+
+	// DefaultShutdownTimeoutMs is the default HTTP server shutdown timeout, in milliseconds.
+	// 3 seconds is long enough to drain typical short-lived alert handlers while keeping
+	// Kubernetes rolling restarts fast (well within a standard terminationGracePeriodSeconds).
+	DefaultShutdownTimeoutMs = 3_000
+)
+
 // Validation constants for RateLimitConfig fields.
 // These limits ensure the rate limiter operates within reasonable bounds.
 const (
@@ -111,6 +128,14 @@ type APIConfig struct {
 	// how many alerts can be sent to each Slack channel. Each channel has its own
 	// independent rate limiter. See RateLimitConfig for detailed documentation.
 	RateLimitPerAlertChannel *RateLimitConfig `json:"rateLimitPerAlertChannel" mapstructure:"rateLimitPerAlertChannel" yaml:"rateLimitPerAlertChannel"`
+
+	// ShutdownTimeoutMs is the maximum time in milliseconds the HTTP server waits for
+	// in-flight requests to complete during graceful shutdown. Once this deadline passes,
+	// remaining connections are closed forcefully. Set this to a value shorter than your
+	// Kubernetes terminationGracePeriodSeconds to ensure the process exits cleanly.
+	//
+	// Defaults to 3000 ms (3 seconds). Valid range: 500–30,000 ms.
+	ShutdownTimeoutMs int `json:"shutdownTimeoutMs" mapstructure:"shutdownTimeoutMs" yaml:"shutdownTimeoutMs"`
 
 	// SlackClient contains configuration for connecting to the Slack API, including
 	// authentication tokens and API behavior settings.
@@ -196,7 +221,8 @@ func NewDefaultAPIConfig() *APIConfig {
 			AlertsPerSecond: 1,
 			AllowedBurst:    30,
 		},
-		SlackClient: NewDefaultSlackClientConfig(),
+		ShutdownTimeoutMs: DefaultShutdownTimeoutMs,
+		SlackClient:       NewDefaultSlackClientConfig(),
 	}
 }
 
@@ -239,6 +265,10 @@ func (c *APIConfig) Validate() error {
 
 	if err := c.RateLimitPerAlertChannel.validate(); err != nil {
 		return fmt.Errorf("rate limit config is invalid: %w", err)
+	}
+
+	if c.ShutdownTimeoutMs < MinShutdownTimeoutMs || c.ShutdownTimeoutMs > MaxShutdownTimeoutMs {
+		return fmt.Errorf("shutdown timeout must be between %d ms and %d ms", MinShutdownTimeoutMs, MaxShutdownTimeoutMs)
 	}
 
 	if c.SlackClient == nil {

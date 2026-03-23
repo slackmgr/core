@@ -169,6 +169,7 @@ func newTestServer(t *testing.T) (*Server, *mockFifoQueueProducer, *mockChannelI
 	cfg := &config.APIConfig{
 		RestPort:               "8080",
 		MaxUsersInAlertChannel: 1000,
+		ShutdownTimeoutMs:      config.DefaultShutdownTimeoutMs,
 		RateLimitPerAlertChannel: &config.RateLimitConfig{
 			AlertsPerSecond: 10,
 			AllowedBurst:    100,

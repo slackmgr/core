@@ -40,6 +40,7 @@ type Manager struct {
 	gate            RateLimitGate
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
+	hooks           Hooks
 }
 
 // rateLimitGateFactory is a package-private interface satisfied by ChannelLocker implementations
@@ -123,6 +124,13 @@ func (m *Manager) WithSettings(settings *config.ManagerSettings) *Manager {
 		return m
 	}
 	m.managerSettings = models.NewManagerSettingsWrapper(settings)
+	return m
+}
+
+// WithHooks registers optional lifecycle callbacks for startup and shutdown
+// probe support. See [Hooks] for the available hooks and when they fire.
+func (m *Manager) WithHooks(hooks Hooks) *Manager {
+	m.hooks = hooks
 	return m
 }
 
@@ -249,6 +257,14 @@ func (m *Manager) Run(ctx context.Context) error {
 	errg.Go(func() error {
 		return m.slackClient.RunSocketMode(ctx)
 	})
+
+	if m.hooks.OnStartup != nil {
+		m.hooks.OnStartup()
+	}
+
+	if m.hooks.OnShutdown != nil {
+		defer m.hooks.OnShutdown()
+	}
 
 	return errg.Wait()
 }

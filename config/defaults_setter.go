@@ -32,6 +32,7 @@ func SetAPIConfigDefaults(v DefaultsSetter) {
 	v.SetDefault("maxUsersInAlertChannel", 100)
 	v.SetDefault("rateLimitPerAlertChannel.alertsPerSecond", 1.0)
 	v.SetDefault("rateLimitPerAlertChannel.allowedBurst", 30)
+	v.SetDefault("shutdownTimeoutMs", DefaultShutdownTimeoutMs)
 	setSlackClientConfigDefaults(v, "slackClient")
 }
 
