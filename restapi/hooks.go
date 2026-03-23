@@ -1,26 +1,26 @@
 package restapi
 
-// ServerHooks contains optional lifecycle callbacks for use with Kubernetes
+// Hooks contains optional lifecycle callbacks for use with Kubernetes
 // probe endpoints. All fields are optional; nil functions are silently skipped.
 // Wire these to your own probe HTTP server — the library does not serve probes.
 //
 // Typical Kubernetes probe mapping:
 //
-//	startupProbe:   set a flag to true in [ServerHooks.OnStartup]
-//	readinessProbe: set a flag to true in [ServerHooks.OnReady], false in [ServerHooks.OnNotReady]
-//	livenessProbe:  set a flag to true in [ServerHooks.OnReady], false in [ServerHooks.OnShutdown]
+//	startupProbe:   set a flag to true in [Hooks.OnStartup]
+//	livenessProbe:  set a flag to true in [Hooks.OnStartup], false in [Hooks.OnShutdown]
+//	readinessProbe: set a flag to true in [Hooks.OnReady], false in [Hooks.OnNotReady]
 //
 // Register hooks via [Server.WithHooks] before calling [Server.Run].
-type ServerHooks struct {
+type Hooks struct {
 	// OnStartup is called once after Slack connects and channel info is
 	// initialized, but before the TCP listener opens. Signals the end of the
 	// startup phase — the process is past initialization but not yet accepting
-	// traffic. Use it to pass a startup probe.
+	// traffic. Use it to pass a startup probe and enable a liveness probe.
 	OnStartup func()
 
 	// OnReady is called once after net.Listen succeeds and the TCP port is
-	// bound. At this point the server is accepting HTTP connections. Use it to
-	// pass a readiness probe.
+	// bound. At this point the server is accepting HTTP connections. Use it
+	// to pass a readiness probe.
 	OnReady func()
 
 	// OnNotReady is called when shutdown begins (context cancelled), before

@@ -82,7 +82,7 @@ type Server struct {
 	apiSettings         *config.APISettings
 	cfg                 *config.APIConfig
 	defaultPretty       bool
-	hooks               ServerHooks
+	hooks               Hooks
 }
 
 // New creates a [Server] with the three required dependencies.
@@ -150,9 +150,9 @@ func (s *Server) WithSettings(settings *config.APISettings) *Server {
 }
 
 // WithHooks registers optional lifecycle callbacks for startup, readiness, and
-// shutdown probe support. See [ServerHooks] for the available hooks and when
+// shutdown probe support. See [Hooks] for the available hooks and when
 // they fire.
-func (s *Server) WithHooks(hooks ServerHooks) *Server {
+func (s *Server) WithHooks(hooks Hooks) *Server {
 	s.hooks = hooks
 	return s
 }

@@ -32,7 +32,7 @@ func TestWithHooks_Chaining(t *testing.T) {
 	t.Parallel()
 
 	s := newHooksTestServer()
-	got := s.WithHooks(restapi.ServerHooks{})
+	got := s.WithHooks(restapi.Hooks{})
 	assert.Same(t, s, got, "WithHooks must return the same *Server for chaining")
 }
 
@@ -41,16 +41,16 @@ func TestWithHooks_NilFieldsAreAccepted(t *testing.T) {
 
 	s := newHooksTestServer()
 	assert.NotPanics(t, func() {
-		s.WithHooks(restapi.ServerHooks{})
+		s.WithHooks(restapi.Hooks{})
 	})
 }
 
-func TestServerHooks_AllFieldsAreCallable(t *testing.T) {
+func TestHooks_AllFieldsAreCallable(t *testing.T) {
 	t.Parallel()
 
 	var startupCalled, readyCalled, notReadyCalled, shutdownCalled bool
 
-	hooks := restapi.ServerHooks{
+	hooks := restapi.Hooks{
 		OnStartup:  func() { startupCalled = true },
 		OnReady:    func() { readyCalled = true },
 		OnNotReady: func() { notReadyCalled = true },
