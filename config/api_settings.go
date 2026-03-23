@@ -48,7 +48,7 @@ type APISettings struct {
 	//
 	// If no rules match an alert's route key, the API returns an error. Consider adding
 	// a catch-all rule (MatchAll: true) as the last rule to handle unmatched alerts.
-	RoutingRules []*RoutingRule `json:"routingRules" yaml:"routingRules"`
+	RoutingRules []*RoutingRule `json:"routingRules" yaml:"routingRules" mapstructure:"routingRules"`
 
 	ruleMatchCache map[string]string
 	cacheLock      sync.RWMutex
@@ -94,11 +94,11 @@ type APISettings struct {
 type RoutingRule struct {
 	// Name is a unique identifier for the rule, used in logging and debugging.
 	// Does not affect routing behavior. Required and must be unique across all rules.
-	Name string `json:"name" yaml:"name"`
+	Name string `json:"name" yaml:"name" mapstructure:"name"`
 
 	// Description provides human-readable documentation for the rule.
 	// Does not affect routing behavior. Optional.
-	Description string `json:"description" yaml:"description"`
+	Description string `json:"description" yaml:"description" mapstructure:"description"`
 
 	// AlertType restricts this rule to alerts of a specific type. The value is
 	// case-insensitive and matched against the alert's type field. Common values
@@ -106,33 +106,33 @@ type RoutingRule struct {
 	//
 	// When multiple rules match a route key, rules with a matching AlertType take
 	// precedence over rules with no AlertType. Leave empty to match all alert types.
-	AlertType string `json:"alertType" yaml:"alertType"`
+	AlertType string `json:"alertType" yaml:"alertType" mapstructure:"alertType"`
 
 	// Equals lists exact route key values that this rule matches. Matching is
 	// case-insensitive. The rule matches if the alert's route key equals any value
 	// in this list. Exact matches have the highest precedence.
-	Equals []string `json:"equals" yaml:"equals"`
+	Equals []string `json:"equals" yaml:"equals" mapstructure:"equals"`
 
 	// HasPrefix lists route key prefixes that this rule matches. Matching is
 	// case-insensitive. The rule matches if the alert's route key starts with any
 	// value in this list. Prefix matches have second-highest precedence.
-	HasPrefix []string `json:"hasPrefix" yaml:"hasPrefix"`
+	HasPrefix []string `json:"hasPrefix" yaml:"hasPrefix" mapstructure:"hasPrefix"`
 
 	// MatchesRegex lists regular expressions that this rule matches against route keys.
 	// Patterns are automatically made case-insensitive ((?i) is prepended if not present).
 	// The rule matches if the alert's route key matches any pattern. Regex matches
 	// have third-highest precedence.
-	MatchesRegex []string `json:"matchesRegex" yaml:"matchesRegex"`
+	MatchesRegex []string `json:"matchesRegex" yaml:"matchesRegex" mapstructure:"matchesRegex"`
 
 	// MatchAll makes this rule match any route key, regardless of value. Used to
 	// create catch-all rules that handle alerts not matched by more specific rules.
 	// Match-all rules have the lowest precedence - they only match when no other
 	// rule matches. Only one catch-all rule per AlertType is typically needed.
-	MatchAll bool `json:"matchAll" yaml:"matchAll"`
+	MatchAll bool `json:"matchAll" yaml:"matchAll" mapstructure:"matchAll"`
 
 	// Channel is the Slack channel ID where matching alerts are sent. Must be a valid
 	// channel ID (e.g., "C1234567890"), not a channel name. Required.
-	Channel string `json:"channel" yaml:"channel"`
+	Channel string `json:"channel" yaml:"channel" mapstructure:"channel"`
 
 	regex []*regexp.Regexp
 }

@@ -257,7 +257,7 @@ type ManagerSettings struct {
 	// AppFriendlyName is the application name displayed in Slack messages, modals, and
 	// greeting messages. Used to identify the bot in user-facing text.
 	// Default: "Slack Manager"
-	AppFriendlyName string `json:"appFriendlyName" yaml:"appFriendlyName"`
+	AppFriendlyName string `json:"appFriendlyName" yaml:"appFriendlyName" mapstructure:"appFriendlyName"`
 
 	// GlobalAdmins is a list of Slack user IDs (e.g., "U1234567890") with admin permissions
 	// in all channels. Global admins can resolve, terminate, and mute issues in any channel.
@@ -265,103 +265,103 @@ type ManagerSettings struct {
 	// Use sparingly - prefer channel-specific admins via AlertChannelSettings.AdminUsers
 	// for better access control. Global admins are typically reserved for on-call leads
 	// or platform administrators who need cross-channel access.
-	GlobalAdmins []string `json:"globalAdmins" yaml:"globalAdmins"`
+	GlobalAdmins []string `json:"globalAdmins" yaml:"globalAdmins" mapstructure:"globalAdmins"`
 
 	// DefaultPostIconEmoji is the emoji displayed as the bot's avatar in Slack posts
 	// when no per-alert icon is specified. Must be in :emoji: format (colons are added
 	// automatically if missing during validation).
 	// Default: ":female-detective:"
-	DefaultPostIconEmoji string `json:"defaultPostIconEmoji" yaml:"defaultPostIconEmoji"`
+	DefaultPostIconEmoji string `json:"defaultPostIconEmoji" yaml:"defaultPostIconEmoji" mapstructure:"defaultPostIconEmoji"`
 
 	// DefaultPostUsername is the display name shown for the bot in Slack posts when no
 	// per-alert username is specified. This appears as the sender name in message headers.
 	// Default: "Slack Manager"
-	DefaultPostUsername string `json:"defaultPostUsername" yaml:"defaultPostUsername"`
+	DefaultPostUsername string `json:"defaultPostUsername" yaml:"defaultPostUsername" mapstructure:"defaultPostUsername"`
 
 	// DefaultAlertSeverity is the severity level assigned to alerts that don't specify one.
 	// Severity determines issue ordering (when reordering is enabled) and visual indicators.
 	// Valid values: "panic" (highest), "error", "warning". Info-level alerts are not allowed
 	// as the default since they typically don't require immediate attention.
 	// Default: "error"
-	DefaultAlertSeverity types.AlertSeverity `json:"defaultAlertSeverity" yaml:"defaultAlertSeverity"`
+	DefaultAlertSeverity types.AlertSeverity `json:"defaultAlertSeverity" yaml:"defaultAlertSeverity" mapstructure:"defaultAlertSeverity"`
 
 	// DefaultIssueArchivingDelaySeconds is the time (in seconds) after resolution before
 	// an issue is marked as archived. During this period, new alerts can still re-open the
 	// issue. Once archived, the Slack post remains but the issue cannot be re-opened.
 	// Can be overridden per-alert via the alert payload.
 	// Default: 43200 (12 hours). Must be between 60 seconds and 30 days.
-	DefaultIssueArchivingDelaySeconds int `json:"defaultIssueArchivingDelaySeconds" yaml:"defaultIssueArchivingDelaySeconds"`
+	DefaultIssueArchivingDelaySeconds int `json:"defaultIssueArchivingDelaySeconds" yaml:"defaultIssueArchivingDelaySeconds" mapstructure:"defaultIssueArchivingDelaySeconds"`
 
 	// DisableIssueReordering globally disables automatic severity-based ordering of issues.
 	// When false (default), higher-severity issues are moved to the bottom of the channel
 	// for visibility. When true, issues remain in creation order regardless of severity.
 	// Can be overridden per-channel via AlertChannelSettings.DisableIssueReordering.
-	DisableIssueReordering bool `json:"disableIssueReordering" yaml:"disableIssueReordering"`
+	DisableIssueReordering bool `json:"disableIssueReordering" yaml:"disableIssueReordering" mapstructure:"disableIssueReordering"`
 
 	// IssueReorderingLimit is the maximum number of open issues in a channel before
 	// automatic reordering is temporarily disabled. This prevents excessive API calls
 	// during incident storms. When the issue count drops below this limit, reordering
 	// resumes automatically. Can be overridden per-channel.
 	// Default: 30. Must be between 5 and 100.
-	IssueReorderingLimit int `json:"issueReorderingLimit" yaml:"issueReorderingLimit"`
+	IssueReorderingLimit int `json:"issueReorderingLimit" yaml:"issueReorderingLimit" mapstructure:"issueReorderingLimit"`
 
 	// IssueProcessingIntervalSeconds is the frequency (in seconds) of background issue
 	// maintenance tasks: reordering, auto-resolution, archiving, and escalation.
 	// Lower values provide more responsive behavior but increase API usage.
 	// Can be overridden per-channel via AlertChannelSettings.IssueProcessingIntervalSeconds.
 	// Default: 10. Must be between 3 and 600 seconds.
-	IssueProcessingIntervalSeconds int `json:"issueProcessingIntervalSeconds" yaml:"issueProcessingIntervalSeconds"`
+	IssueProcessingIntervalSeconds int `json:"issueProcessingIntervalSeconds" yaml:"issueProcessingIntervalSeconds" mapstructure:"issueProcessingIntervalSeconds"`
 
 	// IssueReactions configures which emoji reactions trigger issue actions. Each action
 	// can have multiple emojis configured, allowing teams to use their preferred symbols.
 	// If nil, a default IssueReactionSettings is created during InitAndValidate().
-	IssueReactions *IssueReactionSettings `json:"issueReactions" yaml:"issueReactions"`
+	IssueReactions *IssueReactionSettings `json:"issueReactions" yaml:"issueReactions" mapstructure:"issueReactions"`
 
 	// IssueStatus configures the emoji indicators displayed in issue posts to show
 	// severity and state. These appear in the issue header for quick visual scanning.
 	// If nil, a default IssueStatusSettings is created during InitAndValidate().
-	IssueStatus *IssueStatusSettings `json:"issueStatus" yaml:"issueStatus"`
+	IssueStatus *IssueStatusSettings `json:"issueStatus" yaml:"issueStatus" mapstructure:"issueStatus"`
 
 	// MinIssueCountForThrottle is the minimum number of open issues in a channel before
 	// update throttling is considered. Below this threshold, all updates are immediate.
 	// Above it, rapid updates to the same issue may be delayed to reduce API usage.
 	// Default: 5. Must be between 1 and 100.
-	MinIssueCountForThrottle int `json:"minIssueCountForThrottle" yaml:"minIssueCountForThrottle"`
+	MinIssueCountForThrottle int `json:"minIssueCountForThrottle" yaml:"minIssueCountForThrottle" mapstructure:"minIssueCountForThrottle"`
 
 	// MaxThrottleDurationSeconds is the maximum delay (in seconds) between updates to
 	// a single issue when throttling is active. The actual delay scales with alert count
 	// but never exceeds this value. After this duration, updates are always allowed.
 	// Default: 60. Must be between 1 and 600 seconds.
-	MaxThrottleDurationSeconds int `json:"maxThrottleDurationSeconds" yaml:"maxThrottleDurationSeconds"`
+	MaxThrottleDurationSeconds int `json:"maxThrottleDurationSeconds" yaml:"maxThrottleDurationSeconds" mapstructure:"maxThrottleDurationSeconds"`
 
 	// AlwaysShowOptionButtons controls whether interactive action buttons are permanently
 	// visible on issue posts. When false (default), buttons are hidden until a user reacts
 	// with the ShowOptionButtonsEmoji, reducing visual clutter. When true, buttons are
 	// always visible for immediate access to actions.
-	AlwaysShowOptionButtons bool `json:"alwaysShowOptionButtons" yaml:"alwaysShowOptionButtons"`
+	AlwaysShowOptionButtons bool `json:"alwaysShowOptionButtons" yaml:"alwaysShowOptionButtons" mapstructure:"alwaysShowOptionButtons"`
 
 	// ShowIssueCorrelationIDInSlackPost controls whether the issue's correlation ID
 	// (used for grouping related alerts) is displayed in the post footer. When false
 	// (default), the ID is hidden but accessible via the Issue Details modal.
 	// Enable for debugging or when correlation IDs are meaningful to users.
-	ShowIssueCorrelationIDInSlackPost bool `json:"showIssueCorrelationIdInSlackPost" yaml:"showIssueCorrelationIdInSlackPost"`
+	ShowIssueCorrelationIDInSlackPost bool `json:"showIssueCorrelationIdInSlackPost" yaml:"showIssueCorrelationIdInSlackPost" mapstructure:"showIssueCorrelationIdInSlackPost"`
 
 	// DocsURL is an optional URL to documentation about your Slack Manager deployment.
 	// When set, this URL is included in help messages and error dialogs to direct users
 	// to relevant documentation. Leave empty if no documentation is available.
-	DocsURL string `json:"docsUrl" yaml:"docsUrl"`
+	DocsURL string `json:"docsUrl" yaml:"docsUrl" mapstructure:"docsUrl"`
 
 	// AlertChannels contains per-channel configuration overrides. Use this to customize
 	// admin permissions, reordering behavior, and processing intervals for specific channels.
 	// Channels not listed here use the global settings. Channel IDs must be unique and
 	// cannot overlap with InfoChannels.
-	AlertChannels []*AlertChannelSettings `json:"alertChannels" yaml:"alertChannels"`
+	AlertChannels []*AlertChannelSettings `json:"alertChannels" yaml:"alertChannels" mapstructure:"alertChannels"`
 
 	// InfoChannels defines channels designated for system information display. These
 	// channels cannot receive alerts - the API returns an error if an alert targets an
 	// info channel. Use for dashboards, status pages, or documentation channels.
 	// Channel IDs must be unique and cannot overlap with AlertChannels.
-	InfoChannels []*InfoChannelSettings `json:"infoChannels" yaml:"infoChannels"`
+	InfoChannels []*InfoChannelSettings `json:"infoChannels" yaml:"infoChannels" mapstructure:"infoChannels"`
 
 	globalAdmins       map[string]struct{}
 	alertChannels      map[string]*AlertChannelSettings
@@ -393,28 +393,28 @@ type IssueReactionSettings struct {
 	// issues are removed without being marked as resolved - use for false positives or
 	// issues that should be dismissed without tracking. Requires admin permissions.
 	// Default: [":firecracker:"]
-	TerminateEmojis []string `json:"terminateEmojis" yaml:"terminateEmojis"`
+	TerminateEmojis []string `json:"terminateEmojis" yaml:"terminateEmojis" mapstructure:"terminateEmojis"`
 
 	// ResolveEmojis lists emojis that mark an issue as resolved. Resolved issues can be
 	// re-opened by new alerts until the archiving delay elapses. Requires admin.
 	// Default: [":white_check_mark:"]
-	ResolveEmojis []string `json:"resolveEmojis" yaml:"resolveEmojis"`
+	ResolveEmojis []string `json:"resolveEmojis" yaml:"resolveEmojis" mapstructure:"resolveEmojis"`
 
 	// InvestigateEmojis lists emojis that mark the reacting user as investigating the
 	// issue. The user's name appears in the issue post to signal that someone is working
 	// on it. Available to all users. Default: [":eyes:"]
-	InvestigateEmojis []string `json:"investigateEmojis" yaml:"investigateEmojis"`
+	InvestigateEmojis []string `json:"investigateEmojis" yaml:"investigateEmojis" mapstructure:"investigateEmojis"`
 
 	// MuteEmojis lists emojis that mute an issue, suppressing escalation notifications
 	// while keeping the issue visible. Useful for known issues being monitored.
 	// Requires admin permissions. Default: [":mask:"]
-	MuteEmojis []string `json:"muteEmojis" yaml:"muteEmojis"`
+	MuteEmojis []string `json:"muteEmojis" yaml:"muteEmojis" mapstructure:"muteEmojis"`
 
 	// ShowOptionButtonsEmojis lists emojis that reveal the interactive action buttons
 	// on the issue post (when AlwaysShowOptionButtons is false). Provides quick access
 	// to actions without memorizing emoji shortcuts. Available to all users.
 	// Default: [":information_source:"]
-	ShowOptionButtonsEmojis []string `json:"showOptionButtonsEmojis" yaml:"showOptionButtonsEmojis"`
+	ShowOptionButtonsEmojis []string `json:"showOptionButtonsEmojis" yaml:"showOptionButtonsEmojis" mapstructure:"showOptionButtonsEmojis"`
 }
 
 // IssueStatusSettings configures the visual indicators displayed in issue post headers.
@@ -438,41 +438,41 @@ type IssueReactionSettings struct {
 type IssueStatusSettings struct {
 	// PanicEmoji indicates a panic-level issue (highest severity, unmuted).
 	// Default: ":scream:"
-	PanicEmoji string `json:"panicEmoji" yaml:"panicEmoji"`
+	PanicEmoji string `json:"panicEmoji" yaml:"panicEmoji" mapstructure:"panicEmoji"`
 
 	// ErrorEmoji indicates an error-level issue (unmuted).
 	// Default: ":x:"
-	ErrorEmoji string `json:"errorEmoji" yaml:"errorEmoji"`
+	ErrorEmoji string `json:"errorEmoji" yaml:"errorEmoji" mapstructure:"errorEmoji"`
 
 	// WarningEmoji indicates a warning-level issue (unmuted).
 	// Default: ":warning:"
-	WarningEmoji string `json:"warningEmoji" yaml:"warningEmoji"`
+	WarningEmoji string `json:"warningEmoji" yaml:"warningEmoji" mapstructure:"warningEmoji"`
 
 	// InfoEmoji indicates an info-level issue (lowest severity, unmuted).
 	// Default: ":information_source:"
-	InfoEmoji string `json:"infoEmoji" yaml:"infoEmoji"`
+	InfoEmoji string `json:"infoEmoji" yaml:"infoEmoji" mapstructure:"infoEmoji"`
 
 	// MutePanicEmoji indicates a muted panic-level issue. Escalations are suppressed
 	// but the issue remains visible and can still receive alerts.
 	// Default: ":no_bell:"
-	MutePanicEmoji string `json:"mutePanicEmoji" yaml:"mutePanicEmoji"`
+	MutePanicEmoji string `json:"mutePanicEmoji" yaml:"mutePanicEmoji" mapstructure:"mutePanicEmoji"`
 
 	// MuteErrorEmoji indicates a muted error-level issue.
 	// Default: ":no_bell:"
-	MuteErrorEmoji string `json:"muteErrorEmoji" yaml:"muteErrorEmoji"`
+	MuteErrorEmoji string `json:"muteErrorEmoji" yaml:"muteErrorEmoji" mapstructure:"muteErrorEmoji"`
 
 	// MuteWarningEmoji indicates a muted warning-level issue.
 	// Default: ":no_bell:"
-	MuteWarningEmoji string `json:"muteWarningEmoji" yaml:"muteWarningEmoji"`
+	MuteWarningEmoji string `json:"muteWarningEmoji" yaml:"muteWarningEmoji" mapstructure:"muteWarningEmoji"`
 
 	// InconclusiveEmoji indicates an issue resolved as inconclusive - neither confirmed
 	// as fixed nor identified as a false positive. Used when the root cause is unclear.
 	// Default: ":grey_question:"
-	InconclusiveEmoji string `json:"unresolvedEmoji" yaml:"unresolvedEmoji"`
+	InconclusiveEmoji string `json:"inconclusiveEmoji" yaml:"inconclusiveEmoji" mapstructure:"inconclusiveEmoji"`
 
 	// ResolvedEmoji indicates a successfully resolved (and possibly archived) issue.
 	// Default: ":white_check_mark:"
-	ResolvedEmoji string `json:"resolvedEmoji" yaml:"resolvedEmoji"`
+	ResolvedEmoji string `json:"resolvedEmoji" yaml:"resolvedEmoji" mapstructure:"resolvedEmoji"`
 }
 
 // AlertChannelSettings provides per-channel configuration overrides for alert channels.
@@ -494,34 +494,34 @@ type AlertChannelSettings struct {
 	// ID is the Slack channel ID (e.g., "C1234567890"). This must be the channel's
 	// internal ID, not its display name. Required and must be unique across all
 	// AlertChannels and InfoChannels.
-	ID string `json:"id" yaml:"id"`
+	ID string `json:"id" yaml:"id" mapstructure:"id"`
 
 	// AdminUsers lists Slack user IDs (e.g., "U1234567890") with admin permissions
 	// in this channel. These users can resolve, terminate, and mute issues in this
 	// channel only. For cross-channel admin access, use ManagerSettings.GlobalAdmins.
-	AdminUsers []string `json:"adminUsers" yaml:"adminUsers"`
+	AdminUsers []string `json:"adminUsers" yaml:"adminUsers" mapstructure:"adminUsers"`
 
 	// AdminGroups lists Slack user group IDs whose members have admin permissions in
 	// this channel. Group membership is checked dynamically via the Slack API. This
 	// allows permission management through Slack groups rather than individual user IDs.
-	AdminGroups []string `json:"adminGroups" yaml:"adminGroups"`
+	AdminGroups []string `json:"adminGroups" yaml:"adminGroups" mapstructure:"adminGroups"`
 
 	// DisableIssueReordering overrides the global DisableIssueReordering setting for
 	// this channel. When true, issues in this channel are displayed in creation order
 	// regardless of severity, even if global reordering is enabled.
-	DisableIssueReordering bool `json:"disableIssueReordering" yaml:"disableIssueReordering"`
+	DisableIssueReordering bool `json:"disableIssueReordering" yaml:"disableIssueReordering" mapstructure:"disableIssueReordering"`
 
 	// IssueReorderingLimit overrides the global IssueReorderingLimit for this channel.
 	// When the number of open issues exceeds this limit, reordering is temporarily
 	// disabled for this channel. Set to 0 to use the global default.
 	// Must be between 5 and 100 if specified.
-	IssueReorderingLimit int `json:"issueReorderingLimit" yaml:"issueReorderingLimit"`
+	IssueReorderingLimit int `json:"issueReorderingLimit" yaml:"issueReorderingLimit" mapstructure:"issueReorderingLimit"`
 
 	// IssueProcessingIntervalSeconds overrides the global IssueProcessingIntervalSeconds
 	// for this channel. Controls how frequently background maintenance runs for this
 	// channel's issues. Set to 0 to use the global default.
 	// Must be between 3 and 600 seconds if specified.
-	IssueProcessingIntervalSeconds int `json:"issueProcessingIntervalSeconds" yaml:"issueProcessingIntervalSeconds"`
+	IssueProcessingIntervalSeconds int `json:"issueProcessingIntervalSeconds" yaml:"issueProcessingIntervalSeconds" mapstructure:"issueProcessingIntervalSeconds"`
 
 	adminUsers  map[string]struct{}
 	adminGroups map[string]struct{}
@@ -541,12 +541,12 @@ type AlertChannelSettings struct {
 type InfoChannelSettings struct {
 	// ID is the Slack channel ID (e.g., "C1234567890"). Required and must be unique
 	// across all AlertChannels and InfoChannels.
-	ID string `json:"channelId" yaml:"channelId"`
+	ID string `json:"id" yaml:"id" mapstructure:"id"`
 
 	// TemplatePath is the file path to a Go template file used to render content
 	// for this info channel. Either TemplatePath or TemplateContent must be set.
 	// TemplateContent takes precedence if both are provided.
-	TemplatePath string `json:"templatePath" yaml:"templatePath"`
+	TemplatePath string `json:"templatePath" yaml:"templatePath" mapstructure:"templatePath"`
 
 	// TemplateContent is the Go template used to render content for this info
 	// channel. Takes precedence over TemplatePath when both are set. Prefer
@@ -560,7 +560,7 @@ type InfoChannelSettings struct {
 	// contains characters that are awkward to embed in YAML (e.g. braces,
 	// quotes). Plain templates and base64 templates are both supported and
 	// can be used interchangeably.
-	TemplateContent string `json:"templateContent" yaml:"templateContent"`
+	TemplateContent string `json:"templateContent" yaml:"templateContent" mapstructure:"templateContent"`
 }
 
 // Clone creates a deep copy of the ManagerSettings by marshaling to JSON and back.

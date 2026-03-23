@@ -135,61 +135,61 @@ type SlackClientConfig struct {
 	// This token enables real-time event handling including reactions, mentions, and
 	// interactive components. Obtain from: Slack App Settings > Basic Information >
 	// App-Level Tokens.
-	AppToken string `json:"appToken" yaml:"appToken"`
+	AppToken string `json:"appToken" yaml:"appToken" mapstructure:"appToken"`
 
 	// BotToken is the Slack Bot User OAuth Token (xoxb-...) used for API operations.
 	// This token is used for posting messages, reading channels, managing reactions,
 	// and other bot actions. Obtain from: Slack App Settings > OAuth & Permissions.
-	BotToken string `json:"botToken" yaml:"botToken"`
+	BotToken string `json:"botToken" yaml:"botToken" mapstructure:"botToken"`
 
 	// DebugLogging enables verbose logging of all Slack API requests and responses.
 	// Useful for debugging but should be disabled in production as it may expose
 	// sensitive data in logs.
-	DebugLogging bool `json:"debugLogging" yaml:"debugLogging"`
+	DebugLogging bool `json:"debugLogging" yaml:"debugLogging" mapstructure:"debugLogging"`
 
 	// DryRun prevents actual Slack API calls when true. The client logs intended
 	// actions without executing them. Useful for testing configuration and validating
 	// message formatting without affecting real Slack channels.
-	DryRun bool `json:"dryRun" yaml:"dryRun"`
+	DryRun bool `json:"dryRun" yaml:"dryRun" mapstructure:"dryRun"`
 
 	// Concurrency sets the maximum number of concurrent Slack API requests.
 	// Higher values increase throughput but may trigger more rate limit responses.
 	// Default: 3. Must be between 1 and 50.
-	Concurrency int `json:"concurrency" yaml:"concurrency"`
+	Concurrency int `json:"concurrency" yaml:"concurrency" mapstructure:"concurrency"`
 
 	// MaxAttemptsForRateLimitError sets how many times to retry after receiving
 	// a rate limit (HTTP 429) response. Slack rate limits are usually short-lived
 	// (seconds to minutes). Default: 10. Must be between 1 and 100.
-	MaxAttemptsForRateLimitError int `json:"maxAttemptsForRateLimitError" yaml:"maxAttemptsForRateLimitError"`
+	MaxAttemptsForRateLimitError int `json:"maxAttemptsForRateLimitError" yaml:"maxAttemptsForRateLimitError" mapstructure:"maxAttemptsForRateLimitError"`
 
 	// MaxAttemptsForTransientError sets how many times to retry after transient
 	// errors like network timeouts or 5xx server errors. Default: 5. Must be
 	// between 1 and 100.
-	MaxAttemptsForTransientError int `json:"maxAttemptsForTransientError" yaml:"maxAttemptsForTransientError"`
+	MaxAttemptsForTransientError int `json:"maxAttemptsForTransientError" yaml:"maxAttemptsForTransientError" mapstructure:"maxAttemptsForTransientError"`
 
 	// MaxAttemptsForFatalError sets how many times to retry after fatal errors
 	// (4xx responses except 429). These rarely succeed on retry but a few attempts
 	// help with edge cases. Default: 5. Must be between 1 and 100.
-	MaxAttemptsForFatalError int `json:"maxAttemptsForFatalError" yaml:"maxAttemptsForFatalError"`
+	MaxAttemptsForFatalError int `json:"maxAttemptsForFatalError" yaml:"maxAttemptsForFatalError" mapstructure:"maxAttemptsForFatalError"`
 
 	// MaxRateLimitErrorWaitTimeSeconds caps the wait time between rate limit retries.
 	// Even if Slack's Retry-After header suggests longer, we won't wait more than
 	// this many seconds. Default: 120. Must be between 1 and 600.
-	MaxRateLimitErrorWaitTimeSeconds int `json:"maxRateLimitErrorWaitTimeSeconds" yaml:"maxRateLimitErrorWaitTimeSeconds"`
+	MaxRateLimitErrorWaitTimeSeconds int `json:"maxRateLimitErrorWaitTimeSeconds" yaml:"maxRateLimitErrorWaitTimeSeconds" mapstructure:"maxRateLimitErrorWaitTimeSeconds"`
 
 	// MaxTransientErrorWaitTimeSeconds caps the wait time between transient error
 	// retries using exponential backoff. Default: 30. Must be between 1 and 600.
-	MaxTransientErrorWaitTimeSeconds int `json:"maxTransientErrorWaitTimeSeconds" yaml:"maxTransientErrorWaitTimeSeconds"`
+	MaxTransientErrorWaitTimeSeconds int `json:"maxTransientErrorWaitTimeSeconds" yaml:"maxTransientErrorWaitTimeSeconds" mapstructure:"maxTransientErrorWaitTimeSeconds"`
 
 	// MaxFatalErrorWaitTimeSeconds caps the wait time between fatal error retries.
 	// Kept short since fatal errors rarely resolve on their own. Default: 30.
 	// Must be between 1 and 600.
-	MaxFatalErrorWaitTimeSeconds int `json:"maxFatalErrorWaitTimeSeconds" yaml:"maxFatalErrorWaitTimeSeconds"`
+	MaxFatalErrorWaitTimeSeconds int `json:"maxFatalErrorWaitTimeSeconds" yaml:"maxFatalErrorWaitTimeSeconds" mapstructure:"maxFatalErrorWaitTimeSeconds"`
 
 	// HTTPTimeoutSeconds sets the HTTP client timeout for Slack API requests.
 	// This should be long enough to accommodate slow responses but short enough
 	// to fail fast on unresponsive endpoints. Default: 30. Must be between 1 and 300.
-	HTTPTimeoutSeconds int `json:"httpTimeoutSeconds" yaml:"httpTimeoutSeconds"`
+	HTTPTimeoutSeconds int `json:"httpTimeoutSeconds" yaml:"httpTimeoutSeconds" mapstructure:"httpTimeoutSeconds"`
 }
 
 // NewDefaultSlackClientConfig returns a SlackClientConfig populated with sensible defaults.

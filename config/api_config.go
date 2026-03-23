@@ -61,31 +61,31 @@ type APIConfig struct {
 	// LogJSON controls the log output format. When true, logs are written as structured
 	// JSON objects suitable for log aggregation systems like Elasticsearch or Splunk.
 	// When false, logs are written in a human-readable text format for local development.
-	LogJSON bool `json:"logJson" yaml:"logJson"`
+	LogJSON bool `json:"logJson" yaml:"logJson" mapstructure:"logJson"`
 
 	// Verbose enables debug-level logging when true. This includes detailed information
 	// about request processing, rate limiting decisions, and internal state changes.
 	// Should be disabled in production to reduce log volume and avoid exposing
 	// sensitive information.
-	Verbose bool `json:"verbose" yaml:"verbose"`
+	Verbose bool `json:"verbose" yaml:"verbose" mapstructure:"verbose"`
 
 	// RestPort specifies the TCP port the HTTP server listens on. The value is stored
 	// as a string to allow easy configuration from environment variables. Common values
 	// are "8080" for development and "80" or "443" for production (though TLS termination
 	// is typically handled by a reverse proxy).
-	RestPort string `json:"restPort" yaml:"restPort"`
+	RestPort string `json:"restPort" yaml:"restPort" mapstructure:"restPort"`
 
 	// EncryptionKey is a 32-character alphanumeric key used for AES-256 encryption of
 	// sensitive data such as webhook payloads. This key must be identical in both the
 	// API and Manager configurations to ensure encrypted data can be decrypted correctly.
 	// Generate a secure random key for production use; never use predictable values.
-	EncryptionKey string `json:"encryptionKey" yaml:"encryptionKey"`
+	EncryptionKey string `json:"encryptionKey" yaml:"encryptionKey" mapstructure:"encryptionKey"`
 
 	// CacheKeyPrefix is prepended to all Redis cache keys to namespace them. Using the
 	// same prefix in both the API and Manager allows them to share cached data (such as
 	// channel information), reducing Slack API calls. Use different prefixes if running
 	// multiple independent Slack Manager instances against the same Redis cluster.
-	CacheKeyPrefix string `json:"cacheKeyPrefix" yaml:"cacheKeyPrefix"`
+	CacheKeyPrefix string `json:"cacheKeyPrefix" yaml:"cacheKeyPrefix" mapstructure:"cacheKeyPrefix"`
 
 	// MetricsPrefix is prepended to all metric names registered by the API server,
 	// including the HTTP request duration histogram and Slack API metrics. This
@@ -93,28 +93,28 @@ type APIConfig struct {
 	//
 	// Defaults to "slackmgr_" (e.g. "slackmgr_http_server_request_duration_seconds").
 	// Set to an empty string to disable prefixing and keep bare metric names.
-	MetricsPrefix string `json:"metricsPrefix" yaml:"metricsPrefix"`
+	MetricsPrefix string `json:"metricsPrefix" yaml:"metricsPrefix" mapstructure:"metricsPrefix"`
 
 	// ErrorReportChannelID is the Slack channel where the API posts error reports for
 	// failed requests (4xx and 5xx responses). This is useful for monitoring API health
 	// and debugging integration issues. Leave empty to disable error reporting.
 	// The channel must exist and the bot must be a member.
-	ErrorReportChannelID string `json:"errorReportChannelId" yaml:"errorReportChannelId"`
+	ErrorReportChannelID string `json:"errorReportChannelId" yaml:"errorReportChannelId" mapstructure:"errorReportChannelId"`
 
 	// MaxUsersInAlertChannel sets the maximum number of members allowed in a channel
 	// that receives alerts. The API returns HTTP 400 if an alert targets a channel
 	// exceeding this limit. This prevents accidental alerts to large public channels
 	// (like #general) which could spam many users and trigger Slack API rate limits.
-	MaxUsersInAlertChannel int `json:"maxUsersInAlertChannel" yaml:"maxUsersInAlertChannel"`
+	MaxUsersInAlertChannel int `json:"maxUsersInAlertChannel" yaml:"maxUsersInAlertChannel" mapstructure:"maxUsersInAlertChannel"`
 
 	// RateLimitPerAlertChannel configures the token bucket rate limiter that controls
 	// how many alerts can be sent to each Slack channel. Each channel has its own
 	// independent rate limiter. See RateLimitConfig for detailed documentation.
-	RateLimitPerAlertChannel *RateLimitConfig `json:"rateLimitPerAlertChannel" yaml:"rateLimitPerAlertChannel"`
+	RateLimitPerAlertChannel *RateLimitConfig `json:"rateLimitPerAlertChannel" yaml:"rateLimitPerAlertChannel" mapstructure:"rateLimitPerAlertChannel"`
 
 	// SlackClient contains configuration for connecting to the Slack API, including
 	// authentication tokens and API behavior settings.
-	SlackClient *SlackClientConfig `json:"slackClient" yaml:"slackClient"`
+	SlackClient *SlackClientConfig `json:"slackClient" yaml:"slackClient" mapstructure:"slackClient"`
 }
 
 // RateLimitConfig configures the token bucket rate limiter for alert processing.
@@ -159,7 +159,7 @@ type RateLimitConfig struct {
 	//   - 10.0 = ten alerts per second (ten tokens added every second)
 	//
 	// This value can be fractional to allow rates slower than 1 per second.
-	AlertsPerSecond float64 `json:"alertsPerSecond" yaml:"alertsPerSecond"`
+	AlertsPerSecond float64 `json:"alertsPerSecond" yaml:"alertsPerSecond" mapstructure:"alertsPerSecond"`
 
 	// AllowedBurst sets the token bucket capacity - the maximum number of tokens that
 	// can accumulate. This determines how many alerts can be sent in a rapid burst
@@ -168,7 +168,7 @@ type RateLimitConfig struct {
 	//
 	// This value also serves as the maximum number of alerts allowed in a single API
 	// request. Requests exceeding this limit are rejected with HTTP 400 immediately.
-	AllowedBurst int `json:"allowedBurst" yaml:"allowedBurst"`
+	AllowedBurst int `json:"allowedBurst" yaml:"allowedBurst" mapstructure:"allowedBurst"`
 }
 
 // NewDefaultAPIConfig returns an APIConfig populated with sensible default values.
