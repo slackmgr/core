@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-03-23
+
+### Changed
+- `restapi.ServerHooks` renamed to `restapi.Hooks` for consistency with `manager.Hooks`
+- `restapi.Hooks.OnStartup` doc comment updated to indicate it should also enable a liveness probe
+
 ## [0.9.0] - 2026-03-23
 
 ### Added
@@ -248,7 +254,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/slackmgr/core/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/slackmgr/core/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/slackmgr/core/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/slackmgr/core/compare/v0.7.0...v0.7.1
