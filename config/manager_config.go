@@ -246,6 +246,9 @@ type ManagerConfig struct {
 	// When loading from YAML, the value must be a quoted string (e.g. "5s"), not a bare
 	// number — an unquoted YAML value is interpreted as nanoseconds by the YAML parser.
 	SocketModeDrainTimeout time.Duration `json:"socketModeDrainTimeout" mapstructure:"socketModeDrainTimeout" yaml:"socketModeDrainTimeout"`
+
+	// location is the parsed *time.Location for the Location field, cached by Validate().
+	location *time.Location
 }
 
 // NewDefaultManagerConfig returns a ManagerConfig populated with sensible default values.
@@ -305,9 +308,12 @@ func (c *ManagerConfig) Validate() error {
 		return errors.New("location is required")
 	}
 
-	if _, err := time.LoadLocation(c.Location); err != nil {
+	loc, err := time.LoadLocation(c.Location)
+	if err != nil {
 		return fmt.Errorf("location %q is not a valid IANA timezone: %w", c.Location, err)
 	}
+
+	c.location = loc
 
 	if c.SlackClient == nil {
 		return errors.New("slack client config is required")
@@ -336,10 +342,15 @@ func (c *ManagerConfig) Validate() error {
 	return nil
 }
 
-// GetLocation parses the Location field into a *time.Location. Location is validated
-// during Validate(), so this will only return time.UTC as a fallback if called before
-// validation.
+// GetLocation returns the parsed *time.Location for the Location field. The result is
+// cached by Validate(), so after a successful Validate() call this is a simple pointer
+// return with no I/O. If called before Validate(), the location is parsed on demand
+// and time.UTC is returned as a fallback on error.
 func (c *ManagerConfig) GetLocation() *time.Location {
+	if c.location != nil {
+		return c.location
+	}
+
 	loc, err := time.LoadLocation(c.Location)
 	if err != nil {
 		return time.UTC
