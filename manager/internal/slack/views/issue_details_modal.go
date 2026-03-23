@@ -108,7 +108,7 @@ func IssueDetailsAssets(issue *models.Issue, cfg *config.ManagerConfig) (slack.B
 }
 
 func formatTimestamp(t time.Time, cfg *config.ManagerConfig) string {
-	s := t.In(cfg.Location).Format("2006-01-02T15:04:05")
+	s := t.In(cfg.GetLocation()).Format("2006-01-02T15:04:05")
 
 	diff := time.Since(t)
 

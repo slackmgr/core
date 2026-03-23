@@ -21,6 +21,10 @@ var cacheKeyPrefixRegex = regexp.MustCompile(`^[a-zA-Z0-9._:-]+$`)
 // An empty prefix is always valid (it disables prefixing entirely).
 var metricsPrefixRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
+// DefaultLocation is the default IANA timezone name used by the Manager for timestamp
+// formatting. "UTC" is recommended for distributed systems and log aggregation.
+const DefaultLocation = "UTC"
+
 // DefaultKeyPrefix is the default Redis key namespace used by all slackmgr components.
 // It is applied to cache keys, queue keys, and distributed gate keys.
 // Override it when running multiple independent slackmgr deployments against the same Redis instance.
@@ -125,7 +129,7 @@ type ManagerConfig struct {
 	//   - Never use predictable values like "test" repeated or sequential characters
 	//   - Rotate keys by deploying new API and Manager instances simultaneously
 	//   - Store the key securely (e.g., Kubernetes secrets, HashiCorp Vault)
-	EncryptionKey string `json:"encryptionKey" yaml:"encryptionKey" mapstructure:"encryptionKey"`
+	EncryptionKey string `json:"encryptionKey" mapstructure:"encryptionKey" yaml:"encryptionKey"`
 
 	// CacheKeyPrefix is prepended to all Redis cache keys to namespace them. Using the
 	// same prefix in both the API and Manager allows them to share cached data (such as
@@ -133,7 +137,7 @@ type ManagerConfig struct {
 	//
 	// Use different prefixes only if running multiple independent Slack Manager deployments
 	// against the same Redis cluster that should not share cache data.
-	CacheKeyPrefix string `json:"cacheKeyPrefix" yaml:"cacheKeyPrefix" mapstructure:"cacheKeyPrefix"`
+	CacheKeyPrefix string `json:"cacheKeyPrefix" mapstructure:"cacheKeyPrefix" yaml:"cacheKeyPrefix"`
 
 	// MetricsPrefix is prepended to all metric names registered by the Manager, including
 	// Slack API metrics, queue metrics, and channel manager metrics. This namespaces
@@ -141,7 +145,7 @@ type ManagerConfig struct {
 	//
 	// Defaults to "slackmgr_" (e.g. "slackmgr_slack_api_call_total").
 	// Set to an empty string to disable prefixing and keep bare metric names.
-	MetricsPrefix string `json:"metricsPrefix" yaml:"metricsPrefix" mapstructure:"metricsPrefix"`
+	MetricsPrefix string `json:"metricsPrefix" mapstructure:"metricsPrefix" yaml:"metricsPrefix"`
 
 	// IsSingleInstanceDeployment disables certain safeguards that exist to protect
 	// correctness in multi-instance deployments. Setting this to true is ONLY safe
@@ -153,7 +157,7 @@ type ManagerConfig struct {
 	//
 	// WARNING: Do NOT set this to true in production environments that run more than
 	// one manager instance. Doing so will cause race conditions and data inconsistency.
-	IsSingleInstanceDeployment bool `json:"isSingleInstanceDeployment" yaml:"isSingleInstanceDeployment" mapstructure:"isSingleInstanceDeployment"`
+	IsSingleInstanceDeployment bool `json:"isSingleInstanceDeployment" mapstructure:"isSingleInstanceDeployment" yaml:"isSingleInstanceDeployment"`
 
 	// SkipDatabaseCache disables the in-memory database query cache when set to true.
 	// The database cache reduces load on the database by caching frequently accessed
@@ -165,24 +169,21 @@ type ManagerConfig struct {
 	//   - Testing scenarios that require predictable database behavior
 	//
 	// In production, keep this false (the default) for optimal performance.
-	SkipDatabaseCache bool `json:"skipDatabaseCache" yaml:"skipDatabaseCache" mapstructure:"skipDatabaseCache"`
+	SkipDatabaseCache bool `json:"skipDatabaseCache" mapstructure:"skipDatabaseCache" yaml:"skipDatabaseCache"`
 
-	// Location specifies the timezone used for timestamp parsing and formatting in
+	// Location specifies the IANA timezone name used for timestamp formatting in
 	// Slack messages, logs, and issue metadata. All time-related operations use this
 	// location for consistency.
 	//
-	// Common values:
-	//   - time.UTC (default): Recommended for distributed systems and log aggregation
-	//   - time.LoadLocation("America/New_York"): For teams in a specific timezone
-	//   - time.Local: Uses the server's local timezone (not recommended for production)
-	//
-	// Must not be nil. The default is time.UTC.
-	Location *time.Location `json:"location" yaml:"location" mapstructure:"location"`
+	// Must be a valid IANA timezone name (validated by time.LoadLocation on startup).
+	// Common values: "UTC" (default), "America/New_York", "Europe/London", "Asia/Tokyo".
+	// Use "Local" to inherit the server's local timezone (not recommended for production).
+	Location string `json:"location" mapstructure:"location" yaml:"location"`
 
 	// SlackClient contains configuration for connecting to the Slack API, including
 	// authentication tokens, retry behavior, and timeout settings. See SlackClientConfig
 	// for detailed documentation of each field.
-	SlackClient *SlackClientConfig `json:"slackClient" yaml:"slackClient" mapstructure:"slackClient"`
+	SlackClient *SlackClientConfig `json:"slackClient" mapstructure:"slackClient" yaml:"slackClient"`
 
 	// CoordinatorDrainTimeout is the maximum time the coordinator spends nacking
 	// buffered messages during shutdown.
@@ -197,7 +198,9 @@ type ManagerConfig struct {
 	// backlogged at shutdown time. In normal operation the drain completes instantly.
 	//
 	// Default: 5 seconds. Must be between 2 seconds and 5 minutes.
-	CoordinatorDrainTimeout time.Duration `json:"coordinatorDrainTimeout" yaml:"coordinatorDrainTimeout" mapstructure:"coordinatorDrainTimeout"`
+	// When loading from YAML, the value must be a quoted string (e.g. "5s"), not a bare
+	// number — an unquoted YAML value is interpreted as nanoseconds by the YAML parser.
+	CoordinatorDrainTimeout time.Duration `json:"coordinatorDrainTimeout" mapstructure:"coordinatorDrainTimeout" yaml:"coordinatorDrainTimeout"`
 
 	// ChannelManagerDrainTimeout is the maximum time each channel manager spends
 	// nacking buffered messages during shutdown.
@@ -213,7 +216,9 @@ type ManagerConfig struct {
 	// backlogged at shutdown time. In normal operation the drain completes instantly.
 	//
 	// Default: 3 seconds. Must be between 2 seconds and 5 minutes.
-	ChannelManagerDrainTimeout time.Duration `json:"channelManagerDrainTimeout" yaml:"channelManagerDrainTimeout" mapstructure:"channelManagerDrainTimeout"`
+	// When loading from YAML, the value must be a quoted string (e.g. "3s"), not a bare
+	// number — an unquoted YAML value is interpreted as nanoseconds by the YAML parser.
+	ChannelManagerDrainTimeout time.Duration `json:"channelManagerDrainTimeout" mapstructure:"channelManagerDrainTimeout" yaml:"channelManagerDrainTimeout"`
 
 	// SocketModeMaxWorkers limits the number of concurrent socket mode event handlers.
 	// This prevents goroutine explosion under high load by using a semaphore to limit
@@ -224,7 +229,7 @@ type ManagerConfig struct {
 	// thousands of goroutines, exhausting system resources.
 	//
 	// Default: 100. Must be between 10 and 1000.
-	SocketModeMaxWorkers int64 `json:"socketModeMaxWorkers" yaml:"socketModeMaxWorkers" mapstructure:"socketModeMaxWorkers"`
+	SocketModeMaxWorkers int64 `json:"socketModeMaxWorkers" mapstructure:"socketModeMaxWorkers" yaml:"socketModeMaxWorkers"`
 
 	// SocketModeDrainTimeout is the maximum time to wait for in-flight socket mode
 	// handlers to complete during graceful shutdown.
@@ -238,7 +243,9 @@ type ManagerConfig struct {
 	// For critical operations (like queue writes), handlers should complete quickly.
 	//
 	// Default: 5 seconds. Must be between 2 seconds and 5 minutes.
-	SocketModeDrainTimeout time.Duration `json:"socketModeDrainTimeout" yaml:"socketModeDrainTimeout" mapstructure:"socketModeDrainTimeout"`
+	// When loading from YAML, the value must be a quoted string (e.g. "5s"), not a bare
+	// number — an unquoted YAML value is interpreted as nanoseconds by the YAML parser.
+	SocketModeDrainTimeout time.Duration `json:"socketModeDrainTimeout" mapstructure:"socketModeDrainTimeout" yaml:"socketModeDrainTimeout"`
 }
 
 // NewDefaultManagerConfig returns a ManagerConfig populated with sensible default values.
@@ -258,7 +265,7 @@ func NewDefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
 		CacheKeyPrefix:             DefaultKeyPrefix,
 		MetricsPrefix:              DefaultMetricsPrefix,
-		Location:                   time.UTC,
+		Location:                   DefaultLocation,
 		SlackClient:                NewDefaultSlackClientConfig(),
 		CoordinatorDrainTimeout:    DefaultCoordinatorDrainTimeout,
 		ChannelManagerDrainTimeout: DefaultChannelManagerDrainTimeout,
@@ -294,8 +301,12 @@ func (c *ManagerConfig) Validate() error {
 		return err
 	}
 
-	if c.Location == nil {
+	if c.Location == "" {
 		return errors.New("location is required")
+	}
+
+	if _, err := time.LoadLocation(c.Location); err != nil {
+		return fmt.Errorf("location %q is not a valid IANA timezone: %w", c.Location, err)
 	}
 
 	if c.SlackClient == nil {
@@ -323,6 +334,18 @@ func (c *ManagerConfig) Validate() error {
 	}
 
 	return nil
+}
+
+// GetLocation parses the Location field into a *time.Location. Location is validated
+// during Validate(), so this will only return time.UTC as a fallback if called before
+// validation.
+func (c *ManagerConfig) GetLocation() *time.Location {
+	loc, err := time.LoadLocation(c.Location)
+	if err != nil {
+		return time.UTC
+	}
+
+	return loc
 }
 
 // validateCacheKeyPrefix checks that a Redis cache key prefix is non-empty, within

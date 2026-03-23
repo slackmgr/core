@@ -48,7 +48,7 @@ func TestFormatDuration(t *testing.T) {
 func TestFormatTimestamp(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.ManagerConfig{Location: time.UTC}
+	cfg := &config.ManagerConfig{Location: "UTC"}
 
 	tests := []struct {
 		name   string
@@ -79,15 +79,13 @@ func TestFormatTimestamp_FormatsInConfiguredTimezone(t *testing.T) {
 	// A fixed time in UTC: 2024-06-15 12:00:00
 	ts := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
 
-	utcCfg := &config.ManagerConfig{Location: time.UTC}
+	utcCfg := &config.ManagerConfig{Location: "UTC"}
 	result := formatTimestamp(ts, utcCfg)
 	assert.True(t, strings.HasPrefix(result, "2024-06-15T12:00:00"),
 		"UTC result should start with the UTC-formatted timestamp, got %q", result)
 
 	// New York is UTC-4 or UTC-5, so the same instant shows as 08:00:00 or 07:00:00.
-	nyLoc, err := time.LoadLocation("America/New_York")
-	require.NoError(t, err)
-	nyCfg := &config.ManagerConfig{Location: nyLoc}
+	nyCfg := &config.ManagerConfig{Location: "America/New_York"}
 	nyResult := formatTimestamp(ts, nyCfg)
 	assert.False(t, strings.HasPrefix(nyResult, "2024-06-15T12:00:00"),
 		"NY-timezone result should NOT start with the UTC timestamp, got %q", nyResult)

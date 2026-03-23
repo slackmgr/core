@@ -612,8 +612,8 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 	}
 
 	if issue.FollowUpEnabled() {
-		first := "First: " + issue.Created.In(c.cfg.Location).Format("01-02 15:04:05")
-		last := "Last: " + issue.LastAlertReceived.In(c.cfg.Location).Format("01-02 15:04:05")
+		first := "First: " + issue.Created.In(c.cfg.GetLocation()).Format("01-02 15:04:05")
+		last := "Last: " + issue.LastAlertReceived.In(c.cfg.GetLocation()).Format("01-02 15:04:05")
 		alertCount := fmt.Sprintf("#%d", issue.AlertCount)
 
 		fields := make([]slack.MixedElement, 0, 3)
@@ -625,19 +625,19 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 
 	// Issue is manually resolved by user
 	if method != postUpdateMethodUpdateDeleted && issue.IsInfoOrResolved() && issue.IsEmojiResolved {
-		text := newMrkdwnTextBlock(fmt.Sprintf(":raising_hand: The issue was resolved by *%s* at %s", issue.ResolvedByUser, issue.ResolveTime.In(c.cfg.Location).Format("2006-01-02 15:04:05")))
+		text := newMrkdwnTextBlock(fmt.Sprintf(":raising_hand: The issue was resolved by *%s* at %s", issue.ResolvedByUser, issue.ResolveTime.In(c.cfg.GetLocation()).Format("2006-01-02 15:04:05")))
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 
 	// Issue is not resolved AND being investigated by user
 	if method != postUpdateMethodUpdateDeleted && !issue.IsInfoOrResolved() && issue.IsEmojiInvestigated {
-		text := newMrkdwnTextBlock(fmt.Sprintf(":cop: The issue is investigated by *%s* since %s", issue.InvestigatedByUser, issue.InvestigatedSince.In(c.cfg.Location).Format("2006-01-02 15:04:05")))
+		text := newMrkdwnTextBlock(fmt.Sprintf(":cop: The issue is investigated by *%s* since %s", issue.InvestigatedByUser, issue.InvestigatedSince.In(c.cfg.GetLocation()).Format("2006-01-02 15:04:05")))
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 
 	// Issue is not resolved AND muted by user
 	if method != postUpdateMethodUpdateDeleted && !issue.IsInfoOrResolved() && issue.IsEmojiMuted {
-		text := newMrkdwnTextBlock(fmt.Sprintf(":mask: The issue was muted by *%s* at %s", issue.MutedByUser, issue.MutedSince.In(c.cfg.Location).Format("2006-01-02 15:04:05")))
+		text := newMrkdwnTextBlock(fmt.Sprintf(":mask: The issue was muted by *%s* at %s", issue.MutedByUser, issue.MutedSince.In(c.cfg.GetLocation()).Format("2006-01-02 15:04:05")))
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 

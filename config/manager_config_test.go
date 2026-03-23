@@ -19,7 +19,7 @@ func TestNewDefaultManagerConfig(t *testing.T) {
 	assert.Equal(t, "slack-manager:", cfg.CacheKeyPrefix)
 	assert.Equal(t, config.DefaultMetricsPrefix, cfg.MetricsPrefix)
 	assert.False(t, cfg.SkipDatabaseCache)
-	assert.Equal(t, time.UTC, cfg.Location)
+	assert.Equal(t, config.DefaultLocation, cfg.Location)
 	require.NotNil(t, cfg.SlackClient)
 	assert.Equal(t, config.DefaultCoordinatorDrainTimeout, cfg.CoordinatorDrainTimeout)
 	assert.Equal(t, config.DefaultChannelManagerDrainTimeout, cfg.ChannelManagerDrainTimeout)
@@ -142,11 +142,18 @@ func TestManagerConfig_Validate(t *testing.T) {
 		},
 		// Location validation
 		{
-			name: "nil location",
+			name: "empty location",
 			modify: func(c *config.ManagerConfig) {
-				c.Location = nil
+				c.Location = ""
 			},
 			expectError: "location is required",
+		},
+		{
+			name: "invalid location",
+			modify: func(c *config.ManagerConfig) {
+				c.Location = "Not/A/Timezone"
+			},
+			expectError: `location "Not/A/Timezone" is not a valid IANA timezone: unknown time zone Not/A/Timezone`,
 		},
 		{
 			name: "nil slack client config",
@@ -309,31 +316,28 @@ func TestManagerConfig_Validate_LocationVariations(t *testing.T) {
 	t.Run("UTC location", func(t *testing.T) {
 		t.Parallel()
 		cfg := validManagerConfig()
-		cfg.Location = time.UTC
+		cfg.Location = "UTC"
 		assert.NoError(t, cfg.Validate())
 	})
 
-	t.Run("custom fixed zone", func(t *testing.T) {
+	t.Run("America/New_York", func(t *testing.T) {
 		t.Parallel()
 		cfg := validManagerConfig()
-		cfg.Location = time.FixedZone("PST", -8*60*60)
+		cfg.Location = "America/New_York"
 		assert.NoError(t, cfg.Validate())
 	})
 
-	t.Run("fixed zone location", func(t *testing.T) {
+	t.Run("Europe/London", func(t *testing.T) {
 		t.Parallel()
 		cfg := validManagerConfig()
-		cfg.Location = time.FixedZone("EST", -5*60*60)
+		cfg.Location = "Europe/London"
 		assert.NoError(t, cfg.Validate())
 	})
 
-	t.Run("loaded timezone", func(t *testing.T) {
+	t.Run("Local timezone", func(t *testing.T) {
 		t.Parallel()
-		loc, err := time.LoadLocation("America/New_York")
-		require.NoError(t, err)
-
 		cfg := validManagerConfig()
-		cfg.Location = loc
+		cfg.Location = "Local"
 		assert.NoError(t, cfg.Validate())
 	})
 }
@@ -346,7 +350,7 @@ func TestManagerConfig_Validate_Order(t *testing.T) {
 
 		cfg := validManagerConfig()
 		cfg.EncryptionKey = "invalid"
-		cfg.Location = nil
+		cfg.Location = ""
 
 		err := cfg.Validate()
 
@@ -358,7 +362,7 @@ func TestManagerConfig_Validate_Order(t *testing.T) {
 		t.Parallel()
 
 		cfg := validManagerConfig()
-		cfg.Location = nil
+		cfg.Location = ""
 		cfg.SlackClient = nil
 
 		err := cfg.Validate()
