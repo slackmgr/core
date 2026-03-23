@@ -181,7 +181,7 @@ messageLoop:
 // drainChannels nacks all remaining messages in the alert and command channels.
 // This ensures messages are returned to the queue for reprocessing by another instance.
 func (c *coordinator) drainChannels(alertCh <-chan models.InFlightMessage, commandCh <-chan models.InFlightMessage) {
-	drainCtx, cancel := context.WithTimeout(context.Background(), c.cfg.CoordinatorDrainTimeout)
+	drainCtx, cancel := context.WithTimeout(context.Background(), time.Duration(c.cfg.CoordinatorDrainTimeoutMs)*time.Millisecond)
 	defer cancel()
 
 	drained := 0

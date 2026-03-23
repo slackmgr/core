@@ -194,7 +194,7 @@ func TestServer_HandlePing(t *testing.T) {
 		router := gin.New()
 		router.GET("/ping", server.ping)
 
-		req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/ping", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -208,7 +208,7 @@ func TestServer_HandlePing(t *testing.T) {
 		router := gin.New()
 		router.GET("/ping", server.ping)
 
-		req := httptest.NewRequest(http.MethodGet, "/ping?status=503", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/ping?status=503", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -222,7 +222,7 @@ func TestServer_HandlePing(t *testing.T) {
 		router := gin.New()
 		router.GET("/ping", server.ping)
 
-		req := httptest.NewRequest(http.MethodGet, "/ping?status=9999", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/ping?status=9999", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -247,7 +247,7 @@ func TestServer_HandleChannels(t *testing.T) {
 		router := gin.New()
 		router.GET("/channels", server.handleChannels)
 
-		req := httptest.NewRequest(http.MethodGet, "/channels", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/channels", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -270,7 +270,7 @@ func TestServer_HandleChannels(t *testing.T) {
 		router := gin.New()
 		router.GET("/channels", server.handleChannels)
 
-		req := httptest.NewRequest(http.MethodGet, "/channels", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/channels", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -295,7 +295,7 @@ func TestServer_HandleMappings(t *testing.T) {
 		router := gin.New()
 		router.GET("/mappings", server.handleMappings)
 
-		req := httptest.NewRequest(http.MethodGet, "/mappings", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/mappings", nil)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
@@ -315,7 +315,7 @@ func TestServer_HandleAlerts_Validation(t *testing.T) {
 		router := gin.New()
 		router.POST("/alert", server.handleAlerts)
 
-		req := httptest.NewRequest(http.MethodPost, "/alert", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", nil)
 		req.Header.Set("Content-Type", "application/json")
 		req.ContentLength = 0
 		w := httptest.NewRecorder()
@@ -332,7 +332,7 @@ func TestServer_HandleAlerts_Validation(t *testing.T) {
 		router := gin.New()
 		router.POST("/alert", server.handleAlerts)
 
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader([]byte("invalid json")))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader([]byte("invalid json")))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -349,7 +349,7 @@ func TestServer_HandleAlerts_Validation(t *testing.T) {
 		router.POST("/alert", server.handleAlerts)
 
 		body := `[]`
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader([]byte(body)))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader([]byte(body)))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -382,7 +382,7 @@ func TestServer_HandleAlerts_Success(t *testing.T) {
 			Header:         "Test Alert",
 		}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -409,7 +409,7 @@ func TestServer_HandleAlerts_Success(t *testing.T) {
 
 		alert := types.Alert{Header: "Test Alert"}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest(http.MethodPost, "/alert/C456", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert/C456", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -437,7 +437,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 
 		alert := types.Alert{SlackChannelID: "C123", Header: "Test"}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -462,7 +462,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 
 		alert := types.Alert{SlackChannelID: "C123", Header: "Test"}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -487,7 +487,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 
 		alert := types.Alert{SlackChannelID: "C123", Header: "Test"}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -514,7 +514,7 @@ func TestServer_HandleAlerts_ChannelValidation(t *testing.T) {
 
 		alert := types.Alert{SlackChannelID: "C123", Header: "Test"}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -552,7 +552,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 			{SlackChannelID: "C123", Header: "Alert 5"},
 		}
 		body, _ := json.Marshal(alerts)
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -587,7 +587,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 			Header:         "Test Alert",
 		}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -631,7 +631,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 			{SlackChannelID: "C123", Header: "Alert 5"},
 		}
 		body, _ := json.Marshal(alerts)
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -660,7 +660,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 
 		alert := types.Alert{SlackChannelID: "C123", Header: "Test Alert"}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -707,7 +707,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 			{SlackChannelID: "C222", Header: "Alert 3"},
 		}
 		body, _ := json.Marshal(alerts)
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -1043,7 +1043,7 @@ func TestServer_HandlePrometheusWebhook_Validation(t *testing.T) {
 		router := gin.New()
 		router.POST("/prometheus-alert", server.handlePrometheusWebhook)
 
-		req := httptest.NewRequest(http.MethodPost, "/prometheus-alert", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/prometheus-alert", nil)
 		req.Header.Set("Content-Type", "application/json")
 		req.ContentLength = 0
 		w := httptest.NewRecorder()
@@ -1060,7 +1060,7 @@ func TestServer_HandlePrometheusWebhook_Validation(t *testing.T) {
 		router := gin.New()
 		router.POST("/prometheus-alert", server.handlePrometheusWebhook)
 
-		req := httptest.NewRequest(http.MethodPost, "/prometheus-alert", bytes.NewReader([]byte("invalid json")))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/prometheus-alert", bytes.NewReader([]byte("invalid json")))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -1077,7 +1077,7 @@ func TestServer_HandlePrometheusWebhook_Validation(t *testing.T) {
 		router.POST("/prometheus-alert", server.handlePrometheusWebhook)
 
 		body := `{"alerts": []}`
-		req := httptest.NewRequest(http.MethodPost, "/prometheus-alert", bytes.NewReader([]byte(body)))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/prometheus-alert", bytes.NewReader([]byte(body)))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -1123,7 +1123,7 @@ func TestServer_HandlePrometheusWebhook_Success(t *testing.T) {
 			},
 		}
 		body, _ := json.Marshal(webhook)
-		req := httptest.NewRequest(http.MethodPost, "/prometheus-alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/prometheus-alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -1159,7 +1159,7 @@ func TestServer_HandlePrometheusWebhook_Success(t *testing.T) {
 			},
 		}
 		body, _ := json.Marshal(webhook)
-		req := httptest.NewRequest(http.MethodPost, "/prometheus-alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/prometheus-alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -1986,7 +1986,7 @@ func TestServer_HandleAlerts_WebhooksWithoutKey(t *testing.T) {
 			},
 		}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
@@ -2024,7 +2024,7 @@ func TestServer_HandleAlerts_WebhooksWithoutKey(t *testing.T) {
 			},
 		}
 		body, _ := json.Marshal(alert)
-		req := httptest.NewRequest(http.MethodPost, "/alert", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)

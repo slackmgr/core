@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/eko/gocache/lib/v4/store"
 	"github.com/slack-go/slack"
@@ -139,7 +140,7 @@ func (r *SocketModeHandler) RunEventLoop(ctx context.Context) error {
 
 // drainHandlers waits for all in-flight handlers to complete, up to the configured drain timeout.
 func (r *SocketModeHandler) drainHandlers() {
-	drainCtx, cancel := context.WithTimeout(context.Background(), r.cfg.SocketModeDrainTimeout)
+	drainCtx, cancel := context.WithTimeout(context.Background(), time.Duration(r.cfg.SocketModeDrainTimeoutMs)*time.Millisecond)
 	defer cancel()
 
 	done := make(chan struct{})
@@ -152,7 +153,7 @@ func (r *SocketModeHandler) drainHandlers() {
 	case <-done:
 		r.logger.Debug("All socket mode handlers completed gracefully")
 	case <-drainCtx.Done():
-		r.logger.WithField("timeout", r.cfg.SocketModeDrainTimeout).Info("Socket mode drain timeout exceeded, some handlers may not have completed")
+		r.logger.WithField("timeout", r.cfg.SocketModeDrainTimeoutMs).Info("Socket mode drain timeout exceeded, some handlers may not have completed")
 	}
 }
 

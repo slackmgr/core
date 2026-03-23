@@ -285,7 +285,7 @@ func (c *channelManager) keepAlive(ctx context.Context) error {
 // drainChannels nacks all remaining messages in the channel manager's internal buffers.
 // This ensures messages are returned to the queue for reprocessing by another instance.
 func (c *channelManager) drainChannels() {
-	drainCtx, cancel := context.WithTimeout(context.Background(), c.cfg.ChannelManagerDrainTimeout)
+	drainCtx, cancel := context.WithTimeout(context.Background(), time.Duration(c.cfg.ChannelManagerDrainTimeoutMs)*time.Millisecond)
 	defer cancel()
 
 	drained := 0

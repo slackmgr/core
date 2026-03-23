@@ -52,29 +52,29 @@ const (
 // Drain timeouts control how long the system waits during graceful shutdown
 // to process remaining messages before forcefully terminating.
 const (
-	// MinDrainTimeout is the minimum allowed value for drain timeout fields.
+	// MinDrainTimeoutMs is the minimum allowed value for drain timeout fields, in milliseconds.
 	// This must be at least 2 seconds because internal operations (message acknowledgment,
 	// negative acknowledgment, and distributed lock release) each have 2-second timeouts.
 	// Setting a drain timeout shorter than this could cause message loss during shutdown.
-	MinDrainTimeout = 2 * time.Second
+	MinDrainTimeoutMs = 2_000
 
-	// MaxDrainTimeout is the maximum allowed value for drain timeout fields.
+	// MaxDrainTimeoutMs is the maximum allowed value for drain timeout fields, in milliseconds.
 	// A 5-minute maximum prevents excessively long shutdown times that could delay
 	// deployments or cause orchestration systems (like Kubernetes) to forcefully
 	// terminate the process. In practice, if draining takes longer than a few minutes,
 	// there is likely a deeper issue that won't be resolved by waiting longer.
-	MaxDrainTimeout = 5 * time.Minute
+	MaxDrainTimeoutMs = 300_000
 
-	// DefaultCoordinatorDrainTimeout is the default drain timeout for the coordinator.
-	// 5 seconds provides enough time to process in-flight messages while keeping
-	// shutdown times reasonable for typical deployments.
-	DefaultCoordinatorDrainTimeout = 5 * time.Second
+	// DefaultCoordinatorDrainTimeoutMs is the default drain timeout for the coordinator,
+	// in milliseconds. 5 seconds provides enough time to process in-flight messages while
+	// keeping shutdown times reasonable for typical deployments.
+	DefaultCoordinatorDrainTimeoutMs = 5_000
 
-	// DefaultChannelManagerDrainTimeout is the default drain timeout for channel managers.
-	// 3 seconds is typically sufficient for channel managers, which have smaller internal
-	// buffers than the coordinator. This is intentionally shorter than the coordinator
-	// timeout to allow for sequential draining if needed.
-	DefaultChannelManagerDrainTimeout = 3 * time.Second
+	// DefaultChannelManagerDrainTimeoutMs is the default drain timeout for channel managers,
+	// in milliseconds. 3 seconds is typically sufficient for channel managers, which have
+	// smaller internal buffers than the coordinator. This is intentionally shorter than the
+	// coordinator timeout to allow for sequential draining if needed.
+	DefaultChannelManagerDrainTimeoutMs = 3_000
 
 	// MinSocketModeMaxWorkers is the minimum allowed value for concurrent socket mode handlers.
 	// At least 10 workers ensures the system can handle basic event processing even under
@@ -91,10 +91,10 @@ const (
 	// typical Slack workspaces.
 	DefaultSocketModeMaxWorkers = int64(100)
 
-	// DefaultSocketModeDrainTimeout is the default drain timeout for socket mode handlers.
-	// 5 seconds provides enough time for most handlers to complete their work (Slack API
-	// calls, queue writes) during graceful shutdown.
-	DefaultSocketModeDrainTimeout = 5 * time.Second
+	// DefaultSocketModeDrainTimeoutMs is the default drain timeout for socket mode handlers,
+	// in milliseconds. 5 seconds provides enough time for most handlers to complete their
+	// work (Slack API calls, queue writes) during graceful shutdown.
+	DefaultSocketModeDrainTimeoutMs = 5_000
 )
 
 // ManagerConfig holds configuration for the Slack Manager service.
@@ -185,8 +185,8 @@ type ManagerConfig struct {
 	// for detailed documentation of each field.
 	SlackClient *SlackClientConfig `json:"slackClient" mapstructure:"slackClient" yaml:"slackClient"`
 
-	// CoordinatorDrainTimeout is the maximum time the coordinator spends nacking
-	// buffered messages during shutdown.
+	// CoordinatorDrainTimeoutMs is the maximum time the coordinator spends nacking
+	// buffered messages during shutdown, in milliseconds.
 	//
 	// When the context is cancelled, the coordinator exits its main processing loop and
 	// immediately nacks any messages still sitting in its internal alert and command
@@ -197,13 +197,11 @@ type ManagerConfig struct {
 	// select case), this timeout is only reached if the internal channels are heavily
 	// backlogged at shutdown time. In normal operation the drain completes instantly.
 	//
-	// Default: 5 seconds. Must be between 2 seconds and 5 minutes.
-	// When loading from YAML, the value must be a quoted string (e.g. "5s"), not a bare
-	// number — an unquoted YAML value is interpreted as nanoseconds by the YAML parser.
-	CoordinatorDrainTimeout time.Duration `json:"coordinatorDrainTimeout" mapstructure:"coordinatorDrainTimeout" yaml:"coordinatorDrainTimeout"`
+	// Default: 5000 (5s). Must be between 2000 (2s) and 300000 (5m).
+	CoordinatorDrainTimeoutMs int `json:"coordinatorDrainTimeoutMs" mapstructure:"coordinatorDrainTimeoutMs" yaml:"coordinatorDrainTimeoutMs"`
 
-	// ChannelManagerDrainTimeout is the maximum time each channel manager spends
-	// nacking buffered messages during shutdown.
+	// ChannelManagerDrainTimeoutMs is the maximum time each channel manager spends
+	// nacking buffered messages during shutdown, in milliseconds.
 	//
 	// When the context is cancelled, each channel manager exits its run loop and
 	// immediately nacks any messages still sitting in its internal alert and command
@@ -215,10 +213,8 @@ type ManagerConfig struct {
 	// select case), this timeout is only reached if the internal channels are heavily
 	// backlogged at shutdown time. In normal operation the drain completes instantly.
 	//
-	// Default: 3 seconds. Must be between 2 seconds and 5 minutes.
-	// When loading from YAML, the value must be a quoted string (e.g. "3s"), not a bare
-	// number — an unquoted YAML value is interpreted as nanoseconds by the YAML parser.
-	ChannelManagerDrainTimeout time.Duration `json:"channelManagerDrainTimeout" mapstructure:"channelManagerDrainTimeout" yaml:"channelManagerDrainTimeout"`
+	// Default: 3000 (3s). Must be between 2000 (2s) and 300000 (5m).
+	ChannelManagerDrainTimeoutMs int `json:"channelManagerDrainTimeoutMs" mapstructure:"channelManagerDrainTimeoutMs" yaml:"channelManagerDrainTimeoutMs"`
 
 	// SocketModeMaxWorkers limits the number of concurrent socket mode event handlers.
 	// This prevents goroutine explosion under high load by using a semaphore to limit
@@ -231,8 +227,8 @@ type ManagerConfig struct {
 	// Default: 100. Must be between 10 and 1000.
 	SocketModeMaxWorkers int64 `json:"socketModeMaxWorkers" mapstructure:"socketModeMaxWorkers" yaml:"socketModeMaxWorkers"`
 
-	// SocketModeDrainTimeout is the maximum time to wait for in-flight socket mode
-	// handlers to complete during graceful shutdown.
+	// SocketModeDrainTimeoutMs is the maximum time to wait for in-flight socket mode
+	// handlers to complete during graceful shutdown, in milliseconds.
 	//
 	// During graceful shutdown, the socket mode handler:
 	//  1. Stops accepting new events from the Slack socket
@@ -242,10 +238,8 @@ type ManagerConfig struct {
 	// Handlers that don't complete within this timeout may have their work interrupted.
 	// For critical operations (like queue writes), handlers should complete quickly.
 	//
-	// Default: 5 seconds. Must be between 2 seconds and 5 minutes.
-	// When loading from YAML, the value must be a quoted string (e.g. "5s"), not a bare
-	// number — an unquoted YAML value is interpreted as nanoseconds by the YAML parser.
-	SocketModeDrainTimeout time.Duration `json:"socketModeDrainTimeout" mapstructure:"socketModeDrainTimeout" yaml:"socketModeDrainTimeout"`
+	// Default: 5000 (5s). Must be between 2000 (2s) and 300000 (5m).
+	SocketModeDrainTimeoutMs int `json:"socketModeDrainTimeoutMs" mapstructure:"socketModeDrainTimeoutMs" yaml:"socketModeDrainTimeoutMs"`
 
 	// location is the parsed *time.Location for the Location field, cached by Validate().
 	location *time.Location
@@ -266,14 +260,14 @@ type ManagerConfig struct {
 // The SlackClient tokens are also empty and must be configured.
 func NewDefaultManagerConfig() *ManagerConfig {
 	return &ManagerConfig{
-		CacheKeyPrefix:             DefaultKeyPrefix,
-		MetricsPrefix:              DefaultMetricsPrefix,
-		Location:                   DefaultLocation,
-		SlackClient:                NewDefaultSlackClientConfig(),
-		CoordinatorDrainTimeout:    DefaultCoordinatorDrainTimeout,
-		ChannelManagerDrainTimeout: DefaultChannelManagerDrainTimeout,
-		SocketModeMaxWorkers:       DefaultSocketModeMaxWorkers,
-		SocketModeDrainTimeout:     DefaultSocketModeDrainTimeout,
+		CacheKeyPrefix:               DefaultKeyPrefix,
+		MetricsPrefix:                DefaultMetricsPrefix,
+		Location:                     DefaultLocation,
+		SlackClient:                  NewDefaultSlackClientConfig(),
+		CoordinatorDrainTimeoutMs:    DefaultCoordinatorDrainTimeoutMs,
+		ChannelManagerDrainTimeoutMs: DefaultChannelManagerDrainTimeoutMs,
+		SocketModeMaxWorkers:         DefaultSocketModeMaxWorkers,
+		SocketModeDrainTimeoutMs:     DefaultSocketModeDrainTimeoutMs,
 	}
 }
 
@@ -285,12 +279,12 @@ func NewDefaultManagerConfig() *ManagerConfig {
 //   - EncryptionKey: if non-empty, must be exactly 32 alphanumeric characters
 //   - CacheKeyPrefix: required; max 100 chars; only letters, digits, '.', '_', ':', '-'
 //   - MetricsPrefix: if non-empty, must be a valid Prometheus name prefix (letters, digits, '_'; max 64 chars)
-//   - Location: must not be nil
+//   - Location: must not be empty and must be a valid IANA timezone name
 //   - SlackClient: must not be nil, and must pass its own validation
-//   - CoordinatorDrainTimeout: must be between 2 seconds and 5 minutes
-//   - ChannelManagerDrainTimeout: must be between 2 seconds and 5 minutes
+//   - CoordinatorDrainTimeoutMs: must be between 2000 ms and 300000 ms
+//   - ChannelManagerDrainTimeoutMs: must be between 2000 ms and 300000 ms
 //   - SocketModeMaxWorkers: must be between 10 and 1000
-//   - SocketModeDrainTimeout: must be between 2 seconds and 5 minutes
+//   - SocketModeDrainTimeoutMs: must be between 2000 ms and 300000 ms
 func (c *ManagerConfig) Validate() error {
 	if c.EncryptionKey != "" && !encryptionKeyRegex.MatchString(c.EncryptionKey) {
 		return fmt.Errorf("encryption key must be a %d character alphanumeric string", EncryptionKeyLength)
@@ -323,20 +317,20 @@ func (c *ManagerConfig) Validate() error {
 		return fmt.Errorf("slack client config is invalid: %w", err)
 	}
 
-	if c.CoordinatorDrainTimeout < MinDrainTimeout || c.CoordinatorDrainTimeout > MaxDrainTimeout {
-		return fmt.Errorf("coordinator drain timeout must be between %v and %v", MinDrainTimeout, MaxDrainTimeout)
+	if c.CoordinatorDrainTimeoutMs < MinDrainTimeoutMs || c.CoordinatorDrainTimeoutMs > MaxDrainTimeoutMs {
+		return fmt.Errorf("coordinator drain timeout must be between %d ms and %d ms", MinDrainTimeoutMs, MaxDrainTimeoutMs)
 	}
 
-	if c.ChannelManagerDrainTimeout < MinDrainTimeout || c.ChannelManagerDrainTimeout > MaxDrainTimeout {
-		return fmt.Errorf("channel manager drain timeout must be between %v and %v", MinDrainTimeout, MaxDrainTimeout)
+	if c.ChannelManagerDrainTimeoutMs < MinDrainTimeoutMs || c.ChannelManagerDrainTimeoutMs > MaxDrainTimeoutMs {
+		return fmt.Errorf("channel manager drain timeout must be between %d ms and %d ms", MinDrainTimeoutMs, MaxDrainTimeoutMs)
 	}
 
 	if c.SocketModeMaxWorkers < MinSocketModeMaxWorkers || c.SocketModeMaxWorkers > MaxSocketModeMaxWorkers {
 		return fmt.Errorf("socket mode max workers must be between %d and %d", MinSocketModeMaxWorkers, MaxSocketModeMaxWorkers)
 	}
 
-	if c.SocketModeDrainTimeout < MinDrainTimeout || c.SocketModeDrainTimeout > MaxDrainTimeout {
-		return fmt.Errorf("socket mode drain timeout must be between %v and %v", MinDrainTimeout, MaxDrainTimeout)
+	if c.SocketModeDrainTimeoutMs < MinDrainTimeoutMs || c.SocketModeDrainTimeoutMs > MaxDrainTimeoutMs {
+		return fmt.Errorf("socket mode drain timeout must be between %d ms and %d ms", MinDrainTimeoutMs, MaxDrainTimeoutMs)
 	}
 
 	return nil

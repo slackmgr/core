@@ -60,7 +60,7 @@ func TestSocketModeHandler_RunEventLoop_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
 	cfg := newTestManagerConfig()
-	cfg.SocketModeDrainTimeout = 100 * time.Millisecond
+	cfg.SocketModeDrainTimeoutMs = 100
 
 	logger := &mockLogger{}
 	logger.On("Debug", mock.Anything).Maybe()
@@ -107,7 +107,7 @@ func TestSocketModeHandler_RunEventLoop_ChannelClosure(t *testing.T) {
 	t.Parallel()
 
 	cfg := newTestManagerConfig()
-	cfg.SocketModeDrainTimeout = 100 * time.Millisecond
+	cfg.SocketModeDrainTimeoutMs = 100
 
 	logger := &mockLogger{}
 	logger.On("Debug", mock.Anything).Maybe()
@@ -799,7 +799,7 @@ func TestSocketModeHandler_drainHandlers_Timeout(t *testing.T) {
 	t.Parallel()
 
 	cfg := newTestManagerConfig()
-	cfg.SocketModeDrainTimeout = 50 * time.Millisecond
+	cfg.SocketModeDrainTimeoutMs = 50
 
 	logger := &mockLogger{}
 	logger.On("Debug", mock.Anything).Maybe()
@@ -839,7 +839,7 @@ func TestSocketModeHandler_drainHandlers_Success(t *testing.T) {
 	t.Parallel()
 
 	cfg := newTestManagerConfig()
-	cfg.SocketModeDrainTimeout = 1 * time.Second
+	cfg.SocketModeDrainTimeoutMs = 1000
 
 	logger := &mockLogger{}
 	logger.On("Debug", "All socket mode handlers completed gracefully").Once()

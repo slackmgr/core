@@ -3,7 +3,6 @@ package config_test
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/slackmgr/core/config"
 	"github.com/stretchr/testify/assert"
@@ -21,10 +20,10 @@ func TestNewDefaultManagerConfig(t *testing.T) {
 	assert.False(t, cfg.SkipDatabaseCache)
 	assert.Equal(t, config.DefaultLocation, cfg.Location)
 	require.NotNil(t, cfg.SlackClient)
-	assert.Equal(t, config.DefaultCoordinatorDrainTimeout, cfg.CoordinatorDrainTimeout)
-	assert.Equal(t, config.DefaultChannelManagerDrainTimeout, cfg.ChannelManagerDrainTimeout)
+	assert.Equal(t, config.DefaultCoordinatorDrainTimeoutMs, cfg.CoordinatorDrainTimeoutMs)
+	assert.Equal(t, config.DefaultChannelManagerDrainTimeoutMs, cfg.ChannelManagerDrainTimeoutMs)
 	assert.Equal(t, config.DefaultSocketModeMaxWorkers, cfg.SocketModeMaxWorkers)
-	assert.Equal(t, config.DefaultSocketModeDrainTimeout, cfg.SocketModeDrainTimeout)
+	assert.Equal(t, config.DefaultSocketModeDrainTimeoutMs, cfg.SocketModeDrainTimeoutMs)
 }
 
 func TestManagerConfig_Validate(t *testing.T) {
@@ -180,22 +179,22 @@ func TestManagerConfig_Validate(t *testing.T) {
 		{
 			name: "coordinator drain timeout too short",
 			modify: func(c *config.ManagerConfig) {
-				c.CoordinatorDrainTimeout = 1 * time.Second
+				c.CoordinatorDrainTimeoutMs = config.MinDrainTimeoutMs - 1
 			},
-			expectError: "coordinator drain timeout must be between 2s and 5m0s",
+			expectError: "coordinator drain timeout must be between 2000 ms and 300000 ms",
 		},
 		{
 			name: "channel manager drain timeout too short",
 			modify: func(c *config.ManagerConfig) {
-				c.ChannelManagerDrainTimeout = 1 * time.Second
+				c.ChannelManagerDrainTimeoutMs = config.MinDrainTimeoutMs - 1
 			},
-			expectError: "channel manager drain timeout must be between 2s and 5m0s",
+			expectError: "channel manager drain timeout must be between 2000 ms and 300000 ms",
 		},
 		{
 			name: "drain timeouts at minimum are valid",
 			modify: func(c *config.ManagerConfig) {
-				c.CoordinatorDrainTimeout = 2 * time.Second
-				c.ChannelManagerDrainTimeout = 2 * time.Second
+				c.CoordinatorDrainTimeoutMs = config.MinDrainTimeoutMs
+				c.ChannelManagerDrainTimeoutMs = config.MinDrainTimeoutMs
 			},
 			expectError: "",
 		},
@@ -228,25 +227,25 @@ func TestManagerConfig_Validate(t *testing.T) {
 			},
 			expectError: "",
 		},
-		// SocketModeDrainTimeout validation
+		// SocketModeDrainTimeoutMs validation
 		{
 			name: "socket mode drain timeout too short",
 			modify: func(c *config.ManagerConfig) {
-				c.SocketModeDrainTimeout = 1 * time.Second
+				c.SocketModeDrainTimeoutMs = config.MinDrainTimeoutMs - 1
 			},
-			expectError: "socket mode drain timeout must be between 2s and 5m0s",
+			expectError: "socket mode drain timeout must be between 2000 ms and 300000 ms",
 		},
 		{
 			name: "socket mode drain timeout too long",
 			modify: func(c *config.ManagerConfig) {
-				c.SocketModeDrainTimeout = config.MaxDrainTimeout + 1
+				c.SocketModeDrainTimeoutMs = config.MaxDrainTimeoutMs + 1
 			},
-			expectError: "socket mode drain timeout must be between 2s and 5m0s",
+			expectError: "socket mode drain timeout must be between 2000 ms and 300000 ms",
 		},
 		{
 			name: "socket mode drain timeout at minimum is valid",
 			modify: func(c *config.ManagerConfig) {
-				c.SocketModeDrainTimeout = config.MinDrainTimeout
+				c.SocketModeDrainTimeoutMs = config.MinDrainTimeoutMs
 			},
 			expectError: "",
 		},
@@ -460,52 +459,52 @@ func TestManagerConfig_OptionalFields(t *testing.T) {
 func TestManagerConfig_Validate_BoundaryValues(t *testing.T) {
 	t.Parallel()
 
-	// CoordinatorDrainTimeout boundaries
+	// CoordinatorDrainTimeoutMs boundaries
 	t.Run("coordinator drain timeout at lower bound", func(t *testing.T) {
 		t.Parallel()
 		cfg := validManagerConfig()
-		cfg.CoordinatorDrainTimeout = config.MinDrainTimeout
+		cfg.CoordinatorDrainTimeoutMs = config.MinDrainTimeoutMs
 		assert.NoError(t, cfg.Validate())
 	})
 
 	t.Run("coordinator drain timeout at upper bound", func(t *testing.T) {
 		t.Parallel()
 		cfg := validManagerConfig()
-		cfg.CoordinatorDrainTimeout = config.MaxDrainTimeout
+		cfg.CoordinatorDrainTimeoutMs = config.MaxDrainTimeoutMs
 		assert.NoError(t, cfg.Validate())
 	})
 
 	t.Run("coordinator drain timeout exceeds maximum", func(t *testing.T) {
 		t.Parallel()
 		cfg := validManagerConfig()
-		cfg.CoordinatorDrainTimeout = config.MaxDrainTimeout + 1
+		cfg.CoordinatorDrainTimeoutMs = config.MaxDrainTimeoutMs + 1
 		err := cfg.Validate()
 		require.Error(t, err)
-		assert.Equal(t, "coordinator drain timeout must be between 2s and 5m0s", err.Error())
+		assert.Equal(t, "coordinator drain timeout must be between 2000 ms and 300000 ms", err.Error())
 	})
 
-	// ChannelManagerDrainTimeout boundaries
+	// ChannelManagerDrainTimeoutMs boundaries
 	t.Run("channel manager drain timeout at lower bound", func(t *testing.T) {
 		t.Parallel()
 		cfg := validManagerConfig()
-		cfg.ChannelManagerDrainTimeout = config.MinDrainTimeout
+		cfg.ChannelManagerDrainTimeoutMs = config.MinDrainTimeoutMs
 		assert.NoError(t, cfg.Validate())
 	})
 
 	t.Run("channel manager drain timeout at upper bound", func(t *testing.T) {
 		t.Parallel()
 		cfg := validManagerConfig()
-		cfg.ChannelManagerDrainTimeout = config.MaxDrainTimeout
+		cfg.ChannelManagerDrainTimeoutMs = config.MaxDrainTimeoutMs
 		assert.NoError(t, cfg.Validate())
 	})
 
 	t.Run("channel manager drain timeout exceeds maximum", func(t *testing.T) {
 		t.Parallel()
 		cfg := validManagerConfig()
-		cfg.ChannelManagerDrainTimeout = config.MaxDrainTimeout + 1
+		cfg.ChannelManagerDrainTimeoutMs = config.MaxDrainTimeoutMs + 1
 		err := cfg.Validate()
 		require.Error(t, err)
-		assert.Equal(t, "channel manager drain timeout must be between 2s and 5m0s", err.Error())
+		assert.Equal(t, "channel manager drain timeout must be between 2000 ms and 300000 ms", err.Error())
 	})
 
 	// SocketModeMaxWorkers boundaries
@@ -541,28 +540,28 @@ func TestManagerConfig_Validate_BoundaryValues(t *testing.T) {
 		assert.Equal(t, "socket mode max workers must be between 10 and 1000", err.Error())
 	})
 
-	// SocketModeDrainTimeout boundaries
+	// SocketModeDrainTimeoutMs boundaries
 	t.Run("socket mode drain timeout at lower bound", func(t *testing.T) {
 		t.Parallel()
 		cfg := validManagerConfig()
-		cfg.SocketModeDrainTimeout = config.MinDrainTimeout
+		cfg.SocketModeDrainTimeoutMs = config.MinDrainTimeoutMs
 		assert.NoError(t, cfg.Validate())
 	})
 
 	t.Run("socket mode drain timeout at upper bound", func(t *testing.T) {
 		t.Parallel()
 		cfg := validManagerConfig()
-		cfg.SocketModeDrainTimeout = config.MaxDrainTimeout
+		cfg.SocketModeDrainTimeoutMs = config.MaxDrainTimeoutMs
 		assert.NoError(t, cfg.Validate())
 	})
 
 	t.Run("socket mode drain timeout exceeds maximum", func(t *testing.T) {
 		t.Parallel()
 		cfg := validManagerConfig()
-		cfg.SocketModeDrainTimeout = config.MaxDrainTimeout + 1
+		cfg.SocketModeDrainTimeoutMs = config.MaxDrainTimeoutMs + 1
 		err := cfg.Validate()
 		require.Error(t, err)
-		assert.Equal(t, "socket mode drain timeout must be between 2s and 5m0s", err.Error())
+		assert.Equal(t, "socket mode drain timeout must be between 2000 ms and 300000 ms", err.Error())
 	})
 }
 
