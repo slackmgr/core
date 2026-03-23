@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-03-23
+
+### Added
+- `manager.Hooks` struct with `OnStartup` and `OnShutdown` callbacks; register via `Manager.WithHooks` for Kubernetes startup and liveness probe support
+- `restapi.ServerHooks` struct with `OnStartup`, `OnReady`, `OnNotReady`, and `OnShutdown` callbacks; register via `Server.WithHooks` for Kubernetes startup, readiness, and liveness probe support
+- `APIConfig.ShutdownTimeoutMs` — configurable HTTP server graceful shutdown timeout (default 3000 ms, range 500–30,000 ms); registered in `SetAPIConfigDefaults` for Viper users
+
+### Changed
+- HTTP server now uses `srv.Shutdown` instead of `srv.Close` on context cancellation, allowing in-flight requests to complete within the configured `ShutdownTimeoutMs` deadline
+- `Server.Run` now uses `net.ListenConfig.Listen` instead of `net.Listen` so port binding respects context cancellation
+- Raw alert consumer loop replaced with a `select` on both `queueCh` and `ctx.Done()`, ensuring the goroutine exits on context cancellation regardless of whether the consumer closes the channel
+
 ## [0.8.0] - 2026-03-23
 
 ### Added
@@ -236,7 +248,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/slackmgr/core/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/slackmgr/core/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/slackmgr/core/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/slackmgr/core/compare/v0.6.0...v0.7.0
