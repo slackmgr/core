@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-03-23
+
+### Added
+- `DefaultsSetter` interface and `SetManagerConfigDefaults` / `SetAPIConfigDefaults` functions; call before `viper.Unmarshal` to register all non-zero config defaults so fields absent from the config file retain their defaults. The interface is satisfied by `*viper.Viper` via duck typing — no Viper import required in this module
+- `config.DefaultLocation` constant (`"UTC"`)
+- `GetLocation() *time.Location` method on `ManagerConfig`; result is cached after `Validate()` to avoid repeated filesystem I/O for timezone data
+- `mapstructure` struct tags on all exported fields in `APIConfig`, `RateLimitConfig`, `ManagerConfig`, `SlackClientConfig`, `APISettings`, `RoutingRule`, `ManagerSettings`, and all nested settings types; required for correct `viper.Unmarshal` behaviour
+
+### Changed
+- **Breaking**: `ManagerConfig.Location` field type changed from `*time.Location` to `string` (IANA timezone name, e.g. `"UTC"`, `"America/New_York"`); use `GetLocation()` to obtain the parsed `*time.Location`
+- **Breaking**: `CoordinatorDrainTimeout time.Duration`, `ChannelManagerDrainTimeout time.Duration`, and `SocketModeDrainTimeout time.Duration` replaced by `CoordinatorDrainTimeoutMs int`, `ChannelManagerDrainTimeoutMs int`, and `SocketModeDrainTimeoutMs int`; values are milliseconds, eliminating the YAML quoted-string requirement
+- **Breaking**: Constants renamed: `MinDrainTimeout` → `MinDrainTimeoutMs`, `MaxDrainTimeout` → `MaxDrainTimeoutMs`, `DefaultCoordinatorDrainTimeout` → `DefaultCoordinatorDrainTimeoutMs`, `DefaultChannelManagerDrainTimeout` → `DefaultChannelManagerDrainTimeoutMs`, `DefaultSocketModeDrainTimeout` → `DefaultSocketModeDrainTimeoutMs`
+- README rewritten with Features section and deployment guidance
+
 ## [0.7.1] - 2026-02-26
 
 ### Changed
@@ -222,7 +236,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/slackmgr/core/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/slackmgr/core/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/slackmgr/core/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/slackmgr/core/compare/v0.5.1...v0.6.0
