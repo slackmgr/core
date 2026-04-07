@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
-	"unicode/utf8"
 	"time"
+	"unicode/utf8"
 
 	"github.com/eko/gocache/lib/v4/store"
 	slack "github.com/slack-go/slack"
