@@ -29,7 +29,7 @@ func TestFindCutPoint(t *testing.T) {
 		s := base(2600) + "\n\n" + base(200)
 		cut := findCutPoint(s)
 		assert.Equal(t, 2602, cut) // after the two newline bytes
-		assert.True(t, utf8.Valid([]byte(s[:cut])))
+		assert.True(t, utf8.ValidString(s[:cut]))
 	})
 
 	t.Run("single newline in window, no double newline", func(t *testing.T) {
@@ -70,6 +70,6 @@ func TestFindCutPoint(t *testing.T) {
 		cut := findCutPoint(s)
 		// Cut must be at a valid UTF-8 boundary, so it should walk back to 2699.
 		assert.Equal(t, 2699, cut)
-		assert.True(t, utf8.Valid([]byte(s[:cut])))
+		assert.True(t, utf8.ValidString(s[:cut]))
 	})
 }
