@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"unicode/utf8"
 	"time"
 
 	"github.com/eko/gocache/lib/v4/store"
@@ -801,8 +802,9 @@ func getTextBlocks(alertText, statusEmoji string, method postUpdateMethod) []sla
 			break
 		}
 
-		part := alertText[0:2700]
-		alertText = alertText[2700:]
+		cutAt := findCutPoint(alertText)
+		part := strings.TrimSpace(alertText[:cutAt])
+		alertText = strings.TrimSpace(alertText[cutAt:])
 
 		if endsWithCodeBlock {
 			part += "```"
@@ -822,6 +824,35 @@ func getTextBlocks(alertText, statusEmoji string, method postUpdateMethod) []sla
 	}
 
 	return blocks
+}
+
+// findCutPoint returns the byte index at which to split s (assumed len(s) > 2700).
+// It searches s[2500:2700] for a natural break in priority order:
+// double newline → single newline → space.
+// If none found, falls back to 2700, adjusted to a valid UTF-8 rune boundary.
+func findCutPoint(s string) int {
+	const (
+		searchStart = 2500
+		cutTarget   = 2700
+	)
+	sub := s[searchStart:cutTarget]
+
+	if idx := strings.LastIndex(sub, "\n\n"); idx >= 0 {
+		return searchStart + idx + 2
+	}
+	if idx := strings.LastIndex(sub, "\n"); idx >= 0 {
+		return searchStart + idx + 1
+	}
+	if idx := strings.LastIndex(sub, " "); idx >= 0 {
+		return searchStart + idx + 1
+	}
+
+	// No natural break found — fall back to cutTarget, walking back to a valid UTF-8 boundary.
+	cut := cutTarget
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return cut
 }
 
 func (c *Client) throttleIssue(issue *models.Issue, action models.SlackAction, issuesInChannel int) bool {
