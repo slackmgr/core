@@ -363,10 +363,6 @@ func (c *Client) DeletePost(ctx context.Context, channelID, ts string) error {
 }
 
 func (c *Client) IsAlertChannel(ctx context.Context, channelID string) (bool, string, error) {
-	if c.managerSettings.GetSettings().IsInfoChannel(channelID) {
-		return false, "channel is defined as 'info channel' (no alerts allowed)", nil
-	}
-
 	botIsInChannel, err := c.api.BotIsInChannel(ctx, channelID)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to check if Slack App integration is in channel: %w", err)

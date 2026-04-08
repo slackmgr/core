@@ -229,10 +229,9 @@ const (
 //
 // # Structure
 //
-// Settings are organized into three levels:
+// Settings are organized into two levels:
 //   - Global settings: Apply to all channels unless overridden
 //   - AlertChannels: Per-channel overrides for processing behavior and admin permissions
-//   - InfoChannels: Channels designated for system information (cannot receive alerts)
 //
 // # Defaults
 //
@@ -353,19 +352,11 @@ type ManagerSettings struct {
 
 	// AlertChannels contains per-channel configuration overrides. Use this to customize
 	// admin permissions, reordering behavior, and processing intervals for specific channels.
-	// Channels not listed here use the global settings. Channel IDs must be unique and
-	// cannot overlap with InfoChannels.
+	// Channels not listed here use the global settings. Channel IDs must be unique.
 	AlertChannels []*AlertChannelSettings `json:"alertChannels" mapstructure:"alertChannels" yaml:"alertChannels"`
-
-	// InfoChannels defines channels designated for system information display. These
-	// channels cannot receive alerts - the API returns an error if an alert targets an
-	// info channel. Use for dashboards, status pages, or documentation channels.
-	// Channel IDs must be unique and cannot overlap with AlertChannels.
-	InfoChannels []*InfoChannelSettings `json:"infoChannels" mapstructure:"infoChannels" yaml:"infoChannels"`
 
 	globalAdmins       map[string]struct{}
 	alertChannels      map[string]*AlertChannelSettings
-	infoChannels       map[string]*InfoChannelSettings
 	issueReactionMap   map[string]IssueReaction
 	issueReactionMutex sync.RWMutex
 	initialized        bool
@@ -492,8 +483,7 @@ type IssueStatusSettings struct {
 // also global admins or admins of those specific channels.
 type AlertChannelSettings struct {
 	// ID is the Slack channel ID (e.g., "C1234567890"). This must be the channel's
-	// internal ID, not its display name. Required and must be unique across all
-	// AlertChannels and InfoChannels.
+	// internal ID, not its display name. Required and must be unique across all AlertChannels.
 	ID string `json:"id" mapstructure:"id" yaml:"id"`
 
 	// AdminUsers lists Slack user IDs (e.g., "U1234567890") with admin permissions
@@ -525,42 +515,6 @@ type AlertChannelSettings struct {
 
 	adminUsers  map[string]struct{}
 	adminGroups map[string]struct{}
-}
-
-// InfoChannelSettings configures a channel designated for system information display.
-//
-// Info channels cannot receive alerts - the API returns an error if an alert targets
-// an info channel. Use info channels for:
-//   - System status dashboards
-//   - Documentation or help content
-//   - Operational announcements
-//
-// The Manager can post templated content to info channels based on the configured
-// template path, which is rendered using the Go template engine with access to
-// system status information.
-type InfoChannelSettings struct {
-	// ID is the Slack channel ID (e.g., "C1234567890"). Required and must be unique
-	// across all AlertChannels and InfoChannels.
-	ID string `json:"id" mapstructure:"id" yaml:"id"`
-
-	// TemplatePath is the file path to a Go template file used to render content
-	// for this info channel. Either TemplatePath or TemplateContent must be set.
-	// TemplateContent takes precedence if both are provided.
-	TemplatePath string `json:"templatePath" mapstructure:"templatePath" yaml:"templatePath"`
-
-	// TemplateContent is the Go template used to render content for this info
-	// channel. Takes precedence over TemplatePath when both are set. Prefer
-	// this over TemplatePath when running in environments where mounting files
-	// is inconvenient (e.g. Kubernetes — embed the template in the settings
-	// ConfigMap instead of mounting a separate volume).
-	//
-	// Accepts either a plain template string or a standard base64-encoded
-	// (RFC 4648, with padding) template string. Base64 is detected automatically
-	// and decoded before rendering, which is convenient when the template
-	// contains characters that are awkward to embed in YAML (e.g. braces,
-	// quotes). Plain templates and base64 templates are both supported and
-	// can be used interchangeably.
-	TemplateContent string `json:"templateContent" mapstructure:"templateContent" yaml:"templateContent"`
 }
 
 // Clone creates a deep copy of the ManagerSettings by marshaling to JSON and back.
@@ -606,7 +560,6 @@ func (s *ManagerSettings) InitAndValidate() error {
 
 	s.globalAdmins = make(map[string]struct{})
 	s.alertChannels = make(map[string]*AlertChannelSettings)
-	s.infoChannels = make(map[string]*InfoChannelSettings)
 	s.issueReactionMap = make(map[string]IssueReaction)
 
 	if s.AppFriendlyName == "" {
@@ -781,30 +734,6 @@ func (s *ManagerSettings) InitAndValidate() error {
 		s.alertChannels[a.ID] = a
 	}
 
-	for i, a := range s.InfoChannels {
-		a.ID = strings.TrimSpace(a.ID)
-		a.TemplatePath = strings.TrimSpace(a.TemplatePath)
-		a.TemplateContent = strings.TrimSpace(a.TemplateContent)
-
-		if a.ID == "" {
-			return fmt.Errorf("infoChannels[%d].id cannot be empty", i)
-		}
-
-		if _, exists := s.infoChannels[a.ID]; exists {
-			return fmt.Errorf("infoChannels[%d].id %q is a duplicate", i, a.ID)
-		}
-
-		if _, exists := s.alertChannels[a.ID]; exists {
-			return fmt.Errorf("infoChannels[%d].id %q is already configured as an alert channel", i, a.ID)
-		}
-
-		if a.TemplatePath == "" && a.TemplateContent == "" {
-			return fmt.Errorf("infoChannels[%d]: templatePath or templateContent must be set", i)
-		}
-
-		s.infoChannels[a.ID] = a
-	}
-
 	s.initialized = true
 
 	return nil
@@ -863,34 +792,6 @@ func (s *ManagerSettings) UserIsChannelAdmin(ctx context.Context, channelID, use
 	}
 
 	return false
-}
-
-// IsInfoChannel reports whether the channel is configured as an info channel.
-// Info channels cannot receive alerts - they are designated for system information
-// display only. The API returns an error if an alert targets an info channel.
-//
-// Returns false if the settings have not been initialized or if the channel is not
-// configured as an info channel.
-func (s *ManagerSettings) IsInfoChannel(channelID string) bool {
-	if !s.initialized {
-		return false
-	}
-
-	_, ok := s.infoChannels[channelID]
-	return ok
-}
-
-// GetInfoChannelConfig returns the InfoChannelSettings for the given channel ID.
-// The second return value indicates whether the channel was found in the info channel
-// configuration. Returns (nil, false) if the settings have not been initialized or
-// if the channel is not configured as an info channel.
-func (s *ManagerSettings) GetInfoChannelConfig(channelID string) (*InfoChannelSettings, bool) {
-	if !s.initialized {
-		return nil, false
-	}
-
-	c, ok := s.infoChannels[channelID]
-	return c, ok
 }
 
 // OrderIssuesBySeverity reports whether automatic severity-based issue ordering should

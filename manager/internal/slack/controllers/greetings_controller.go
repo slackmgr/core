@@ -30,9 +30,11 @@ func (c *greetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 		return
 	}
 
+	logger := c.logger.WithField("channel_id", joinedEvent.Channel)
+
 	userInfo, err := c.apiClient.GetUserInfo(ctx, joinedEvent.User)
 	if err != nil {
-		c.logger.WithField("channel_id", joinedEvent.Channel).WithField("user_id", joinedEvent.User).Errorf("Failed to read Slack user info: %s", err)
+		logger.WithField("channel_id", joinedEvent.Channel).WithField("user_id", joinedEvent.User).Errorf("Failed to read Slack user info: %s", err)
 		return
 	}
 
@@ -40,59 +42,42 @@ func (c *greetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 		return
 	}
 
+	logger = logger.WithField("user_name", userInfo.RealName).WithField("user_id", userInfo.ID)
+
 	isAlertChannel, _, err := c.apiClient.IsAlertChannel(ctx, joinedEvent.Channel)
 	if err != nil {
-		c.logger.Errorf("Failed to verify if channel %s is a valid alert channel: %s", joinedEvent.Channel, err)
+		logger.Errorf("Failed to verify if channel %s is a valid alert channel: %s", joinedEvent.Channel, err)
 		return
 	}
 
-	logger := c.logger.WithField("channel_id", joinedEvent.Channel).WithField("user_name", userInfo.RealName).WithField("user_id", userInfo.ID)
-
-	if isAlertChannel {
-		logger.Info("User joined managed channel")
-	} else {
-		logger.Info("User joined un-managed channel")
+	if !isAlertChannel {
+		logger.Debug("User joined un-managed channel")
+		return
 	}
 
-	infoChannelConfig, isInfoChannel := c.managerSettings.GetSettings().GetInfoChannelConfig(joinedEvent.Channel)
+	logger.Info("User joined managed alert channel")
 
-	if isInfoChannel {
-		blocks, err := views.InfoChannelView(infoChannelConfig.TemplateContent, infoChannelConfig.TemplatePath, userInfo.RealName)
-		if err != nil {
-			logger.Errorf("Failed to generate view: %s", err)
-			return
-		}
+	userIsChannelAdmin := c.managerSettings.GetSettings().UserIsChannelAdmin(ctx, joinedEvent.Channel, userInfo.ID, c.apiClient.UserIsInGroup)
 
-		_, err = c.apiClient.PostEphemeral(ctx, joinedEvent.Channel, joinedEvent.User, slackapi.MsgOptionBlocks(blocks...))
-		if err != nil {
-			logger.Errorf("Failed to post greeting message: %s", err)
-			return
-		}
-
-		logger.WithField("reason", "Greeting message in info channel").Info("Post ephemeral message")
-	} else if isAlertChannel {
-		userIsChannelAdmin := c.managerSettings.GetSettings().UserIsChannelAdmin(ctx, joinedEvent.Channel, userInfo.ID, c.apiClient.UserIsInGroup)
-
-		blocks, err := views.GreetingView(userInfo.RealName, userIsChannelAdmin, c.managerSettings.GetSettings())
-		if err != nil {
-			logger.Errorf("Failed to generate view: %s", err)
-			return
-		}
-
-		attachments := slackapi.MsgOptionAttachments(slackapi.Attachment{
-			Blocks: slackapi.Blocks{
-				BlockSet: blocks,
-			},
-		})
-
-		_, err = c.apiClient.PostEphemeral(ctx, joinedEvent.Channel, joinedEvent.User, attachments)
-		if err != nil {
-			logger.Errorf("Failed to post greeting message: %s", err)
-			return
-		}
-
-		logger.WithField("reason", "Greeting message in managed channel").Info("Post ephemeral message")
+	blocks, err := views.GreetingView(userInfo.RealName, userIsChannelAdmin, c.managerSettings.GetSettings())
+	if err != nil {
+		logger.Errorf("Failed to generate view: %s", err)
+		return
 	}
+
+	attachments := slackapi.MsgOptionAttachments(slackapi.Attachment{
+		Blocks: slackapi.Blocks{
+			BlockSet: blocks,
+		},
+	})
+
+	_, err = c.apiClient.PostEphemeral(ctx, joinedEvent.Channel, joinedEvent.User, attachments)
+	if err != nil {
+		logger.Errorf("Failed to post greeting message: %s", err)
+		return
+	}
+
+	logger.WithField("reason", "Greeting message in managed channel").Info("Post ephemeral message")
 }
 
 func (c *greetingsController) memberLeftChannel(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {

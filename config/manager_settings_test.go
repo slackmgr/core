@@ -403,71 +403,6 @@ func TestManagerSettings_InitAndValidate_AlertChannels(t *testing.T) {
 	}
 }
 
-func TestManagerSettings_InitAndValidate_InfoChannels(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name        string
-		channels    []*config.InfoChannelSettings
-		expectError string
-	}{
-		{
-			name: "valid channel with templatePath",
-			channels: []*config.InfoChannelSettings{
-				{ID: "C123456789", TemplatePath: "/path/to/template"},
-			},
-			expectError: "",
-		},
-		{
-			name: "valid channel with templateContent",
-			channels: []*config.InfoChannelSettings{
-				{ID: "C123456789", TemplateContent: `{"blocks":[]}`},
-			},
-			expectError: "",
-		},
-		{
-			name: "valid channel with both templatePath and templateContent",
-			channels: []*config.InfoChannelSettings{
-				{ID: "C123456789", TemplatePath: "/path/to/template", TemplateContent: `{"blocks":[]}`},
-			},
-			expectError: "",
-		},
-		{
-			name: "empty channel ID",
-			channels: []*config.InfoChannelSettings{
-				{ID: "", TemplatePath: "/path/to/template"},
-			},
-			expectError: "infoChannels[0].id cannot be empty",
-		},
-		{
-			name: "neither templatePath nor templateContent set",
-			channels: []*config.InfoChannelSettings{
-				{ID: "C123456789"},
-			},
-			expectError: "infoChannels[0]: templatePath or templateContent must be set",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			settings := &config.ManagerSettings{
-				InfoChannels: tt.channels,
-			}
-
-			err := settings.InitAndValidate()
-
-			if tt.expectError == "" {
-				assert.NoError(t, err)
-			} else {
-				require.Error(t, err)
-				assert.Equal(t, tt.expectError, err.Error())
-			}
-		})
-	}
-}
-
 func TestManagerSettings_UserIsGlobalAdmin(t *testing.T) {
 	t.Parallel()
 
@@ -561,45 +496,6 @@ func TestManagerSettings_UserIsChannelAdmin(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
-}
-
-func TestManagerSettings_IsInfoChannel(t *testing.T) {
-	t.Parallel()
-
-	settings := &config.ManagerSettings{
-		InfoChannels: []*config.InfoChannelSettings{
-			{ID: "CINFO1", TemplatePath: "/path1"},
-			{ID: "CINFO2", TemplatePath: "/path2"},
-		},
-	}
-	err := settings.InitAndValidate()
-	require.NoError(t, err)
-
-	assert.True(t, settings.IsInfoChannel("CINFO1"))
-	assert.True(t, settings.IsInfoChannel("CINFO2"))
-	assert.False(t, settings.IsInfoChannel("COTHER"))
-	assert.False(t, settings.IsInfoChannel(""))
-}
-
-func TestManagerSettings_GetInfoChannelConfig(t *testing.T) {
-	t.Parallel()
-
-	settings := &config.ManagerSettings{
-		InfoChannels: []*config.InfoChannelSettings{
-			{ID: "CINFO1", TemplatePath: "/path1"},
-		},
-	}
-	err := settings.InitAndValidate()
-	require.NoError(t, err)
-
-	cfg, found := settings.GetInfoChannelConfig("CINFO1")
-	assert.True(t, found)
-	require.NotNil(t, cfg)
-	assert.Equal(t, "/path1", cfg.TemplatePath)
-
-	cfg, found = settings.GetInfoChannelConfig("CUNKNOWN")
-	assert.False(t, found)
-	assert.Nil(t, cfg)
 }
 
 func TestManagerSettings_OrderIssuesBySeverity(t *testing.T) {
@@ -741,40 +637,6 @@ func TestManagerSettings_InitAndValidate_DuplicateAlertChannelIDs(t *testing.T) 
 
 	require.Error(t, err)
 	assert.Equal(t, `alertChannels[1].id "C123456789" is a duplicate`, err.Error())
-}
-
-func TestManagerSettings_InitAndValidate_DuplicateInfoChannelIDs(t *testing.T) {
-	t.Parallel()
-
-	settings := &config.ManagerSettings{
-		InfoChannels: []*config.InfoChannelSettings{
-			{ID: "C123456789", TemplatePath: "/path1"},
-			{ID: "C123456789", TemplatePath: "/path2"},
-		},
-	}
-
-	err := settings.InitAndValidate()
-
-	require.Error(t, err)
-	assert.Equal(t, `infoChannels[1].id "C123456789" is a duplicate`, err.Error())
-}
-
-func TestManagerSettings_InitAndValidate_OverlappingAlertAndInfoChannelIDs(t *testing.T) {
-	t.Parallel()
-
-	settings := &config.ManagerSettings{
-		AlertChannels: []*config.AlertChannelSettings{
-			{ID: "C123456789"},
-		},
-		InfoChannels: []*config.InfoChannelSettings{
-			{ID: "C123456789", TemplatePath: "/path"},
-		},
-	}
-
-	err := settings.InitAndValidate()
-
-	require.Error(t, err)
-	assert.Equal(t, `infoChannels[0].id "C123456789" is already configured as an alert channel`, err.Error())
 }
 
 func TestManagerSettings_InitAndValidate_ThrottleSettings(t *testing.T) {
@@ -919,13 +781,8 @@ func TestManagerSettings_MethodsBeforeInitialization(t *testing.T) {
 	// These should return false/nil instead of panicking
 	assert.False(t, settings.UserIsGlobalAdmin("U123"))
 	assert.False(t, settings.UserIsChannelAdmin(context.Background(), "C123", "U123", nil))
-	assert.False(t, settings.IsInfoChannel("C123"))
 	assert.False(t, settings.OrderIssuesBySeverity("C123", 5))
 	assert.Equal(t, config.IssueReaction(""), settings.MapSlackPostReaction("firecracker"))
-
-	cfg, found := settings.GetInfoChannelConfig("C123")
-	assert.Nil(t, cfg)
-	assert.False(t, found)
 
 	// IssueProcessingInterval returns a default value
 	assert.Equal(t, time.Duration(config.DefaultIssueProcessingIntervalSeconds)*time.Second, settings.IssueProcessingInterval("C123"))
@@ -963,12 +820,6 @@ func TestManagerSettings_Clone(t *testing.T) {
 					IssueReorderingLimit: 50,
 				},
 			},
-			InfoChannels: []*config.InfoChannelSettings{
-				{
-					ID:           "C002",
-					TemplatePath: "/path/to/template",
-				},
-			},
 		}
 
 		clone, err := original.Clone()
@@ -994,9 +845,6 @@ func TestManagerSettings_Clone(t *testing.T) {
 		// Verify slices are independent copies
 		require.Len(t, clone.AlertChannels, 1)
 		assert.Equal(t, original.AlertChannels[0].ID, clone.AlertChannels[0].ID)
-
-		require.Len(t, clone.InfoChannels, 1)
-		assert.Equal(t, original.InfoChannels[0].ID, clone.InfoChannels[0].ID)
 	})
 
 	t.Run("modifications to original do not affect clone", func(t *testing.T) {
