@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-04-08
+
+### Changed
+- Socket mode handler extracted into dedicated `socket_mode_handler.go` and `socket_mode_client.go`; `SocketModeHandlerFunc` signature simplified to `func(context.Context, *socketmode.Event)` with the `SocketModeClient` stored on each controller struct instead of passed per-call
+- `SocketModeClient` interface gains `AckWithPayload` and `AckWithFieldErrorMsg` as first-class methods (previously package-level helpers)
+- `views.IssueDetailsAssets` and internal `formatTimestamp` now use the package-level `config.Location()` instead of accepting a `*config.ManagerConfig` parameter
+- `config.Location()` global is now race-safe via `atomic.Pointer`
+
+### Removed
+- Info channel concept removed
+
 ## [0.9.3] - 2026-04-07
 
 ### Fixed
@@ -265,6 +276,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 See git history for changes in v0.0.62 and earlier versions.
 
 [Unreleased]: https://github.com/slackmgr/core/compare/v0.9.2...HEAD
+[0.10.0]: https://github.com/slackmgr/core/compare/v0.9.3...v0.10.0
 [0.9.3]: https://github.com/slackmgr/core/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/slackmgr/core/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/slackmgr/core/compare/v0.9.0...v0.9.1
