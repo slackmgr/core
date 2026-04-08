@@ -169,7 +169,7 @@ func (c *SlackAPIClient) API() *slack.Client {
 
 func (c *SlackAPIClient) NewSocketModeClient() *SocketModeClientWrapper {
 	s := socketmode.New(c.api, socketmode.OptionDebug(c.cfg.DebugLogging), socketmode.OptionLog(&slackApilogger{logger: c.logger}))
-	return NewSocketModeClientWrapper(s)
+	return NewSocketModeClientWrapper(s, c.logger)
 }
 
 func (c *SlackAPIClient) BotUserID() string {

@@ -177,7 +177,7 @@ func TestSocketModeHandler_dispatchHandler_ConcurrencyLimit(t *testing.T) {
 	var maxActive atomic.Int32
 	var wg sync.WaitGroup
 
-	handlerFunc := func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+	handlerFunc := func(ctx context.Context, evt *socketmode.Event) {
 		current := activeCount.Add(1)
 		// Track maximum concurrent handlers
 		for {
@@ -228,7 +228,7 @@ func TestSocketModeHandler_dispatchHandler_PanicRecovery(t *testing.T) {
 
 	var completed atomic.Bool
 
-	panicHandler := func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+	panicHandler := func(ctx context.Context, evt *socketmode.Event) {
 		defer func() { completed.Store(true) }()
 		panic("test panic")
 	}
@@ -265,7 +265,7 @@ func TestSocketModeHandler_dispatchHandler_ContextCancelled(t *testing.T) {
 	)
 
 	var called atomic.Bool
-	handlerFunc := func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+	handlerFunc := func(ctx context.Context, evt *socketmode.Event) {
 		called.Store(true)
 	}
 
@@ -307,7 +307,7 @@ func TestSocketModeHandler_dispatcher_EventTypeInteractive(t *testing.T) {
 
 	var handlerCalled atomic.Bool
 	handler.interactionEventMap[slack.InteractionTypeShortcut] = []SocketModeHandlerFunc{
-		func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+		func(ctx context.Context, evt *socketmode.Event) {
 			handlerCalled.Store(true)
 		},
 	}
@@ -345,7 +345,7 @@ func TestSocketModeHandler_dispatcher_EventTypeEventsAPI(t *testing.T) {
 
 	var handlerCalled atomic.Bool
 	handler.eventAPIMap["test_event"] = []SocketModeHandlerFunc{
-		func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+		func(ctx context.Context, evt *socketmode.Event) {
 			handlerCalled.Store(true)
 		},
 	}
@@ -385,7 +385,7 @@ func TestSocketModeHandler_dispatcher_EventTypeSlashCommand(t *testing.T) {
 
 	var handlerCalled atomic.Bool
 	handler.slashCommandMap["/test"] = []SocketModeHandlerFunc{
-		func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+		func(ctx context.Context, evt *socketmode.Event) {
 			handlerCalled.Store(true)
 		},
 	}
@@ -423,7 +423,7 @@ func TestSocketModeHandler_dispatcher_DefaultHandler(t *testing.T) {
 	)
 
 	var defaultCalled atomic.Bool
-	handler.defaultHandlerFunc = func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+	handler.defaultHandlerFunc = func(ctx context.Context, evt *socketmode.Event) {
 		defaultCalled.Store(true)
 	}
 
@@ -458,7 +458,7 @@ func TestSocketModeHandler_socketmodeDispatcher_HandlerRegistered(t *testing.T) 
 
 	var handlerCalled atomic.Bool
 	handler.eventMap[socketmode.EventTypeHello] = []SocketModeHandlerFunc{
-		func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+		func(ctx context.Context, evt *socketmode.Event) {
 			handlerCalled.Store(true)
 		},
 	}
@@ -554,7 +554,7 @@ func TestSocketModeHandler_interactionDispatcher_BlockActions(t *testing.T) {
 
 	var handlerCalled atomic.Bool
 	handler.interactionBlockActionEventMap["test_action"] = []SocketModeHandlerFunc{
-		func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+		func(ctx context.Context, evt *socketmode.Event) {
 			handlerCalled.Store(true)
 		},
 	}
@@ -659,7 +659,7 @@ func TestSocketModeHandler_handle(t *testing.T) {
 	// Clear existing handlers
 	handler.eventMap = make(map[socketmode.EventType][]SocketModeHandlerFunc)
 
-	testHandler := func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {}
+	testHandler := func(ctx context.Context, evt *socketmode.Event) {}
 
 	handler.handle(socketmode.EventTypeHello, testHandler)
 
@@ -692,7 +692,7 @@ func TestSocketModeHandler_handleMultiple(t *testing.T) {
 	// Clear existing handlers
 	handler.eventMap = make(map[socketmode.EventType][]SocketModeHandlerFunc)
 
-	testHandler := func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {}
+	testHandler := func(ctx context.Context, evt *socketmode.Event) {}
 
 	events := []socketmode.EventType{
 		socketmode.EventTypeHello,
@@ -728,7 +728,7 @@ func TestSocketModeHandler_handleInteraction(t *testing.T) {
 	// Clear existing handlers
 	handler.interactionEventMap = make(map[slack.InteractionType][]SocketModeHandlerFunc)
 
-	testHandler := func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {}
+	testHandler := func(ctx context.Context, evt *socketmode.Event) {}
 
 	handler.handleInteraction(slack.InteractionTypeShortcut, testHandler)
 
@@ -756,7 +756,7 @@ func TestSocketModeHandler_handleEventsAPI(t *testing.T) {
 	// Clear existing handlers
 	handler.eventAPIMap = make(map[string][]SocketModeHandlerFunc)
 
-	testHandler := func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {}
+	testHandler := func(ctx context.Context, evt *socketmode.Event) {}
 
 	handler.handleEventsAPI("test_event", testHandler)
 
@@ -782,7 +782,7 @@ func TestSocketModeHandler_handleDefault(t *testing.T) {
 	)
 
 	var called bool
-	testHandler := func(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+	testHandler := func(ctx context.Context, evt *socketmode.Event) {
 		called = true
 	}
 
@@ -791,7 +791,7 @@ func TestSocketModeHandler_handleDefault(t *testing.T) {
 	assert.NotNil(t, handler.defaultHandlerFunc)
 
 	// Call it to verify it's the right handler
-	handler.defaultHandlerFunc(context.Background(), &socketmode.Event{}, nil)
+	handler.defaultHandlerFunc(context.Background(), &socketmode.Event{})
 	assert.True(t, called)
 }
 
@@ -868,94 +868,6 @@ func TestSocketModeHandler_drainHandlers_Success(t *testing.T) {
 }
 
 // --- Tests for utils.go ---
-
-func TestAck_WithRequest(t *testing.T) {
-	t.Parallel()
-
-	client := newMockSocketModeClient()
-	req := socketmode.Request{EnvelopeID: "test-envelope-id"}
-	evt := &socketmode.Event{
-		Request: &req,
-	}
-
-	client.On("Ack", req, []any(nil)).Once()
-
-	ack(evt, client)
-
-	client.AssertExpectations(t)
-}
-
-func TestAck_NilRequest(t *testing.T) {
-	t.Parallel()
-
-	client := newMockSocketModeClient()
-	evt := &socketmode.Event{
-		Request: nil,
-	}
-
-	// Ack should not be called when Request is nil
-	ack(evt, client)
-
-	client.AssertNotCalled(t, "Ack", mock.Anything, mock.Anything)
-}
-
-func TestAckWithPayload_WithRequest(t *testing.T) {
-	t.Parallel()
-
-	client := newMockSocketModeClient()
-	req := socketmode.Request{EnvelopeID: "test-envelope-id"}
-	evt := &socketmode.Event{
-		Request: &req,
-	}
-	payload := map[string]string{"key": "value"}
-
-	client.On("Ack", req, []any{payload}).Once()
-
-	ackWithPayload(evt, client, payload)
-
-	client.AssertExpectations(t)
-}
-
-func TestAckWithPayload_NilRequest(t *testing.T) {
-	t.Parallel()
-
-	client := newMockSocketModeClient()
-	evt := &socketmode.Event{
-		Request: nil,
-	}
-	payload := map[string]string{"key": "value"}
-
-	// Ack should not be called when Request is nil
-	ackWithPayload(evt, client, payload)
-
-	client.AssertNotCalled(t, "Ack", mock.Anything, mock.Anything)
-}
-
-func TestAckWithFieldErrorMsg(t *testing.T) {
-	t.Parallel()
-
-	client := newMockSocketModeClient()
-	req := socketmode.Request{EnvelopeID: "test-envelope-id"}
-	evt := &socketmode.Event{
-		Request: &req,
-	}
-
-	// Capture the payload to verify it's a ViewSubmissionResponse with errors
-	client.On("Ack", req, mock.MatchedBy(func(payload []any) bool {
-		if len(payload) != 1 {
-			return false
-		}
-		resp, ok := payload[0].(*slack.ViewSubmissionResponse)
-		if !ok {
-			return false
-		}
-		return resp.ResponseAction == slack.RAErrors && resp.Errors["field_name"] == "error message"
-	})).Once()
-
-	ackWithFieldErrorMsg(evt, client, "field_name", "error message")
-
-	client.AssertExpectations(t)
-}
 
 func TestSendCommand_Success(t *testing.T) {
 	t.Parallel()

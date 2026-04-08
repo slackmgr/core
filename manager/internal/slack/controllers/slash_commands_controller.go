@@ -8,11 +8,12 @@ import (
 )
 
 type slashCommandsController struct {
+	clt    SocketModeClient
 	logger types.Logger
 }
 
-func (c *slashCommandsController) handleEventTypeSlashCommands(_ context.Context, evt *socketmode.Event, clt SocketModeClient) {
-	ack(evt, clt)
+func (c *slashCommandsController) handleEventTypeSlashCommands(ctx context.Context, evt *socketmode.Event) {
+	c.clt.Ack(ctx, evt.Request)
 
 	c.logger.WithField("operation", "slack").WithField("event", evt.Type).WithField("envelope_id", evt.Request.EnvelopeID).Debugf("Slash commands event")
 }

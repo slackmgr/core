@@ -18,13 +18,6 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-// SocketModeClient defines the interface for the SocketMode client used by the handlers.
-type SocketModeClient interface {
-	Ack(req socketmode.Request, payload ...any)
-	RunContext(ctx context.Context) error
-	Events() chan socketmode.Event
-}
-
 // SocketModeHandler handles Slack Socket Mode events and interactions.
 type SocketModeHandler struct {
 	apiClient        SlackAPIClient
@@ -55,7 +48,7 @@ type SocketModeHandler struct {
 }
 
 // SocketModeHandlerFunc defines a function to handle socketmode events.
-type SocketModeHandlerFunc func(context.Context, *socketmode.Event, SocketModeClient)
+type SocketModeHandlerFunc func(context.Context, *socketmode.Event)
 
 // NewSocketModeHandler creates a new SocketModeHandler.
 func NewSocketModeHandler(apiClient SlackAPIClient, socketModeClient SocketModeClient, commandQueue FifoQueueProducer, issueFinder IssueFinder,
@@ -159,6 +152,7 @@ func (r *SocketModeHandler) drainHandlers() {
 
 func (r *SocketModeHandler) registerDefaultController() {
 	c := &defaultController{
+		clt:    r.socketModeClient,
 		logger: r.logger,
 	}
 
@@ -187,11 +181,11 @@ func (r *SocketModeHandler) registerInternalEventsController() {
 
 func (r *SocketModeHandler) registerInteractiveController() {
 	c := &interactiveController{
+		clt:             r.socketModeClient,
 		apiClient:       r.apiClient,
 		commandQueue:    r.commandQueue,
 		issueFinder:     r.issueFinder,
 		logger:          r.logger,
-		cfg:             r.cfg,
 		managerSettings: r.managerSettings,
 	}
 
@@ -213,6 +207,7 @@ func (r *SocketModeHandler) registerInteractiveController() {
 
 func (r *SocketModeHandler) registerSlashCommandsController() {
 	c := &slashCommandsController{
+		clt:    r.socketModeClient,
 		logger: r.logger,
 	}
 
@@ -224,6 +219,7 @@ func (r *SocketModeHandler) registerReactionsController() {
 	cache := internal.NewCache(r.cacheStore, cacheKeyPrefix, r.logger)
 
 	c := &reactionsController{
+		clt:             r.socketModeClient,
 		apiClient:       r.apiClient,
 		commandQueue:    r.commandQueue,
 		cache:           cache,
@@ -238,9 +234,9 @@ func (r *SocketModeHandler) registerReactionsController() {
 
 func (r *SocketModeHandler) registerGreetingsController() {
 	c := &greetingsController{
+		clt:             r.socketModeClient,
 		apiClient:       r.apiClient,
 		logger:          r.logger,
-		cfg:             r.cfg,
 		managerSettings: r.managerSettings,
 	}
 
@@ -250,6 +246,7 @@ func (r *SocketModeHandler) registerGreetingsController() {
 
 func (r *SocketModeHandler) registerEventsAPIController() {
 	c := &eventsAPIController{
+		clt:    r.socketModeClient,
 		logger: r.logger,
 	}
 
@@ -306,7 +303,7 @@ func (r *SocketModeHandler) dispatchHandler(ctx context.Context, evt *socketmode
 			}
 		}()
 
-		f(ctx, evt, r.socketModeClient)
+		f(ctx, evt)
 	})
 }
 

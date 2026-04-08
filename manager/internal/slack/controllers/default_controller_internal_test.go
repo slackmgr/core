@@ -19,9 +19,10 @@ func TestDefaultController_handle(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &defaultController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -30,7 +31,7 @@ func TestDefaultController_handle(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.handle(context.Background(), evt, client)
+		controller.handle(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -46,6 +47,7 @@ func TestDefaultController_handle(t *testing.T) {
 		// Ack should not be called when Request is nil
 
 		controller := &defaultController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -54,9 +56,9 @@ func TestDefaultController_handle(t *testing.T) {
 			Request: nil,
 		}
 
-		controller.handle(context.Background(), evt, client)
+		controller.handle(context.Background(), evt)
 
-		client.AssertNotCalled(t, "Ack", mock.Anything, mock.Anything)
+		client.AssertNotCalled(t, "Ack", mock.Anything)
 		logger.AssertExpectations(t)
 	})
 }

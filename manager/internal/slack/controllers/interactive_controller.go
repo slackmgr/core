@@ -9,7 +9,6 @@ import (
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
-	"github.com/slackmgr/core/config"
 	"github.com/slackmgr/core/manager/internal/models"
 	"github.com/slackmgr/core/manager/internal/slack/views"
 	"github.com/slackmgr/types"
@@ -36,18 +35,18 @@ type privateModalMetadata struct {
 }
 
 type interactiveController struct {
+	clt             SocketModeClient
 	apiClient       SlackAPIClient
 	commandQueue    FifoQueueProducer
 	issueFinder     IssueFinder
 	logger          types.Logger
-	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 }
 
 // globalShortcutHandler handles all incoming interaction messages of type 'shortcut'
-func (c *interactiveController) globalShortcutHandler(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+func (c *interactiveController) globalShortcutHandler(ctx context.Context, evt *socketmode.Event) {
 	// No need to customize the ack in this context, so we send it immediately
-	ack(evt, clt)
+	c.clt.Ack(ctx, evt.Request)
 
 	interaction, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
 	if err != nil {
@@ -59,14 +58,14 @@ func (c *interactiveController) globalShortcutHandler(ctx context.Context, evt *
 	case CreateIssueAction:
 		c.handleCreateIssueRequest(ctx, interaction, logger)
 	default:
-		logger.Error("Unknown callback ID in interactive event")
+		logger.Errorf("Unknown callback ID '%s' in global shortcut event", interaction.CallbackID)
 	}
 }
 
 // messageActionHandler handles all incoming interaction messages of type 'message_action'
-func (c *interactiveController) messageActionHandler(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+func (c *interactiveController) messageActionHandler(ctx context.Context, evt *socketmode.Event) {
 	// No need to customize the ack in this context, so we send it immediately
-	ack(evt, clt)
+	c.clt.Ack(ctx, evt.Request)
 
 	interaction, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
 	if err != nil {
@@ -80,15 +79,15 @@ func (c *interactiveController) messageActionHandler(ctx context.Context, evt *s
 	case ViewIssueAction:
 		c.handleViewIssueDetailsRequest(ctx, interaction, logger)
 	default:
-		logger.Error("Unknown callback ID in interactive event")
+		logger.Errorf("Unknown callback ID '%s' in message action event", interaction.CallbackID)
 	}
 }
 
 // viewSubmissionHandler handles all incoming interaction messages of type 'view_submission'
-func (c *interactiveController) viewSubmissionHandler(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+func (c *interactiveController) viewSubmissionHandler(ctx context.Context, evt *socketmode.Event) {
 	interaction, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
 	if err != nil {
-		ack(evt, clt)
+		c.clt.Ack(ctx, evt.Request)
 		c.logger.Errorf("Failed to get interaction from event: %s", err)
 		return
 	}
@@ -97,21 +96,21 @@ func (c *interactiveController) viewSubmissionHandler(ctx context.Context, evt *
 
 	switch interaction.View.CallbackID {
 	case MoveIssueModal:
-		c.moveIssueViewSubmission(ctx, evt, clt, interaction, logger)
+		c.moveIssueViewSubmission(ctx, evt, interaction, logger)
 	case CreateIssueModal:
-		c.createIssueViewSubmission(ctx, evt, clt, interaction, logger)
+		c.createIssueViewSubmission(ctx, evt, interaction, logger)
 	case ConfirmWebhookModal:
-		c.webhookViewSubmission(ctx, evt, clt, interaction, logger)
+		c.webhookViewSubmission(ctx, evt, interaction, logger)
 	default:
-		ack(evt, clt)
-		logger.Error("Unknown callback ID in interactive event")
+		c.clt.Ack(ctx, evt.Request)
+		logger.Errorf("Unknown callback ID '%s' in view submission event", interaction.View.CallbackID)
 	}
 }
 
 // blockActionsHandler handles all incoming interaction messages of type 'block_actions'
-func (c *interactiveController) blockActionsHandler(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
+func (c *interactiveController) blockActionsHandler(ctx context.Context, evt *socketmode.Event) {
 	// No need to customize the ack in this context, so we send it immediately
-	ack(evt, clt)
+	c.clt.Ack(ctx, evt.Request)
 
 	interaction, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
 	if err != nil {
@@ -142,8 +141,8 @@ func (c *interactiveController) blockActionsHandler(ctx context.Context, evt *so
 }
 
 // defaultInteractiveHandler handles all incoming interaction messages not matched by any of the explicit handlers
-func (c *interactiveController) defaultInteractiveHandler(_ context.Context, evt *socketmode.Event, clt SocketModeClient) {
-	ack(evt, clt)
+func (c *interactiveController) defaultInteractiveHandler(ctx context.Context, evt *socketmode.Event) {
+	c.clt.Ack(ctx, evt.Request)
 
 	_, logger, err := getInteractionAndLoggerFromEvent(evt, c.logger)
 	if err != nil {
@@ -236,23 +235,23 @@ func (c *interactiveController) handleMoveIssueRequest(ctx context.Context, inte
 
 // moveIssueViewSubmission handles the callback from the modal move issue dialog (created by handleMoveIssueRequest).
 // It dispatches an async command with info about the move request, IF the Slack App integration is in the receiving channel.
-func (c *interactiveController) moveIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt SocketModeClient, interaction slack.InteractionCallback, logger types.Logger) {
+func (c *interactiveController) moveIssueViewSubmission(ctx context.Context, evt *socketmode.Event, interaction slack.InteractionCallback, logger types.Logger) {
 	targetChannelID, err := getSelectedValue(interaction, "select_channel", "select_channel_input")
 	if err != nil {
-		ack(evt, clt)
+		c.clt.Ack(ctx, evt.Request)
 		logger.Errorf("Move issue view failed: %s", err)
 		return
 	}
 
 	if interaction.View.PrivateMetadata == "" {
-		ack(evt, clt)
-		logger.Error("Missing value in private_metadata field")
+		c.clt.Ack(ctx, evt.Request)
+		logger.Error("Missing value in private_metadata field of move issue view submission callback")
 		return
 	}
 
 	isAlertChannel, _, err := c.apiClient.IsAlertChannel(ctx, targetChannelID)
 	if err != nil {
-		ack(evt, clt)
+		c.clt.Ack(ctx, evt.Request)
 		logger.Errorf("Failed to verify if channel %s is a valid alert channel: %s", targetChannelID, err)
 		return
 	}
@@ -260,7 +259,7 @@ func (c *interactiveController) moveIssueViewSubmission(ctx context.Context, evt
 	// Receiving channel is not a managed alert channel - send ack with error message
 	if !isAlertChannel {
 		errMsg := "The channel must be managed by " + c.managerSettings.GetSettings().AppFriendlyName
-		ackWithFieldErrorMsg(evt, clt, "select_channel", errMsg)
+		c.clt.AckWithFieldErrorMsg(ctx, evt, "select_channel", errMsg)
 		return
 	}
 
@@ -272,12 +271,12 @@ func (c *interactiveController) moveIssueViewSubmission(ctx context.Context, evt
 	// Check that the target channel is not the same as the current channel
 	if strings.EqualFold(targetChannelID, currentChannelID) {
 		errMsg := "You cannot move an issue to the same channel"
-		ackWithFieldErrorMsg(evt, clt, "select_channel", errMsg)
+		c.clt.AckWithFieldErrorMsg(ctx, evt, "select_channel", errMsg)
 		return
 	}
 
 	// All is good - send normal ack and clear the modal view
-	ackWithPayload(evt, clt, slack.NewClearViewSubmissionResponse())
+	c.clt.AckWithPayload(ctx, evt.Request, slack.NewClearViewSubmissionResponse())
 
 	// Fetch info about the user
 	userInfo, err := c.apiClient.GetUserInfo(ctx, interaction.User.ID)
@@ -326,17 +325,17 @@ func (c *interactiveController) handleCreateIssueRequest(ctx context.Context, in
 
 // createIssueViewSubmission handles the callback from the modal create issue dialog (created by handleCreateIssueRequest).
 // It dispatches an async command with info about the create request, IF the Slack App integration is in the receiving channel.
-func (c *interactiveController) createIssueViewSubmission(ctx context.Context, evt *socketmode.Event, clt SocketModeClient, interaction slack.InteractionCallback, logger types.Logger) {
+func (c *interactiveController) createIssueViewSubmission(ctx context.Context, evt *socketmode.Event, interaction slack.InteractionCallback, logger types.Logger) {
 	targetChannelID, err := getSelectedValue(interaction, "select_channel", "select_channel_input")
 	if err != nil {
-		ack(evt, clt)
+		c.clt.Ack(ctx, evt.Request)
 		logger.Errorf("Create issue view failed: %s", err)
 		return
 	}
 
 	isAlertChannel, _, err := c.apiClient.IsAlertChannel(ctx, targetChannelID)
 	if err != nil {
-		ack(evt, clt)
+		c.clt.Ack(ctx, evt.Request)
 		logger.Errorf("Failed to verify if channel %s is a valid alert channel: %s", targetChannelID, err)
 		return
 	}
@@ -344,7 +343,7 @@ func (c *interactiveController) createIssueViewSubmission(ctx context.Context, e
 	// Receiving channel is not managed - send ack with error message
 	if !isAlertChannel {
 		errMsg := "The channel must be managed by " + c.managerSettings.GetSettings().AppFriendlyName
-		ackWithFieldErrorMsg(evt, clt, "select_channel", errMsg)
+		c.clt.AckWithFieldErrorMsg(ctx, evt, "select_channel", errMsg)
 		return
 	}
 
@@ -358,65 +357,65 @@ func (c *interactiveController) createIssueViewSubmission(ctx context.Context, e
 	isAdminInTargetChannel := c.managerSettings.GetSettings().UserIsChannelAdmin(ctx, targetChannelID, userInfo.ID, c.apiClient.UserIsInGroup)
 
 	if !isAdminInTargetChannel {
-		ackWithFieldErrorMsg(evt, clt, "select_channel", fmt.Sprintf("You need to be %s admin in the selected channel", c.managerSettings.GetSettings().AppFriendlyName))
+		c.clt.AckWithFieldErrorMsg(ctx, evt, "select_channel", fmt.Sprintf("You need to be %s admin in the selected channel", c.managerSettings.GetSettings().AppFriendlyName))
 		return
 	}
 
 	header, err := getInputValue(interaction, "issue_header", "issue_header_input")
 	if err != nil {
-		ack(evt, clt)
+		c.clt.Ack(ctx, evt.Request)
 		logger.Errorf("Create issue view failed: %s", err)
 		return
 	}
 
 	text, err := getInputValue(interaction, "issue_text", "issue_text_input")
 	if err != nil {
-		ack(evt, clt)
+		c.clt.Ack(ctx, evt.Request)
 		logger.Errorf("Create issue view failed: %s", err)
 		return
 	}
 
 	iconEmoji, err := getInputValue(interaction, "issue_emoji", "issue_emoji_input")
 	if err != nil {
-		ack(evt, clt)
+		c.clt.Ack(ctx, evt.Request)
 		logger.Errorf("Create issue view failed: %s", err)
 		return
 	}
 
 	if header == "" && text == "" {
-		ackWithFieldErrorMsg(evt, clt, "issue_text", "Both header and text cannot be empty")
+		c.clt.AckWithFieldErrorMsg(ctx, evt, "issue_text", "Both header and text cannot be empty")
 		return
 	}
 
 	severity, err := getSelectedValue(interaction, "issue_severity", "issue_severity_input")
 	if err != nil {
-		ack(evt, clt)
+		c.clt.Ack(ctx, evt.Request)
 		logger.Errorf("Create issue view failed: %s", err)
 		return
 	}
 
 	followUpEnabled, err := getCheckboxSelected(interaction, "issue_follow_up_enabled", "issue_follow_up_enabled_input", "enabled")
 	if err != nil {
-		ack(evt, clt)
+		c.clt.Ack(ctx, evt.Request)
 		logger.Errorf("Create issue view failed: %s", err)
 		return
 	}
 
 	autoResolveHoursString, err := getInputValue(interaction, "issue_auto_resolve", "issue_auto_resolve_input")
 	if err != nil {
-		ack(evt, clt)
+		c.clt.Ack(ctx, evt.Request)
 		logger.Errorf("Create issue view failed: %s", err)
 		return
 	}
 
 	autoResolveHours, err := strconv.Atoi(autoResolveHoursString)
 	if err != nil || autoResolveHours < 0 || autoResolveHours > 8760 {
-		ackWithFieldErrorMsg(evt, clt, "issue_auto_resolve", "Value must be integer 0-8760")
+		c.clt.AckWithFieldErrorMsg(ctx, evt, "issue_auto_resolve", "Value must be integer 0-8760")
 		return
 	}
 
 	// All is good - send normal ack and clear the modal view
-	ackWithPayload(evt, clt, slack.NewClearViewSubmissionResponse())
+	c.clt.AckWithPayload(ctx, evt.Request, slack.NewClearViewSubmissionResponse())
 
 	params := map[string]any{
 		"targetChannelId":    targetChannelID,
@@ -463,7 +462,7 @@ func (c *interactiveController) handleViewIssueDetailsRequest(ctx context.Contex
 		return
 	}
 
-	blocks, err := views.IssueDetailsAssets(issue, c.cfg)
+	blocks, err := views.IssueDetailsAssets(issue)
 	if err != nil {
 		logger.Errorf("Failed to generate view: %s", err)
 		return
@@ -591,7 +590,7 @@ func (c *interactiveController) verifyWebhookAccess(ctx context.Context, interac
 
 // webhookViewSubmission handles the callback from the modal confirm webhook dialog (created by handleWebhookRequest).
 // It dispatches an async command with info about the webhook.
-func (c *interactiveController) webhookViewSubmission(ctx context.Context, evt *socketmode.Event, clt SocketModeClient, interaction slack.InteractionCallback, logger types.Logger) {
+func (c *interactiveController) webhookViewSubmission(ctx context.Context, evt *socketmode.Event, interaction slack.InteractionCallback, logger types.Logger) {
 	// Fetch info about the user
 	userInfo, err := c.apiClient.GetUserInfo(ctx, interaction.User.ID)
 	if err != nil {
@@ -600,7 +599,7 @@ func (c *interactiveController) webhookViewSubmission(ctx context.Context, evt *
 	}
 
 	// All is good - send normal ack and clear the modal view
-	ackWithPayload(evt, clt, slack.NewClearViewSubmissionResponse())
+	c.clt.AckWithPayload(ctx, evt.Request, slack.NewClearViewSubmissionResponse())
 
 	// Parse the incoming metadata
 	metadata := c.parsePrivateModalMetadata(interaction.View.PrivateMetadata)

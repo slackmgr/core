@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,6 +21,11 @@ var cacheKeyPrefixRegex = regexp.MustCompile(`^[a-zA-Z0-9._:-]+$`)
 // for recording rules, so client library metrics should use [a-zA-Z_][a-zA-Z0-9_]*.
 // An empty prefix is always valid (it disables prefixing entirely).
 var metricsPrefixRegex = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+// location is the parsed *time.Location for the Location field in the config, cached by cfg.Validate().
+//
+//nolint:gochecknoglobals
+var location atomic.Pointer[time.Location]
 
 // DefaultLocation is the default IANA timezone name used by the Manager for timestamp
 // formatting. "UTC" is recommended for distributed systems and log aggregation.
@@ -308,6 +314,7 @@ func (c *ManagerConfig) Validate() error {
 	}
 
 	c.location = loc
+	location.Store(loc)
 
 	if c.SlackClient == nil {
 		return errors.New("slack client config is required")
@@ -337,20 +344,23 @@ func (c *ManagerConfig) Validate() error {
 }
 
 // GetLocation returns the parsed *time.Location for the Location field. The result is
-// cached by Validate(), so after a successful Validate() call this is a simple pointer
-// return with no I/O. If called before Validate(), the location is parsed on demand
-// and time.UTC is returned as a fallback on error.
+// cached by Validate(). If called before Validate(), this method panics.
 func (c *ManagerConfig) GetLocation() *time.Location {
 	if c.location != nil {
 		return c.location
 	}
 
-	loc, err := time.LoadLocation(c.Location)
-	if err != nil {
-		return time.UTC
+	panic("GetLocation called before Validate; call Validate first to ensure location is parsed and cached")
+}
+
+// Location returns the parsed *time.Location for the cfg.Location field. The result is
+// cached by cfg.Validate(). If called before cfg.Validate(), this function panics.
+func Location() *time.Location {
+	if loc := location.Load(); loc != nil {
+		return loc
 	}
 
-	return loc
+	panic("GetLocation called before cfg.Validate; call cfg.Validate first to ensure location is parsed and cached")
 }
 
 // validateCacheKeyPrefix checks that a Redis cache key prefix is non-empty, within

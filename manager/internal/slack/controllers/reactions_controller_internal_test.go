@@ -20,13 +20,14 @@ func TestReactionsController_reactionAdded(t *testing.T) {
 		t.Parallel()
 
 		logger := &mockLogger{}
-		logger.On("Error", "Failed to cast EventsAPIEvent").Once()
+		logger.On("Errorf", "Failed to cast event data to EventsAPIEvent, got: %T", []any{"not an EventsAPIEvent"}).Once()
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &reactionsController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -36,7 +37,7 @@ func TestReactionsController_reactionAdded(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.reactionAdded(context.Background(), evt, client)
+		controller.reactionAdded(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -46,13 +47,14 @@ func TestReactionsController_reactionAdded(t *testing.T) {
 		t.Parallel()
 
 		logger := &mockLogger{}
-		logger.On("Error", "Failed to cast ReactionAddedEvent").Once()
+		logger.On("Errorf", "Failed to cast event data to ReactionAddedEvent, got: %T", []any{"not a ReactionAddedEvent"}).Once()
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &reactionsController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -69,7 +71,7 @@ func TestReactionsController_reactionAdded(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.reactionAdded(context.Background(), evt, client)
+		controller.reactionAdded(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -83,9 +85,10 @@ func TestReactionsController_reactionAdded(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &reactionsController{
+			clt:             client,
 			logger:          logger,
 			managerSettings: newTestManagerSettings(),
 		}
@@ -111,7 +114,7 @@ func TestReactionsController_reactionAdded(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.reactionAdded(context.Background(), evt, client)
+		controller.reactionAdded(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -125,13 +128,14 @@ func TestReactionsController_reactionRemoved(t *testing.T) {
 		t.Parallel()
 
 		logger := &mockLogger{}
-		logger.On("Error", "Failed to cast EventsAPIEvent").Once()
+		logger.On("Errorf", "Failed to cast event data to EventsAPIEvent, got: %T", []any{"not an EventsAPIEvent"}).Once()
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &reactionsController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -141,7 +145,7 @@ func TestReactionsController_reactionRemoved(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.reactionRemoved(context.Background(), evt, client)
+		controller.reactionRemoved(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -151,13 +155,14 @@ func TestReactionsController_reactionRemoved(t *testing.T) {
 		t.Parallel()
 
 		logger := &mockLogger{}
-		logger.On("Error", "Failed to cast ReactionRemovedEvent").Once()
+		logger.On("Errorf", "Failed to cast event data to ReactionRemovedEvent, got: %T", []any{"not a ReactionRemovedEvent"}).Once()
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &reactionsController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -174,7 +179,7 @@ func TestReactionsController_reactionRemoved(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.reactionRemoved(context.Background(), evt, client)
+		controller.reactionRemoved(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -188,9 +193,10 @@ func TestReactionsController_reactionRemoved(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &reactionsController{
+			clt:             client,
 			logger:          logger,
 			managerSettings: newTestManagerSettings(),
 		}
@@ -216,7 +222,7 @@ func TestReactionsController_reactionRemoved(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.reactionRemoved(context.Background(), evt, client)
+		controller.reactionRemoved(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)

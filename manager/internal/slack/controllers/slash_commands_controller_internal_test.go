@@ -18,9 +18,10 @@ func TestSlashCommandsController_handleEventTypeSlashCommands(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &slashCommandsController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -29,7 +30,7 @@ func TestSlashCommandsController_handleEventTypeSlashCommands(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.handleEventTypeSlashCommands(context.Background(), evt, client)
+		controller.handleEventTypeSlashCommands(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -47,6 +48,7 @@ func TestSlashCommandsController_handleEventTypeSlashCommands(t *testing.T) {
 		// Ack should not be called when Request is nil
 
 		controller := &slashCommandsController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -64,7 +66,7 @@ func TestSlashCommandsController_handleEventTypeSlashCommands(t *testing.T) {
 			}
 		}()
 
-		controller.handleEventTypeSlashCommands(context.Background(), evt, client)
+		controller.handleEventTypeSlashCommands(context.Background(), evt)
 
 		client.AssertNotCalled(t, "Ack")
 	})

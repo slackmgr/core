@@ -22,6 +22,7 @@ var (
 )
 
 type reactionsController struct {
+	clt             SocketModeClient
 	apiClient       SlackAPIClient
 	commandQueue    FifoQueueProducer
 	cache           *internal.Cache
@@ -30,19 +31,19 @@ type reactionsController struct {
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func (c *reactionsController) reactionAdded(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
-	ack(evt, clt)
+func (c *reactionsController) reactionAdded(ctx context.Context, evt *socketmode.Event) {
+	c.clt.Ack(ctx, evt.Request)
 
 	apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 	if !ok {
 		// This should never happen
-		c.logger.Error("Failed to cast EventsAPIEvent")
+		c.logger.Errorf("Failed to cast event data to EventsAPIEvent, got: %T", evt.Data)
 		return
 	}
 
 	reactionAddedEvent, ok := apiEvent.InnerEvent.Data.(*slackevents.ReactionAddedEvent)
 	if !ok {
-		c.logger.Error("Failed to cast ReactionAddedEvent")
+		c.logger.Errorf("Failed to cast event data to ReactionAddedEvent, got: %T", apiEvent.InnerEvent.Data)
 		return
 	}
 
@@ -65,19 +66,19 @@ func (c *reactionsController) reactionAdded(ctx context.Context, evt *socketmode
 	}
 }
 
-func (c *reactionsController) reactionRemoved(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
-	ack(evt, clt)
+func (c *reactionsController) reactionRemoved(ctx context.Context, evt *socketmode.Event) {
+	c.clt.Ack(ctx, evt.Request)
 
 	apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 	if !ok {
 		// This should never happen
-		c.logger.Error("Failed to cast EventsAPIEvent")
+		c.logger.Errorf("Failed to cast event data to EventsAPIEvent, got: %T", evt.Data)
 		return
 	}
 
 	reactionRemovedEvent, ok := apiEvent.InnerEvent.Data.(*slackevents.ReactionRemovedEvent)
 	if !ok {
-		c.logger.Error("Failed to cast ReactionRemovedEvent")
+		c.logger.Errorf("Failed to cast event data to ReactionRemovedEvent, got: %T", apiEvent.InnerEvent.Data)
 		return
 	}
 

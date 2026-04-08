@@ -18,18 +18,18 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 		t.Parallel()
 
 		logger := &mockLogger{}
-		logger.On("Error", "Failed to cast MemberJoinedChannelEvent").Once()
+		logger.On("Errorf", "Failed to cast event data to MemberJoinedChannelEvent, got: %T", []any{"not a MemberJoinedChannelEvent"}).Once()
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		apiClient := &mockSlackAPIClient{}
 
 		controller := &greetingsController{
+			clt:             client,
 			apiClient:       apiClient,
 			logger:          logger,
-			cfg:             newTestManagerConfig(),
 			managerSettings: newTestManagerSettings(),
 		}
 
@@ -47,7 +47,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.memberJoinedChannel(context.Background(), evt, client)
+		controller.memberJoinedChannel(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -62,15 +62,15 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(nil, errors.New("api error")).Once()
 
 		controller := &greetingsController{
+			clt:             client,
 			apiClient:       apiClient,
 			logger:          logger,
-			cfg:             newTestManagerConfig(),
 			managerSettings: newTestManagerSettings(),
 		}
 
@@ -91,7 +91,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.memberJoinedChannel(context.Background(), evt, client)
+		controller.memberJoinedChannel(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -105,7 +105,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(&slack.User{
@@ -114,9 +114,9 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 		}, nil).Once()
 
 		controller := &greetingsController{
+			clt:             client,
 			apiClient:       apiClient,
 			logger:          logger,
-			cfg:             newTestManagerConfig(),
 			managerSettings: newTestManagerSettings(),
 		}
 
@@ -137,7 +137,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.memberJoinedChannel(context.Background(), evt, client)
+		controller.memberJoinedChannel(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		apiClient.AssertExpectations(t)
@@ -152,7 +152,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(&slack.User{
@@ -161,9 +161,9 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 		}, nil).Once()
 
 		controller := &greetingsController{
+			clt:             client,
 			apiClient:       apiClient,
 			logger:          logger,
-			cfg:             newTestManagerConfig(),
 			managerSettings: newTestManagerSettings(),
 		}
 
@@ -184,7 +184,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.memberJoinedChannel(context.Background(), evt, client)
+		controller.memberJoinedChannel(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		apiClient.AssertExpectations(t)
@@ -200,7 +200,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(&slack.User{
@@ -210,9 +210,9 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(false, "", errors.New("api error")).Once()
 
 		controller := &greetingsController{
+			clt:             client,
 			apiClient:       apiClient,
 			logger:          logger,
-			cfg:             newTestManagerConfig(),
 			managerSettings: newTestManagerSettings(),
 		}
 
@@ -233,7 +233,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.memberJoinedChannel(context.Background(), evt, client)
+		controller.memberJoinedChannel(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		apiClient.AssertExpectations(t)
@@ -244,11 +244,11 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 		t.Parallel()
 
 		logger := &mockLogger{}
-		logger.On("Info", "User joined un-managed channel").Once()
+		logger.On("Debug", "User joined un-managed channel").Once()
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(&slack.User{
@@ -258,9 +258,9 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(false, "", nil).Once()
 
 		controller := &greetingsController{
+			clt:             client,
 			apiClient:       apiClient,
 			logger:          logger,
-			cfg:             newTestManagerConfig(),
 			managerSettings: newTestManagerSettings(),
 		}
 
@@ -281,7 +281,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.memberJoinedChannel(context.Background(), evt, client)
+		controller.memberJoinedChannel(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		apiClient.AssertExpectations(t)
@@ -292,12 +292,12 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 		t.Parallel()
 
 		logger := &mockLogger{}
-		logger.On("Info", "User joined managed channel").Once()
+		logger.On("Info", "User joined managed alert channel").Once()
 		logger.On("Info", "Post ephemeral message").Once()
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(&slack.User{
@@ -309,9 +309,9 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 		apiClient.On("PostEphemeral", mock.Anything, "C12345", "U12345", mock.Anything).Return("", nil).Once()
 
 		controller := &greetingsController{
+			clt:             client,
 			apiClient:       apiClient,
 			logger:          logger,
-			cfg:             newTestManagerConfig(),
 			managerSettings: newTestManagerSettings(),
 		}
 
@@ -332,7 +332,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.memberJoinedChannel(context.Background(), evt, client)
+		controller.memberJoinedChannel(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		apiClient.AssertExpectations(t)
@@ -347,18 +347,18 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 		t.Parallel()
 
 		logger := &mockLogger{}
-		logger.On("Error", "Failed to cast MemberLeftChannelEvent").Once()
+		logger.On("Errorf", "Failed to cast event data to MemberLeftChannelEvent, got: %T", []any{"not a MemberLeftChannelEvent"}).Once()
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		apiClient := &mockSlackAPIClient{}
 
 		controller := &greetingsController{
+			clt:             client,
 			apiClient:       apiClient,
 			logger:          logger,
-			cfg:             newTestManagerConfig(),
 			managerSettings: newTestManagerSettings(),
 		}
 
@@ -376,7 +376,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.memberLeftChannel(context.Background(), evt, client)
+		controller.memberLeftChannel(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -391,15 +391,15 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(nil, errors.New("api error")).Once()
 
 		controller := &greetingsController{
+			clt:             client,
 			apiClient:       apiClient,
 			logger:          logger,
-			cfg:             newTestManagerConfig(),
 			managerSettings: newTestManagerSettings(),
 		}
 
@@ -420,7 +420,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.memberLeftChannel(context.Background(), evt, client)
+		controller.memberLeftChannel(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -434,7 +434,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(&slack.User{
@@ -444,9 +444,9 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 		}, nil).Once()
 
 		controller := &greetingsController{
+			clt:             client,
 			apiClient:       apiClient,
 			logger:          logger,
-			cfg:             newTestManagerConfig(),
 			managerSettings: newTestManagerSettings(),
 		}
 
@@ -467,7 +467,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.memberLeftChannel(context.Background(), evt, client)
+		controller.memberLeftChannel(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		apiClient.AssertExpectations(t)
@@ -483,7 +483,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(&slack.User{
@@ -493,9 +493,9 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(false, "", errors.New("api error")).Once()
 
 		controller := &greetingsController{
+			clt:             client,
 			apiClient:       apiClient,
 			logger:          logger,
-			cfg:             newTestManagerConfig(),
 			managerSettings: newTestManagerSettings(),
 		}
 
@@ -516,7 +516,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.memberLeftChannel(context.Background(), evt, client)
+		controller.memberLeftChannel(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		apiClient.AssertExpectations(t)
@@ -531,7 +531,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(&slack.User{
@@ -541,9 +541,9 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(true, "", nil).Once()
 
 		controller := &greetingsController{
+			clt:             client,
 			apiClient:       apiClient,
 			logger:          logger,
-			cfg:             newTestManagerConfig(),
 			managerSettings: newTestManagerSettings(),
 		}
 
@@ -564,7 +564,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.memberLeftChannel(context.Background(), evt, client)
+		controller.memberLeftChannel(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		apiClient.AssertExpectations(t)
@@ -579,7 +579,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(&slack.User{
@@ -589,9 +589,9 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(false, "", nil).Once()
 
 		controller := &greetingsController{
+			clt:             client,
 			apiClient:       apiClient,
 			logger:          logger,
-			cfg:             newTestManagerConfig(),
 			managerSettings: newTestManagerSettings(),
 		}
 
@@ -612,7 +612,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.memberLeftChannel(context.Background(), evt, client)
+		controller.memberLeftChannel(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		apiClient.AssertExpectations(t)

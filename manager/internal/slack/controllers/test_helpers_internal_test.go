@@ -31,8 +31,22 @@ func newMockSocketModeClient() *mockSocketModeClient {
 	}
 }
 
-func (m *mockSocketModeClient) Ack(req socketmode.Request, payload ...any) {
+func (m *mockSocketModeClient) Ack(ctx context.Context, req *socketmode.Request) {
+	if req == nil {
+		return
+	}
+	m.Called(req)
+}
+
+func (m *mockSocketModeClient) AckWithPayload(ctx context.Context, req *socketmode.Request, payload any) {
+	if req == nil {
+		return
+	}
 	m.Called(req, payload)
+}
+
+func (m *mockSocketModeClient) AckWithFieldErrorMsg(ctx context.Context, evt *socketmode.Event, fieldName, errMsg string) {
+	m.Called(evt, fieldName, errMsg)
 }
 
 func (m *mockSocketModeClient) RunContext(ctx context.Context) error {

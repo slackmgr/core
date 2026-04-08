@@ -38,7 +38,7 @@ type issueDetailsArgs struct {
 	RouteKey                  string
 }
 
-func IssueDetailsAssets(issue *models.Issue, cfg *config.ManagerConfig) (slack.Blocks, error) {
+func IssueDetailsAssets(issue *models.Issue) (slack.Blocks, error) {
 	autoResolve := strconv.FormatBool(issue.FollowUpEnabled())
 
 	if issue.FollowUpEnabled() {
@@ -48,15 +48,15 @@ func IssueDetailsAssets(issue *models.Issue, cfg *config.ManagerConfig) (slack.B
 	resolved := "false"
 
 	if issue.IsResolved() {
-		resolved = fmt.Sprintf("true (%s)", formatTimestamp(issue.ResolveTime, cfg))
+		resolved = fmt.Sprintf("true (%s)", formatTimestamp(issue.ResolveTime))
 	}
 
 	a := issueDetailsArgs{
 		CorrelationID:             issue.CorrelationID,
 		DatabaseID:                issue.ID,
 		SlackPostID:               issue.SlackPostID,
-		Created:                   formatTimestamp(issue.Created, cfg),
-		LastUpdated:               formatTimestamp(issue.LastAlertReceived, cfg),
+		Created:                   formatTimestamp(issue.Created),
+		LastUpdated:               formatTimestamp(issue.LastAlertReceived),
 		AlertCount:                issue.AlertCount,
 		Status:                    string(issue.LastAlert.Severity),
 		AutoResolve:               autoResolve,
@@ -107,8 +107,8 @@ func IssueDetailsAssets(issue *models.Issue, cfg *config.ManagerConfig) (slack.B
 	return view.Blocks, nil
 }
 
-func formatTimestamp(t time.Time, cfg *config.ManagerConfig) string {
-	s := t.In(cfg.GetLocation()).Format("2006-01-02T15:04:05")
+func formatTimestamp(t time.Time) string {
+	s := t.In(config.Location()).Format("2006-01-02T15:04:05")
 
 	diff := time.Since(t)
 

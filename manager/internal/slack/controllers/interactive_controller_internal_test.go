@@ -22,9 +22,10 @@ func TestInteractiveController_globalShortcutHandler(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &interactiveController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -34,7 +35,7 @@ func TestInteractiveController_globalShortcutHandler(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.globalShortcutHandler(context.Background(), evt, client)
+		controller.globalShortcutHandler(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -45,13 +46,14 @@ func TestInteractiveController_globalShortcutHandler(t *testing.T) {
 
 		logger := &mockLogger{}
 		logger.On("Debug", "Interactive event").Once()
-		logger.On("Error", "Unknown callback ID in interactive event").Once()
+		logger.On("Errorf", "Unknown callback ID '%s' in global shortcut event", []any{"unknown_callback"}).Once()
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &interactiveController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -73,7 +75,7 @@ func TestInteractiveController_globalShortcutHandler(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.globalShortcutHandler(context.Background(), evt, client)
+		controller.globalShortcutHandler(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -91,9 +93,10 @@ func TestInteractiveController_messageActionHandler(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &interactiveController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -103,7 +106,7 @@ func TestInteractiveController_messageActionHandler(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.messageActionHandler(context.Background(), evt, client)
+		controller.messageActionHandler(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -114,13 +117,14 @@ func TestInteractiveController_messageActionHandler(t *testing.T) {
 
 		logger := &mockLogger{}
 		logger.On("Debug", "Interactive event").Once()
-		logger.On("Error", "Unknown callback ID in interactive event").Once()
+		logger.On("Errorf", "Unknown callback ID '%s' in message action event", []any{"unknown_callback"}).Once()
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &interactiveController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -142,7 +146,7 @@ func TestInteractiveController_messageActionHandler(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.messageActionHandler(context.Background(), evt, client)
+		controller.messageActionHandler(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -160,9 +164,10 @@ func TestInteractiveController_viewSubmissionHandler(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &interactiveController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -172,7 +177,7 @@ func TestInteractiveController_viewSubmissionHandler(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.viewSubmissionHandler(context.Background(), evt, client)
+		controller.viewSubmissionHandler(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -183,13 +188,14 @@ func TestInteractiveController_viewSubmissionHandler(t *testing.T) {
 
 		logger := &mockLogger{}
 		logger.On("Debug", "Interactive event").Once()
-		logger.On("Error", "Unknown callback ID in interactive event").Once()
+		logger.On("Errorf", "Unknown callback ID '%s' in view submission event", []any{"unknown_callback"}).Once()
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &interactiveController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -213,7 +219,7 @@ func TestInteractiveController_viewSubmissionHandler(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.viewSubmissionHandler(context.Background(), evt, client)
+		controller.viewSubmissionHandler(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -231,9 +237,10 @@ func TestInteractiveController_blockActionsHandler(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &interactiveController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -243,7 +250,7 @@ func TestInteractiveController_blockActionsHandler(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.blockActionsHandler(context.Background(), evt, client)
+		controller.blockActionsHandler(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -258,9 +265,10 @@ func TestInteractiveController_blockActionsHandler(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &interactiveController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -284,7 +292,7 @@ func TestInteractiveController_blockActionsHandler(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.blockActionsHandler(context.Background(), evt, client)
+		controller.blockActionsHandler(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -299,9 +307,10 @@ func TestInteractiveController_blockActionsHandler(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &interactiveController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -328,7 +337,7 @@ func TestInteractiveController_blockActionsHandler(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.blockActionsHandler(context.Background(), evt, client)
+		controller.blockActionsHandler(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -343,9 +352,10 @@ func TestInteractiveController_blockActionsHandler(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &interactiveController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -371,7 +381,7 @@ func TestInteractiveController_blockActionsHandler(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.blockActionsHandler(context.Background(), evt, client)
+		controller.blockActionsHandler(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -389,9 +399,10 @@ func TestInteractiveController_defaultInteractiveHandler(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &interactiveController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -401,7 +412,7 @@ func TestInteractiveController_defaultInteractiveHandler(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.defaultInteractiveHandler(context.Background(), evt, client)
+		controller.defaultInteractiveHandler(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -416,9 +427,10 @@ func TestInteractiveController_defaultInteractiveHandler(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &interactiveController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -439,7 +451,7 @@ func TestInteractiveController_defaultInteractiveHandler(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.defaultInteractiveHandler(context.Background(), evt, client)
+		controller.defaultInteractiveHandler(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/stretchr/testify/mock"
 )
 
 func TestEventsAPIController_handleEventTypeEventsAPI(t *testing.T) {
@@ -19,9 +20,10 @@ func TestEventsAPIController_handleEventTypeEventsAPI(t *testing.T) {
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &eventsAPIController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -39,7 +41,7 @@ func TestEventsAPIController_handleEventTypeEventsAPI(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.handleEventTypeEventsAPI(context.Background(), evt, client)
+		controller.handleEventTypeEventsAPI(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)
@@ -49,13 +51,14 @@ func TestEventsAPIController_handleEventTypeEventsAPI(t *testing.T) {
 		t.Parallel()
 
 		logger := &mockLogger{}
-		logger.On("Info", "Unhandled events API event").Once()
+		logger.On("Errorf", mock.Anything, mock.Anything).Once()
 
 		client := newMockSocketModeClient()
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
-		client.On("Ack", req, []any(nil)).Once()
+		client.On("Ack", &req).Once()
 
 		controller := &eventsAPIController{
+			clt:    client,
 			logger: logger,
 		}
 
@@ -65,7 +68,7 @@ func TestEventsAPIController_handleEventTypeEventsAPI(t *testing.T) {
 			Request: &req,
 		}
 
-		controller.handleEventTypeEventsAPI(context.Background(), evt, client)
+		controller.handleEventTypeEventsAPI(context.Background(), evt)
 
 		client.AssertExpectations(t)
 		logger.AssertExpectations(t)

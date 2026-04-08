@@ -39,7 +39,7 @@ func TestInternalEventsController_handleEventTypeClientInternal(t *testing.T) {
 				Type: tc.eventType,
 			}
 
-			controller.handleEventTypeClientInternal(context.Background(), evt, nil)
+			controller.handleEventTypeClientInternal(context.Background(), evt)
 
 			logger.AssertExpectations(t)
 		})
@@ -60,7 +60,7 @@ func TestInternalEventsController_handleEventTypeHello(t *testing.T) {
 		Type: socketmode.EventTypeHello,
 	}
 
-	controller.handleEventTypeHello(context.Background(), evt, nil)
+	controller.handleEventTypeHello(context.Background(), evt)
 
 	logger.AssertExpectations(t)
 }
@@ -79,7 +79,7 @@ func TestInternalEventsController_handleEventTypeDisconnect(t *testing.T) {
 		Type: socketmode.EventTypeDisconnect,
 	}
 
-	controller.handleEventTypeDisconnect(context.Background(), evt, nil)
+	controller.handleEventTypeDisconnect(context.Background(), evt)
 
 	logger.AssertExpectations(t)
 }

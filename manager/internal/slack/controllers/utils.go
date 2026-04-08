@@ -5,27 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/slack-go/slack"
-	"github.com/slack-go/slack/socketmode"
 	"github.com/slackmgr/core/manager/internal/models"
 )
-
-func ack(evt *socketmode.Event, clt SocketModeClient) {
-	if evt.Request != nil {
-		clt.Ack(*evt.Request)
-	}
-}
-
-func ackWithPayload(evt *socketmode.Event, clt SocketModeClient, payload any) {
-	if evt.Request != nil {
-		clt.Ack(*evt.Request, payload)
-	}
-}
-
-func ackWithFieldErrorMsg(evt *socketmode.Event, clt SocketModeClient, fieldName, errMsg string) {
-	errors := map[string]string{fieldName: errMsg}
-	ackWithPayload(evt, clt, slack.NewErrorsViewSubmissionResponse(errors))
-}
 
 func sendCommand(ctx context.Context, fifoQueue FifoQueueProducer, cmd *models.Command) error {
 	body, err := json.Marshal(cmd)

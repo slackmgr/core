@@ -3,20 +3,22 @@ package internal
 import (
 	"context"
 
+	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/types"
 )
 
 // SocketModeClientWrapper is a wrapper around the slack-go/socketmode.Client.
-// It is primarily created to wrap the Events channel in a function, which allows
-// using interfaces more easily.
 type SocketModeClientWrapper struct {
 	client *socketmode.Client
+	logger types.Logger
 }
 
 // NewSocketModeClientWrapper creates a new instance of SocketModeClientWrapper.
-func NewSocketModeClientWrapper(client *socketmode.Client) *SocketModeClientWrapper {
+func NewSocketModeClientWrapper(client *socketmode.Client, logger types.Logger) *SocketModeClientWrapper {
 	return &SocketModeClientWrapper{
 		client: client,
+		logger: logger,
 	}
 }
 
@@ -31,7 +33,24 @@ func (s *SocketModeClientWrapper) Events() chan socketmode.Event {
 	return s.client.Events
 }
 
-// Ack acknowledges the given socketmode request with an optional payload.
-func (s *SocketModeClientWrapper) Ack(req socketmode.Request, payload ...any) {
-	s.client.Ack(req, payload...)
+// Ack acknowledges the given socketmode request.
+func (s *SocketModeClientWrapper) Ack(ctx context.Context, req *socketmode.Request) {
+	s.AckWithPayload(ctx, req, nil)
+}
+
+// AckWithFieldErrorMsg acknowledges the given socketmode request with a field error message.
+func (s *SocketModeClientWrapper) AckWithFieldErrorMsg(ctx context.Context, evt *socketmode.Event, fieldName, errMsg string) {
+	errors := map[string]string{fieldName: errMsg}
+	s.AckWithPayload(ctx, evt.Request, slack.NewErrorsViewSubmissionResponse(errors))
+}
+
+// AckWithPayload acknowledges the given socketmode request with a payload.
+func (s *SocketModeClientWrapper) AckWithPayload(ctx context.Context, req *socketmode.Request, payload any) {
+	if req == nil {
+		return
+	}
+
+	if err := s.client.AckCtx(ctx, req.EnvelopeID, payload); err != nil {
+		s.logger.Errorf("Failed to acknowledge socketmode request: %v", err)
+	}
 }

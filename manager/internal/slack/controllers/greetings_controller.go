@@ -6,27 +6,30 @@ import (
 	slackapi "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
-	"github.com/slackmgr/core/config"
 	"github.com/slackmgr/core/manager/internal/models"
 	"github.com/slackmgr/core/manager/internal/slack/views"
 	"github.com/slackmgr/types"
 )
 
 type greetingsController struct {
+	clt             SocketModeClient
 	apiClient       SlackAPIClient
 	logger          types.Logger
-	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 }
 
-func (c *greetingsController) memberJoinedChannel(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
-	ack(evt, clt)
+func (c *greetingsController) memberJoinedChannel(ctx context.Context, evt *socketmode.Event) {
+	c.clt.Ack(ctx, evt.Request)
 
-	apiEvent, _ := evt.Data.(slackevents.EventsAPIEvent)
+	apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
+	if !ok {
+		c.logger.WithField("operation", "slack").WithField("envelope_id", evt.Request.EnvelopeID).Errorf("Failed to cast EventsAPIEvent, got: %T", evt.Data)
+		return
+	}
 
 	joinedEvent, ok := apiEvent.InnerEvent.Data.(*slackevents.MemberJoinedChannelEvent)
 	if !ok {
-		c.logger.Error("Failed to cast MemberJoinedChannelEvent")
+		c.logger.Errorf("Failed to cast event data to MemberJoinedChannelEvent, got: %T", apiEvent.InnerEvent.Data)
 		return
 	}
 
@@ -80,14 +83,18 @@ func (c *greetingsController) memberJoinedChannel(ctx context.Context, evt *sock
 	logger.WithField("reason", "Greeting message in managed channel").Info("Post ephemeral message")
 }
 
-func (c *greetingsController) memberLeftChannel(ctx context.Context, evt *socketmode.Event, clt SocketModeClient) {
-	ack(evt, clt)
+func (c *greetingsController) memberLeftChannel(ctx context.Context, evt *socketmode.Event) {
+	c.clt.Ack(ctx, evt.Request)
 
-	apiEvent, _ := evt.Data.(slackevents.EventsAPIEvent)
+	apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
+	if !ok {
+		c.logger.WithField("operation", "slack").WithField("envelope_id", evt.Request.EnvelopeID).Errorf("Failed to cast EventsAPIEvent, got: %T", evt.Data)
+		return
+	}
 
 	leftChannelEvent, ok := apiEvent.InnerEvent.Data.(*slackevents.MemberLeftChannelEvent)
 	if !ok {
-		c.logger.Error("Failed to cast MemberLeftChannelEvent")
+		c.logger.Errorf("Failed to cast event data to MemberLeftChannelEvent, got: %T", apiEvent.InnerEvent.Data)
 		return
 	}
 

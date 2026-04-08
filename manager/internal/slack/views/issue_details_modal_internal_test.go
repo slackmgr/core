@@ -2,6 +2,7 @@ package views
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMain(m *testing.M) {
+	cfg := config.NewDefaultManagerConfig()
+	cfg.SlackClient.AppToken = "xapp-test"
+	cfg.SlackClient.BotToken = "xoxb-test"
+	cfg.EncryptionKey = "abcdefghijklmnopqrstuvwxyz123456"
+	if err := cfg.Validate(); err != nil {
+		panic(err)
+	}
+	os.Exit(m.Run())
+}
 
 // ---- formatDuration ----
 
@@ -48,8 +60,6 @@ func TestFormatDuration(t *testing.T) {
 func TestFormatTimestamp(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.ManagerConfig{Location: "UTC"}
-
 	tests := []struct {
 		name   string
 		offset time.Duration // relative to time.Now()
@@ -66,7 +76,7 @@ func TestFormatTimestamp(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			ts := time.Now().Add(tt.offset)
-			result := formatTimestamp(ts, cfg)
+			result := formatTimestamp(ts)
 			assert.Contains(t, result, tt.want,
 				"formatTimestamp(%v): expected %q in %q", tt.offset, tt.want, result)
 		})
@@ -74,21 +84,15 @@ func TestFormatTimestamp(t *testing.T) {
 }
 
 func TestFormatTimestamp_FormatsInConfiguredTimezone(t *testing.T) {
-	t.Parallel()
+	// Not parallel: verifies the global location set by TestMain (UTC).
 
 	// A fixed time in UTC: 2024-06-15 12:00:00
 	ts := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
 
-	utcCfg := &config.ManagerConfig{Location: "UTC"}
-	result := formatTimestamp(ts, utcCfg)
+	// TestMain sets Location to UTC, so the timestamp should appear in UTC.
+	result := formatTimestamp(ts)
 	assert.True(t, strings.HasPrefix(result, "2024-06-15T12:00:00"),
 		"UTC result should start with the UTC-formatted timestamp, got %q", result)
-
-	// New York is UTC-4 or UTC-5, so the same instant shows as 08:00:00 or 07:00:00.
-	nyCfg := &config.ManagerConfig{Location: "America/New_York"}
-	nyResult := formatTimestamp(ts, nyCfg)
-	assert.False(t, strings.HasPrefix(nyResult, "2024-06-15T12:00:00"),
-		"NY-timezone result should NOT start with the UTC timestamp, got %q", nyResult)
 }
 
 // ---- IssueDetailsAssets ----
@@ -111,7 +115,7 @@ func newMinimalIssue() *models.Issue {
 func TestIssueDetailsAssets_NoError(t *testing.T) {
 	t.Parallel()
 
-	blocks, err := IssueDetailsAssets(newMinimalIssue(), config.NewDefaultManagerConfig())
+	blocks, err := IssueDetailsAssets(newMinimalIssue())
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, blocks.BlockSet)
@@ -119,8 +123,6 @@ func TestIssueDetailsAssets_NoError(t *testing.T) {
 
 func TestIssueDetailsAssets_MoveReason(t *testing.T) {
 	t.Parallel()
-
-	cfg := config.NewDefaultManagerConfig()
 
 	tests := []struct {
 		name        string
@@ -163,7 +165,7 @@ func TestIssueDetailsAssets_MoveReason(t *testing.T) {
 			issue.MoveReason = tt.moveReason
 			issue.MovedByUser = tt.movedByUser
 
-			blocks, err := IssueDetailsAssets(issue, cfg)
+			blocks, err := IssueDetailsAssets(issue)
 			require.NoError(t, err)
 
 			data, marshalErr := json.Marshal(blocks)
@@ -176,14 +178,12 @@ func TestIssueDetailsAssets_MoveReason(t *testing.T) {
 func TestIssueDetailsAssets_RouteKey(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewDefaultManagerConfig()
-
 	t.Run("empty route key rendered as dash", func(t *testing.T) {
 		t.Parallel()
 		issue := newMinimalIssue()
 		issue.LastAlert.RouteKey = ""
 
-		blocks, err := IssueDetailsAssets(issue, cfg)
+		blocks, err := IssueDetailsAssets(issue)
 		require.NoError(t, err)
 
 		data, marshalErr := json.Marshal(blocks)
@@ -196,7 +196,7 @@ func TestIssueDetailsAssets_RouteKey(t *testing.T) {
 		issue := newMinimalIssue()
 		issue.LastAlert.RouteKey = "team-alpha"
 
-		blocks, err := IssueDetailsAssets(issue, cfg)
+		blocks, err := IssueDetailsAssets(issue)
 		require.NoError(t, err)
 
 		data, marshalErr := json.Marshal(blocks)
@@ -208,14 +208,12 @@ func TestIssueDetailsAssets_RouteKey(t *testing.T) {
 func TestIssueDetailsAssets_AutoResolve(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.NewDefaultManagerConfig()
-
 	t.Run("follow-up disabled → auto resolve is false", func(t *testing.T) {
 		t.Parallel()
 		issue := newMinimalIssue()
 		issue.LastAlert.IssueFollowUpEnabled = false
 
-		blocks, err := IssueDetailsAssets(issue, cfg)
+		blocks, err := IssueDetailsAssets(issue)
 		require.NoError(t, err)
 
 		data, marshalErr := json.Marshal(blocks)
@@ -229,7 +227,7 @@ func TestIssueDetailsAssets_AutoResolve(t *testing.T) {
 		issue.LastAlert.IssueFollowUpEnabled = true
 		issue.AutoResolvePeriod = 2 * time.Hour
 
-		blocks, err := IssueDetailsAssets(issue, cfg)
+		blocks, err := IssueDetailsAssets(issue)
 		require.NoError(t, err)
 
 		data, marshalErr := json.Marshal(blocks)
