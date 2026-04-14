@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-04-14
+
+### Changed
+
+- Bump `github.com/slackmgr/types` dependency to v0.4.1
+
 ## [0.10.0] - 2026-04-08
 
 ### Changed
@@ -275,7 +281,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/slackmgr/core/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/slackmgr/core/compare/v0.9.3...v0.10.0
 [0.9.3]: https://github.com/slackmgr/core/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/slackmgr/core/compare/v0.9.1...v0.9.2
