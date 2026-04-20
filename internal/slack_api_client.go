@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"slices"
@@ -839,7 +840,7 @@ func waitForAPIError(ctx context.Context, started time.Time, logger types.Logger
 }
 
 func waitForRateLimit(ctx context.Context, logger types.Logger, err *slack.RateLimitedError, attempt int, action string, remainingWaitTime time.Duration) error {
-	wait := min(err.RetryAfter+2*time.Second, remainingWaitTime)
+	wait := min(err.RetryAfter+2*time.Second+jitter(500*time.Millisecond), remainingWaitTime)
 
 	logger.WithField("action", action).WithField("wait", wait).WithField("attempt", attempt).Info("Slack API rate limit exceeded, waiting before retry")
 
@@ -847,7 +848,7 @@ func waitForRateLimit(ctx context.Context, logger types.Logger, err *slack.RateL
 }
 
 func waitForTransientError(ctx context.Context, logger types.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
-	wait := min(time.Duration(attempt)*time.Second, remainingWaitTime)
+	wait := min(time.Duration(attempt)*time.Second+jitter(500*time.Millisecond), remainingWaitTime)
 
 	logger.WithField("error", err).WithField("action", action).WithField("wait", wait).WithField("attempt", attempt).Info("Slack transient error, waiting before retry")
 
@@ -855,11 +856,16 @@ func waitForTransientError(ctx context.Context, logger types.Logger, err error, 
 }
 
 func waitForFatalError(ctx context.Context, logger types.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
-	wait := min(time.Duration(attempt)*time.Second*2, remainingWaitTime)
+	wait := min(time.Duration(attempt)*2*time.Second+jitter(500*time.Millisecond), remainingWaitTime)
 
 	logger.WithField("error", err).WithField("action", action).WithField("wait", wait).WithField("attempt", attempt).Info("Slack fatal error, waiting before retry")
 
 	return sleep(ctx, wait)
+}
+
+// jitter returns a random duration in [0, maxJitter) to spread retries across goroutines.
+func jitter(maxJitter time.Duration) time.Duration {
+	return time.Duration(rand.N(int64(maxJitter))) // #nosec G404 -- weak random is acceptable for retry jitter
 }
 
 func sleep(ctx context.Context, t time.Duration) error {
