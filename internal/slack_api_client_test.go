@@ -80,7 +80,7 @@ func TestNew(t *testing.T) {
 
 		// Verify defaults were set
 		assert.Equal(t, 3, cfg.Concurrency)
-		assert.Equal(t, 30, cfg.HTTPTimeoutSeconds)
+		assert.Equal(t, 20, cfg.HTTPTimeoutSeconds)
 	})
 }
 

@@ -22,9 +22,9 @@ func TestNewDefaultSlackClientConfig(t *testing.T) {
 	assert.Equal(t, 5, cfg.MaxAttemptsForTransientError)
 	assert.Equal(t, 5, cfg.MaxAttemptsForFatalError)
 	assert.Equal(t, 120, cfg.MaxRateLimitErrorWaitTimeSeconds)
-	assert.Equal(t, 30, cfg.MaxTransientErrorWaitTimeSeconds)
+	assert.Equal(t, 60, cfg.MaxTransientErrorWaitTimeSeconds)
 	assert.Equal(t, 30, cfg.MaxFatalErrorWaitTimeSeconds)
-	assert.Equal(t, 30, cfg.HTTPTimeoutSeconds)
+	assert.Equal(t, 20, cfg.HTTPTimeoutSeconds)
 }
 
 func TestSlackClientConfig_SetDefaults(t *testing.T) {
@@ -41,9 +41,9 @@ func TestSlackClientConfig_SetDefaults(t *testing.T) {
 		assert.Equal(t, 5, cfg.MaxAttemptsForTransientError)
 		assert.Equal(t, 5, cfg.MaxAttemptsForFatalError)
 		assert.Equal(t, 120, cfg.MaxRateLimitErrorWaitTimeSeconds)
-		assert.Equal(t, 30, cfg.MaxTransientErrorWaitTimeSeconds)
+		assert.Equal(t, 60, cfg.MaxTransientErrorWaitTimeSeconds)
 		assert.Equal(t, 30, cfg.MaxFatalErrorWaitTimeSeconds)
-		assert.Equal(t, 30, cfg.HTTPTimeoutSeconds)
+		assert.Equal(t, 20, cfg.HTTPTimeoutSeconds)
 	})
 
 	t.Run("sets defaults for negative values", func(t *testing.T) {
@@ -66,9 +66,9 @@ func TestSlackClientConfig_SetDefaults(t *testing.T) {
 		assert.Equal(t, 5, cfg.MaxAttemptsForTransientError)
 		assert.Equal(t, 5, cfg.MaxAttemptsForFatalError)
 		assert.Equal(t, 120, cfg.MaxRateLimitErrorWaitTimeSeconds)
-		assert.Equal(t, 30, cfg.MaxTransientErrorWaitTimeSeconds)
+		assert.Equal(t, 60, cfg.MaxTransientErrorWaitTimeSeconds)
 		assert.Equal(t, 30, cfg.MaxFatalErrorWaitTimeSeconds)
-		assert.Equal(t, 30, cfg.HTTPTimeoutSeconds)
+		assert.Equal(t, 20, cfg.HTTPTimeoutSeconds)
 	})
 
 	t.Run("preserves positive custom values", func(t *testing.T) {
