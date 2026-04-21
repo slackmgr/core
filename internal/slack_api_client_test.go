@@ -362,9 +362,9 @@ func TestConstants(t *testing.T) {
 	t.Run("error constants are defined", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Equal(t, "channel_not_found", internal.SlackChannelNotFoundError)
-		assert.Equal(t, "thread_not_found", internal.SlackThreadNotFoundError)
-		assert.Equal(t, "no_such_subteam", internal.SlackNoSuchSubTeamError)
+		assert.Equal(t, "channel_not_found", internal.SlackErrChannelNotFound)
+		assert.Equal(t, "thread_not_found", internal.SlackErrThreadNotFound)
+		assert.Equal(t, "no_such_subteam", internal.SlackErrNoSuchSubTeam)
 	})
 
 	t.Run("ErrNotConnected is exported", func(t *testing.T) {

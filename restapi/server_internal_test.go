@@ -1597,7 +1597,7 @@ func TestChannelInfoSyncer_GetChannelInfo(t *testing.T) {
 
 		slackClient := &mockSlackClient{}
 		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{}, nil)
-		slackClient.On("GetChannelInfo", mock.Anything, "C999").Return(nil, errors.New(internal.SlackChannelNotFoundError))
+		slackClient.On("GetChannelInfo", mock.Anything, "C999").Return(nil, errors.New(internal.SlackErrChannelNotFound))
 
 		syncer := newTestChannelInfoSyncer(slackClient)
 		_ = syncer.Init(context.Background())

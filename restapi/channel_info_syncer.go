@@ -195,7 +195,7 @@ func (c *channelInfoSyncer) refreshChannelInfo(ctx context.Context, channel stri
 
 	slackChannel, err := c.slackClient.GetChannelInfo(ctx, channel)
 	if err != nil {
-		if err.Error() == internal.SlackChannelNotFoundError {
+		if err.Error() == internal.SlackErrChannelNotFound {
 			channelFound = false
 		} else {
 			return nil, err

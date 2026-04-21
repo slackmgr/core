@@ -41,8 +41,6 @@ const (
 // ErrNotConnected is returned when an API method is called before Connect().
 var ErrNotConnected = errors.New("client not connected: Connect() must be called first")
 
-type retryable interface{ Retryable() bool }
-
 // rateLimitSignaler is satisfied by any type that can record a rate-limit
 // deadline so that all callers can back off until it expires.
 type rateLimitSignaler interface {
@@ -316,9 +314,9 @@ func (c *SlackAPIClient) MessageHasReplies(ctx context.Context, channelID, ts st
 		return msgs, nil, err
 	}
 
-	msgs, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f, SlackChannelNotFoundError, SlackThreadNotFoundError)
+	msgs, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f, SlackErrChannelNotFound, SlackErrThreadNotFound)
 	if err != nil {
-		if err.Error() == SlackChannelNotFoundError || err.Error() == SlackThreadNotFoundError {
+		if err.Error() == SlackErrChannelNotFound || err.Error() == SlackErrThreadNotFound {
 			return false, nil
 		}
 		return false, err
@@ -344,8 +342,8 @@ func (c *SlackAPIClient) GetChannelInfo(ctx context.Context, channelID string) (
 		c.metrics.CounterInc(slackClientCacheRequestsTotalMetric, action, "hit")
 
 		// If we cached a ChannelNotFoundError, return it as an error
-		if val == SlackChannelNotFoundError {
-			return nil, errors.New(SlackChannelNotFoundError)
+		if val == SlackErrChannelNotFound {
+			return nil, errors.New(SlackErrChannelNotFound)
 		}
 
 		info := slack.Channel{}
@@ -368,11 +366,11 @@ func (c *SlackAPIClient) GetChannelInfo(ctx context.Context, channelID string) (
 		return val, nil, err
 	}
 
-	channel, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f, SlackChannelNotFoundError)
+	channel, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f, SlackErrChannelNotFound)
 	unknownChannel := false
 
 	if err != nil {
-		if err.Error() == SlackChannelNotFoundError {
+		if err.Error() == SlackErrChannelNotFound {
 			unknownChannel = true
 		} else {
 			return nil, err
@@ -381,7 +379,7 @@ func (c *SlackAPIClient) GetChannelInfo(ctx context.Context, channelID string) (
 
 	// No channel found, cache the error to avoid repeated API calls, and then return the error
 	if unknownChannel {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, SlackChannelNotFoundError, 10*time.Second, 10*time.Second)
+		c.cache.SetWithRandomExpiration(ctx, cacheKey, SlackErrChannelNotFound, 10*time.Second, 10*time.Second)
 		return nil, err
 	}
 
@@ -543,9 +541,9 @@ func (c *SlackAPIClient) ListUserGroupMembers(ctx context.Context, groupID strin
 		return val, nil, err
 	}
 
-	userIDs, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, c.gate, c.sem, action, f, SlackNoSuchSubTeamError)
+	userIDs, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, c.gate, c.sem, action, f, SlackErrNoSuchSubTeam)
 	if err != nil {
-		if err.Error() == SlackNoSuchSubTeamError {
+		if err.Error() == SlackErrNoSuchSubTeam {
 			return result, nil
 		}
 		return nil, err
@@ -604,9 +602,9 @@ func (c *SlackAPIClient) GetUserIDsInChannel(ctx context.Context, channelID stri
 	}
 
 	for {
-		users, nextCursor, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f, SlackChannelNotFoundError)
+		users, nextCursor, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f, SlackErrChannelNotFound)
 		if err != nil {
-			if err.Error() == SlackChannelNotFoundError {
+			if err.Error() == SlackErrChannelNotFound {
 				return result, nil
 			}
 			return nil, err
@@ -720,18 +718,26 @@ func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics typ
 			return result1, result2, err
 		}
 
-		errType := classifySlackError(err)
-		metrics.CounterInc(slackAPIErrorsTotalMetric, action, errType)
+		errTypeMetricLabel := getSlackErrorMetricLabel(err)
 
+		metrics.CounterInc(slackAPIErrorsTotalMetric, action, errTypeMetricLabel)
+
+		// waitForAPIError returns nil if we should try again, after waiting an appropriate amount of time for the error type.
+		// A returned error indicates either that the error was not a known recoverable type, or that we've
+		// exceeded retry limits or context deadline and should not retry.
 		if waitErr := waitForAPIError(ctx, started, logger, attempt, action, cfg, gate, metrics, err); waitErr != nil {
 			return result1, result2, waitErr
 		}
 
-		metrics.CounterInc(slackAPIRetriesTotalMetric, action, errType)
+		metrics.CounterInc(slackAPIRetriesTotalMetric, action, errTypeMetricLabel)
+
 		attempt++
 	}
 }
 
+// waitForAPIError determines whether the given error is a rate limit error or a transient error,
+// and if so waits an appropriate amount of time before the next retry attempt
+// An error is returned if the retry should not be attempted (e.g. if we've exceeded max attempts or context deadline).
 func waitForAPIError(ctx context.Context, started time.Time, logger types.Logger, attempt int, action string, cfg *config.SlackClientConfig, gate rateLimitSignaler, metrics types.Metrics, err error) error {
 	var rateLimitError *slack.RateLimitedError
 
