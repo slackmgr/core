@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-21
+
+### Changed
+- Slack API retry logic simplified: only explicitly transient errors (`internal_error`, `fatal_error`, `service_unavailable`, `request_timeout`, HTTP timeouts, and errors implementing `Retryable() bool`) are retried; all other errors fail immediately instead of going through a separate "fatal" retry path
+- Slack error metric label (`slack_api_errors_total`) now uses the Slack error code string directly (e.g. `channel_not_found`, `internal_error`) instead of collapsing errors into broad categories, giving better observability
+- Slack error constants renamed from `SlackFooError` to `SlackErrFoo` (e.g. `SlackChannelNotFoundError` → `SlackErrChannelNotFound`) for consistency with Go naming conventions
+
+### Fixed
+- Jitter (up to 500ms) added to all retry backoff delays (rate limit, transient) to prevent concurrent goroutines from retrying in lockstep
+
+### Removed
+- `MaxAttemptsForFatalError` and `MaxFatalErrorWaitTimeSeconds` fields removed from `config.SlackClientConfig`; the fatal retry path no longer exists
+
 ## [0.10.1] - 2026-04-14
 
 ### Changed
@@ -282,6 +295,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 See git history for changes in v0.0.62 and earlier versions.
 
 [Unreleased]: https://github.com/slackmgr/core/compare/v0.10.1...HEAD
+[0.11.0]: https://github.com/slackmgr/core/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/slackmgr/core/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/slackmgr/core/compare/v0.9.3...v0.10.0
 [0.9.3]: https://github.com/slackmgr/core/compare/v0.9.2...v0.9.3
