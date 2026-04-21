@@ -89,10 +89,8 @@ func TestSetSlackClientConfigDefaults_Prefix(t *testing.T) {
 		"slackClient.concurrency",
 		"slackClient.maxAttemptsForRateLimitError",
 		"slackClient.maxAttemptsForTransientError",
-		"slackClient.maxAttemptsForFatalError",
 		"slackClient.maxRateLimitErrorWaitTimeSeconds",
 		"slackClient.maxTransientErrorWaitTimeSeconds",
-		"slackClient.maxFatalErrorWaitTimeSeconds",
 		"slackClient.httpTimeoutSeconds",
 	}
 
@@ -131,10 +129,8 @@ func TestSetManagerConfigDefaults_MatchesConstructor(t *testing.T) {
 	assert.Equal(t, cfg.SlackClient.Concurrency, stub.m["slackClient.concurrency"])
 	assert.Equal(t, cfg.SlackClient.MaxAttemptsForRateLimitError, stub.m["slackClient.maxAttemptsForRateLimitError"])
 	assert.Equal(t, cfg.SlackClient.MaxAttemptsForTransientError, stub.m["slackClient.maxAttemptsForTransientError"])
-	assert.Equal(t, cfg.SlackClient.MaxAttemptsForFatalError, stub.m["slackClient.maxAttemptsForFatalError"])
 	assert.Equal(t, cfg.SlackClient.MaxRateLimitErrorWaitTimeSeconds, stub.m["slackClient.maxRateLimitErrorWaitTimeSeconds"])
 	assert.Equal(t, cfg.SlackClient.MaxTransientErrorWaitTimeSeconds, stub.m["slackClient.maxTransientErrorWaitTimeSeconds"])
-	assert.Equal(t, cfg.SlackClient.MaxFatalErrorWaitTimeSeconds, stub.m["slackClient.maxFatalErrorWaitTimeSeconds"])
 	assert.Equal(t, cfg.SlackClient.HTTPTimeoutSeconds, stub.m["slackClient.httpTimeoutSeconds"])
 }
 
@@ -160,9 +156,7 @@ func TestSetAPIConfigDefaults_MatchesConstructor(t *testing.T) {
 	assert.Equal(t, cfg.SlackClient.Concurrency, stub.m["slackClient.concurrency"])
 	assert.Equal(t, cfg.SlackClient.MaxAttemptsForRateLimitError, stub.m["slackClient.maxAttemptsForRateLimitError"])
 	assert.Equal(t, cfg.SlackClient.MaxAttemptsForTransientError, stub.m["slackClient.maxAttemptsForTransientError"])
-	assert.Equal(t, cfg.SlackClient.MaxAttemptsForFatalError, stub.m["slackClient.maxAttemptsForFatalError"])
 	assert.Equal(t, cfg.SlackClient.MaxRateLimitErrorWaitTimeSeconds, stub.m["slackClient.maxRateLimitErrorWaitTimeSeconds"])
 	assert.Equal(t, cfg.SlackClient.MaxTransientErrorWaitTimeSeconds, stub.m["slackClient.maxTransientErrorWaitTimeSeconds"])
-	assert.Equal(t, cfg.SlackClient.MaxFatalErrorWaitTimeSeconds, stub.m["slackClient.maxFatalErrorWaitTimeSeconds"])
 	assert.Equal(t, cfg.SlackClient.HTTPTimeoutSeconds, stub.m["slackClient.httpTimeoutSeconds"])
 }

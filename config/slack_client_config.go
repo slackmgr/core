@@ -23,12 +23,6 @@ const (
 	// resolve quickly, so 5 attempts is usually sufficient.
 	DefaultMaxAttemptsForTransientError = 5
 
-	// DefaultMaxAttemptsForFatalError is the default number of retry attempts for
-	// errors that are typically permanent (4xx except 429). While these usually
-	// indicate a problem that won't resolve with retries, a few attempts help
-	// handle edge cases like brief authentication issues.
-	DefaultMaxAttemptsForFatalError = 5
-
 	// DefaultMaxRateLimitErrorWaitTimeSeconds is the total time budget (in seconds)
 	// from the first attempt during which rate limit retries are allowed. Once the
 	// elapsed time exceeds this value, no further retries are made.
@@ -38,11 +32,6 @@ const (
 	// from the first attempt during which transient error retries are allowed. Once
 	// the elapsed time exceeds this value, no further retries are made.
 	DefaultMaxTransientErrorWaitTimeSeconds = 60
-
-	// DefaultMaxFatalErrorWaitTimeSeconds is the total time budget (in seconds)
-	// from the first attempt during which fatal error retries are allowed. Once the
-	// elapsed time exceeds this value, no further retries are made.
-	DefaultMaxFatalErrorWaitTimeSeconds = 30
 
 	// DefaultHTTPTimeoutSeconds is the default HTTP client timeout in seconds.
 	// 20 seconds accommodates slow Slack API responses while not hanging indefinitely.
@@ -111,10 +100,6 @@ const (
 //     MaxAttemptsForTransientError attempts within a MaxTransientErrorWaitTimeSeconds
 //     total time budget.
 //
-//   - Fatal Errors (4xx except 429): Retried sparingly up to MaxAttemptsForFatalError
-//     attempts within a MaxFatalErrorWaitTimeSeconds total time budget, since these
-//     usually indicate permanent problems like invalid parameters.
-//
 // # Concurrency
 //
 // The Concurrency setting controls how many parallel Slack API requests can be made.
@@ -170,11 +155,6 @@ type SlackClientConfig struct {
 	// between 1 and 100.
 	MaxAttemptsForTransientError int `json:"maxAttemptsForTransientError" mapstructure:"maxAttemptsForTransientError" yaml:"maxAttemptsForTransientError"`
 
-	// MaxAttemptsForFatalError sets how many times to retry after fatal errors
-	// (4xx responses except 429). These rarely succeed on retry but a few attempts
-	// help with edge cases. Default: 5. Must be between 1 and 100.
-	MaxAttemptsForFatalError int `json:"maxAttemptsForFatalError" mapstructure:"maxAttemptsForFatalError" yaml:"maxAttemptsForFatalError"`
-
 	// MaxRateLimitErrorWaitTimeSeconds is the total time budget (in seconds) from
 	// the first attempt during which rate limit retries are allowed. The per-retry
 	// sleep is min(RetryAfter+2s, remainingBudget). Default: 120. Must be between
@@ -186,12 +166,6 @@ type SlackClientConfig struct {
 	// per-retry sleep is min(attempt*1s, remainingBudget). Default: 60. Must be
 	// between 1 and 600.
 	MaxTransientErrorWaitTimeSeconds int `json:"maxTransientErrorWaitTimeSeconds" mapstructure:"maxTransientErrorWaitTimeSeconds" yaml:"maxTransientErrorWaitTimeSeconds"`
-
-	// MaxFatalErrorWaitTimeSeconds is the total time budget (in seconds) from the
-	// first attempt during which fatal error retries are allowed. The per-retry
-	// sleep is min(attempt*2s, remainingBudget). Default: 30. Must be between 1
-	// and 600.
-	MaxFatalErrorWaitTimeSeconds int `json:"maxFatalErrorWaitTimeSeconds" mapstructure:"maxFatalErrorWaitTimeSeconds" yaml:"maxFatalErrorWaitTimeSeconds"`
 
 	// HTTPTimeoutSeconds sets the HTTP client timeout for Slack API requests.
 	// This should be long enough to accommodate slow responses but short enough
@@ -205,7 +179,6 @@ type SlackClientConfig struct {
 //   - Concurrency: 3 (balanced throughput vs rate limits)
 //   - Rate limit retries: 10 attempts, 120s total budget
 //   - Transient error retries: 5 attempts, 60s total budget
-//   - Fatal error retries: 5 attempts, 30s total budget
 //   - HTTP timeout: 20 seconds
 //
 // The AppToken and BotToken are intentionally left empty and must be set before use.
@@ -234,20 +207,12 @@ func (c *SlackClientConfig) SetDefaults() {
 		c.MaxAttemptsForTransientError = DefaultMaxAttemptsForTransientError
 	}
 
-	if c.MaxAttemptsForFatalError <= 0 {
-		c.MaxAttemptsForFatalError = DefaultMaxAttemptsForFatalError
-	}
-
 	if c.MaxRateLimitErrorWaitTimeSeconds <= 0 {
 		c.MaxRateLimitErrorWaitTimeSeconds = DefaultMaxRateLimitErrorWaitTimeSeconds
 	}
 
 	if c.MaxTransientErrorWaitTimeSeconds <= 0 {
 		c.MaxTransientErrorWaitTimeSeconds = DefaultMaxTransientErrorWaitTimeSeconds
-	}
-
-	if c.MaxFatalErrorWaitTimeSeconds <= 0 {
-		c.MaxFatalErrorWaitTimeSeconds = DefaultMaxFatalErrorWaitTimeSeconds
 	}
 
 	if c.HTTPTimeoutSeconds <= 0 {
@@ -287,20 +252,12 @@ func (c *SlackClientConfig) Validate() error {
 		return fmt.Errorf("max attempts for transient error must be between %d and %d", MinMaxAttempts, MaxMaxAttempts)
 	}
 
-	if c.MaxAttemptsForFatalError < MinMaxAttempts || c.MaxAttemptsForFatalError > MaxMaxAttempts {
-		return fmt.Errorf("max attempts for fatal error must be between %d and %d", MinMaxAttempts, MaxMaxAttempts)
-	}
-
 	if c.MaxRateLimitErrorWaitTimeSeconds < MinWaitTimeSeconds || c.MaxRateLimitErrorWaitTimeSeconds > MaxWaitTimeSeconds {
 		return fmt.Errorf("max rate limit error wait time must be between %d and %d seconds", MinWaitTimeSeconds, MaxWaitTimeSeconds)
 	}
 
 	if c.MaxTransientErrorWaitTimeSeconds < MinWaitTimeSeconds || c.MaxTransientErrorWaitTimeSeconds > MaxWaitTimeSeconds {
 		return fmt.Errorf("max transient error wait time must be between %d and %d seconds", MinWaitTimeSeconds, MaxWaitTimeSeconds)
-	}
-
-	if c.MaxFatalErrorWaitTimeSeconds < MinWaitTimeSeconds || c.MaxFatalErrorWaitTimeSeconds > MaxWaitTimeSeconds {
-		return fmt.Errorf("max fatal error wait time must be between %d and %d seconds", MinWaitTimeSeconds, MaxWaitTimeSeconds)
 	}
 
 	if c.HTTPTimeoutSeconds < MinHTTPTimeoutSeconds || c.HTTPTimeoutSeconds > MaxHTTPTimeoutSeconds {

@@ -42,9 +42,7 @@ func setSlackClientConfigDefaults(v DefaultsSetter, prefix string) {
 	v.SetDefault(key("concurrency"), DefaultConcurrency)
 	v.SetDefault(key("maxAttemptsForRateLimitError"), DefaultMaxAttemptsForRateLimitError)
 	v.SetDefault(key("maxAttemptsForTransientError"), DefaultMaxAttemptsForTransientError)
-	v.SetDefault(key("maxAttemptsForFatalError"), DefaultMaxAttemptsForFatalError)
 	v.SetDefault(key("maxRateLimitErrorWaitTimeSeconds"), DefaultMaxRateLimitErrorWaitTimeSeconds)
 	v.SetDefault(key("maxTransientErrorWaitTimeSeconds"), DefaultMaxTransientErrorWaitTimeSeconds)
-	v.SetDefault(key("maxFatalErrorWaitTimeSeconds"), DefaultMaxFatalErrorWaitTimeSeconds)
 	v.SetDefault(key("httpTimeoutSeconds"), DefaultHTTPTimeoutSeconds)
 }

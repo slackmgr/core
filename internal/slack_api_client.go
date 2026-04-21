@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -21,67 +20,6 @@ import (
 )
 
 const (
-	// SlackChannelNotFoundError is returned when the target channel does not exist or
-	// the bot lacks visibility of it. Non-retryable.
-	SlackChannelNotFoundError = "channel_not_found"
-
-	// SlackThreadNotFoundError is returned when the target thread does not exist,
-	// typically because the parent message was deleted. Non-retryable.
-	SlackThreadNotFoundError = "thread_not_found"
-
-	// SlackNoSuchSubTeamError is returned when a referenced user group does not exist
-	// in the workspace. Non-retryable.
-	SlackNoSuchSubTeamError = "no_such_subteam"
-
-	// slackCantUpdateMessageError is returned when the bot attempts to edit a message
-	// it is not permitted to modify (e.g. another user's message). Non-retryable.
-	slackCantUpdateMessageError = "cant_update_message"
-
-	// slackCantDeleteMessageError is returned when the bot attempts to delete a message
-	// it is not permitted to remove (e.g. another user's message). Non-retryable.
-	slackCantDeleteMessageError = "cant_delete_message"
-
-	// slackMessageNotFoundError is returned when the target message does not exist,
-	// typically because it was already deleted. Non-retryable.
-	slackMessageNotFoundError = "message_not_found"
-
-	// slackNotInChannelError is returned when the bot is not a member of the channel
-	// it is trying to interact with. Non-retryable.
-	slackNotInChannelError = "not_in_channel"
-
-	// slackInvalidBlocksError is returned when a message payload contains malformed
-	// Block Kit JSON. Non-retryable.
-	slackInvalidBlocksError = "invalid_blocks"
-
-	// slackIsArchivedError is returned when the target channel has been archived and
-	// no longer accepts messages. Non-retryable.
-	slackIsArchivedError = "is_archived"
-
-	// slackRestrictedActionError is returned when a workspace policy prevents the
-	// requested action (e.g. posting is restricted to certain roles). Non-retryable.
-	slackRestrictedActionError = "restricted_action"
-
-	// slackInternalError is a transient server-side error returned by Slack when
-	// something went wrong on their end. Safe to retry.
-	slackInternalError = "internal_error"
-
-	// slackFatalError is a transient error string returned by Slack for unspecified
-	// server-side failures. Despite the name, Slack treats this as retryable.
-	slackFatalError = "fatal_error"
-
-	// slackServiceUnavailableError is a transient error returned when the Slack API
-	// is temporarily unavailable. Safe to retry.
-	slackServiceUnavailableError = "service_unavailable"
-
-	// slackRequestTimeoutError is a transient error returned when Slack's own
-	// processing timed out handling the request. Safe to retry.
-	slackRequestTimeoutError = "request_timeout"
-
-	// slackRateLimitedError is the error string Slack returns alongside a 429 response.
-	// The slack-go library also surfaces this as *slack.RateLimitedError, but the string
-	// form can appear in other contexts. Safe to retry after the Retry-After delay.
-	slackRateLimitedError = "ratelimited"
-
 	// slackClientCacheRequestsTotalMetric counts calls to the cacheable Slack client wrapper
 	// methods, labelled by result ("hit" = served from cache, "miss" = required an API call).
 	slackClientCacheRequestsTotalMetric = "slack_client_cache_requests_total"
@@ -785,10 +723,6 @@ func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics typ
 		errType := classifySlackError(err)
 		metrics.CounterInc(slackAPIErrorsTotalMetric, action, errType)
 
-		if !isRetryableError(err) {
-			return result1, result2, err
-		}
-
 		if waitErr := waitForAPIError(ctx, started, logger, attempt, action, cfg, gate, metrics, err); waitErr != nil {
 			return result1, result2, waitErr
 		}
@@ -830,13 +764,7 @@ func waitForAPIError(ctx context.Context, started time.Time, logger types.Logger
 		return waitForTransientError(ctx, logger, err, attempt, action, remainingWaitTime)
 	}
 
-	remainingWaitTime := time.Until(started.Add(time.Duration(cfg.MaxFatalErrorWaitTimeSeconds) * time.Second))
-
-	if attempt >= cfg.MaxAttemptsForFatalError || remainingWaitTime < time.Second {
-		return fmt.Errorf("failed to call Slack API %s after %d attempts and %d seconds: fatal error: %w", action, attempt, int(time.Since(started).Seconds()), err)
-	}
-
-	return waitForFatalError(ctx, logger, err, attempt, action, remainingWaitTime)
+	return err
 }
 
 func waitForRateLimit(ctx context.Context, logger types.Logger, err *slack.RateLimitedError, attempt int, action string, remainingWaitTime time.Duration) error {
@@ -855,14 +783,6 @@ func waitForTransientError(ctx context.Context, logger types.Logger, err error, 
 	return sleep(ctx, wait)
 }
 
-func waitForFatalError(ctx context.Context, logger types.Logger, err error, attempt int, action string, remainingWaitTime time.Duration) error {
-	wait := min(time.Duration(attempt)*2*time.Second+jitter(500*time.Millisecond), remainingWaitTime)
-
-	logger.WithField("error", err).WithField("action", action).WithField("wait", wait).WithField("attempt", attempt).Info("Slack fatal error, waiting before retry")
-
-	return sleep(ctx, wait)
-}
-
 // jitter returns a random duration in [0, maxJitter) to spread retries across goroutines.
 func jitter(maxJitter time.Duration) time.Duration {
 	return time.Duration(rand.N(int64(maxJitter))) // #nosec G404 -- weak random is acceptable for retry jitter
@@ -875,82 +795,4 @@ func sleep(ctx context.Context, t time.Duration) error {
 	case <-time.After(t):
 		return nil
 	}
-}
-
-// slackErrorMeta holds classification properties for a known Slack API error string.
-type slackErrorMeta struct {
-	label       string // metric label
-	isTransient bool   // true → retry with transient backoff
-	isRetryable bool   // false → non-retryable, bail immediately
-}
-
-//nolint:gochecknoglobals
-var slackErrors = map[string]slackErrorMeta{
-	// Transient — safe to retry with linear backoff
-	slackInternalError:           {label: "transient", isTransient: true, isRetryable: true},
-	slackFatalError:              {label: "transient", isTransient: true, isRetryable: true},
-	slackServiceUnavailableError: {label: "transient", isTransient: true, isRetryable: true},
-	slackRequestTimeoutError:     {label: "transient", isTransient: true, isRetryable: true},
-	slackRateLimitedError:        {label: "transient", isTransient: true, isRetryable: true},
-	// Non-retryable — permanent failures, labelled by error code
-	SlackChannelNotFoundError:   {label: SlackChannelNotFoundError, isTransient: false, isRetryable: false},
-	slackMessageNotFoundError:   {label: slackMessageNotFoundError, isTransient: false, isRetryable: false},
-	slackCantUpdateMessageError: {label: slackCantUpdateMessageError, isTransient: false, isRetryable: false},
-	slackCantDeleteMessageError: {label: slackCantDeleteMessageError, isTransient: false, isRetryable: false},
-	slackInvalidBlocksError:     {label: slackInvalidBlocksError, isTransient: false, isRetryable: false},
-	slackNotInChannelError:      {label: slackNotInChannelError, isTransient: false, isRetryable: false},
-	slackIsArchivedError:        {label: slackIsArchivedError, isTransient: false, isRetryable: false},
-	slackRestrictedActionError:  {label: slackRestrictedActionError, isTransient: false, isRetryable: false},
-}
-
-// classifyError is the single classification function for all Slack API errors.
-// All other error-classification helpers delegate to it.
-func classifyError(err error) slackErrorMeta {
-	if err == nil {
-		return slackErrorMeta{label: "unknown", isTransient: false, isRetryable: true}
-	}
-
-	// Rate limit check must come first: *slack.RateLimitedError also matches
-	// "ratelimited" in the map, but gets its own dedicated retry path.
-	var rateLimitErr *slack.RateLimitedError
-	if errors.As(err, &rateLimitErr) {
-		return slackErrorMeta{label: "rate_limited", isTransient: false, isRetryable: true}
-	}
-
-	// HTTP client timeout — distinct from the caller's context expiring (ctx.Err() != nil).
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) && urlErr.Timeout() {
-		return slackErrorMeta{label: "transient", isTransient: true, isRetryable: true}
-	}
-
-	// If the error type implements a Retryable() method, use it to determine retryability.
-	if v, ok := any(err).(retryable); ok && v.Retryable() {
-		return slackErrorMeta{label: "transient", isTransient: true, isRetryable: true}
-	}
-
-	// Check the error string against known Slack API error codes to classify it for metrics and retry logic.
-	if meta, ok := slackErrors[err.Error()]; ok {
-		return meta
-	}
-
-	// Unrecognized error — assume it's a transient issue worth retrying, but label it "unknown" for,
-	// metrics so we can investigate and add it to the map if needed.
-	return slackErrorMeta{label: "unknown", isTransient: false, isRetryable: true}
-}
-
-// classifySlackError returns a bounded metric label for a Slack API error.
-func classifySlackError(err error) string {
-	if err == nil {
-		return "unknown"
-	}
-
-	return classifyError(err).label
-}
-
-func isTransientError(err error) bool {
-	return classifyError(err).isTransient
-}
-
-func isRetryableError(err error) bool {
-	return classifyError(err).isRetryable
 }

@@ -20,10 +20,8 @@ func TestNewDefaultSlackClientConfig(t *testing.T) {
 	assert.Equal(t, 3, cfg.Concurrency)
 	assert.Equal(t, 10, cfg.MaxAttemptsForRateLimitError)
 	assert.Equal(t, 5, cfg.MaxAttemptsForTransientError)
-	assert.Equal(t, 5, cfg.MaxAttemptsForFatalError)
 	assert.Equal(t, 120, cfg.MaxRateLimitErrorWaitTimeSeconds)
 	assert.Equal(t, 60, cfg.MaxTransientErrorWaitTimeSeconds)
-	assert.Equal(t, 30, cfg.MaxFatalErrorWaitTimeSeconds)
 	assert.Equal(t, 20, cfg.HTTPTimeoutSeconds)
 }
 
@@ -39,10 +37,8 @@ func TestSlackClientConfig_SetDefaults(t *testing.T) {
 		assert.Equal(t, 3, cfg.Concurrency)
 		assert.Equal(t, 10, cfg.MaxAttemptsForRateLimitError)
 		assert.Equal(t, 5, cfg.MaxAttemptsForTransientError)
-		assert.Equal(t, 5, cfg.MaxAttemptsForFatalError)
 		assert.Equal(t, 120, cfg.MaxRateLimitErrorWaitTimeSeconds)
 		assert.Equal(t, 60, cfg.MaxTransientErrorWaitTimeSeconds)
-		assert.Equal(t, 30, cfg.MaxFatalErrorWaitTimeSeconds)
 		assert.Equal(t, 20, cfg.HTTPTimeoutSeconds)
 	})
 
@@ -53,10 +49,8 @@ func TestSlackClientConfig_SetDefaults(t *testing.T) {
 			Concurrency:                      -1,
 			MaxAttemptsForRateLimitError:     -5,
 			MaxAttemptsForTransientError:     -10,
-			MaxAttemptsForFatalError:         -3,
 			MaxRateLimitErrorWaitTimeSeconds: -100,
 			MaxTransientErrorWaitTimeSeconds: -50,
-			MaxFatalErrorWaitTimeSeconds:     -25,
 			HTTPTimeoutSeconds:               -15,
 		}
 		cfg.SetDefaults()
@@ -64,10 +58,8 @@ func TestSlackClientConfig_SetDefaults(t *testing.T) {
 		assert.Equal(t, 3, cfg.Concurrency)
 		assert.Equal(t, 10, cfg.MaxAttemptsForRateLimitError)
 		assert.Equal(t, 5, cfg.MaxAttemptsForTransientError)
-		assert.Equal(t, 5, cfg.MaxAttemptsForFatalError)
 		assert.Equal(t, 120, cfg.MaxRateLimitErrorWaitTimeSeconds)
 		assert.Equal(t, 60, cfg.MaxTransientErrorWaitTimeSeconds)
-		assert.Equal(t, 30, cfg.MaxFatalErrorWaitTimeSeconds)
 		assert.Equal(t, 20, cfg.HTTPTimeoutSeconds)
 	})
 
@@ -78,10 +70,8 @@ func TestSlackClientConfig_SetDefaults(t *testing.T) {
 			Concurrency:                      5,
 			MaxAttemptsForRateLimitError:     20,
 			MaxAttemptsForTransientError:     15,
-			MaxAttemptsForFatalError:         10,
 			MaxRateLimitErrorWaitTimeSeconds: 200,
 			MaxTransientErrorWaitTimeSeconds: 60,
-			MaxFatalErrorWaitTimeSeconds:     45,
 			HTTPTimeoutSeconds:               60,
 		}
 		cfg.SetDefaults()
@@ -89,10 +79,8 @@ func TestSlackClientConfig_SetDefaults(t *testing.T) {
 		assert.Equal(t, 5, cfg.Concurrency)
 		assert.Equal(t, 20, cfg.MaxAttemptsForRateLimitError)
 		assert.Equal(t, 15, cfg.MaxAttemptsForTransientError)
-		assert.Equal(t, 10, cfg.MaxAttemptsForFatalError)
 		assert.Equal(t, 200, cfg.MaxRateLimitErrorWaitTimeSeconds)
 		assert.Equal(t, 60, cfg.MaxTransientErrorWaitTimeSeconds)
-		assert.Equal(t, 45, cfg.MaxFatalErrorWaitTimeSeconds)
 		assert.Equal(t, 60, cfg.HTTPTimeoutSeconds)
 	})
 
@@ -296,23 +284,6 @@ func TestSlackClientConfig_Validate_BoundaryValues(t *testing.T) {
 		assert.Equal(t, "max attempts for transient error must be between 1 and 100", err.Error())
 	})
 
-	// MaxAttemptsForFatalError boundaries
-	t.Run("max attempts for fatal at lower bound", func(t *testing.T) {
-		t.Parallel()
-		cfg := validSlackClientConfig()
-		cfg.MaxAttemptsForFatalError = config.MinMaxAttempts
-		assert.NoError(t, cfg.Validate())
-	})
-
-	t.Run("max attempts for fatal above maximum", func(t *testing.T) {
-		t.Parallel()
-		cfg := validSlackClientConfig()
-		cfg.MaxAttemptsForFatalError = config.MaxMaxAttempts + 1
-		err := cfg.Validate()
-		require.Error(t, err)
-		assert.Equal(t, "max attempts for fatal error must be between 1 and 100", err.Error())
-	})
-
 	// MaxRateLimitErrorWaitTimeSeconds boundaries
 	t.Run("max rate limit wait time at lower bound", func(t *testing.T) {
 		t.Parallel()
@@ -361,23 +332,6 @@ func TestSlackClientConfig_Validate_BoundaryValues(t *testing.T) {
 		err := cfg.Validate()
 		require.Error(t, err)
 		assert.Equal(t, "max transient error wait time must be between 1 and 600 seconds", err.Error())
-	})
-
-	// MaxFatalErrorWaitTimeSeconds boundaries
-	t.Run("max fatal wait time at lower bound", func(t *testing.T) {
-		t.Parallel()
-		cfg := validSlackClientConfig()
-		cfg.MaxFatalErrorWaitTimeSeconds = config.MinWaitTimeSeconds
-		assert.NoError(t, cfg.Validate())
-	})
-
-	t.Run("max fatal wait time above maximum", func(t *testing.T) {
-		t.Parallel()
-		cfg := validSlackClientConfig()
-		cfg.MaxFatalErrorWaitTimeSeconds = config.MaxWaitTimeSeconds + 1
-		err := cfg.Validate()
-		require.Error(t, err)
-		assert.Equal(t, "max fatal error wait time must be between 1 and 600 seconds", err.Error())
 	})
 
 	// HTTPTimeoutSeconds boundaries
