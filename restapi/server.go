@@ -350,7 +350,13 @@ func (s *Server) Run(ctx context.Context) error {
 
 		close(readyCh)
 
-		return srv.Serve(ln)
+		// ErrServerClosed is the expected return value when the shutdown goroutine
+		// calls srv.Shutdown() after ctx is cancelled. Treat it as a clean exit.
+		if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+
+		return nil
 	})
 
 	errg.Go(func() error {
