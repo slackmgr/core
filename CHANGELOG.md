@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-04-22
+
+### Fixed
+- `http: Server closed` no longer logged as an error on graceful shutdown; `ErrServerClosed` is now treated as a clean exit from the HTTP server goroutine
+
 ## [0.11.0] - 2026-04-21
 
 ### Changed
@@ -295,6 +300,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 See git history for changes in v0.0.62 and earlier versions.
 
 [Unreleased]: https://github.com/slackmgr/core/compare/v0.10.1...HEAD
+[0.11.1]: https://github.com/slackmgr/core/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/slackmgr/core/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/slackmgr/core/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/slackmgr/core/compare/v0.9.3...v0.10.0
