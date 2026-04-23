@@ -12,6 +12,7 @@ import (
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -38,6 +39,7 @@ func TestNewSocketModeHandler(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	require.NotNil(t, handler)
@@ -78,6 +80,7 @@ func TestSocketModeHandler_RunEventLoop_ContextCancellation(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -124,6 +127,7 @@ func TestSocketModeHandler_RunEventLoop_ChannelClosure(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -171,6 +175,7 @@ func TestSocketModeHandler_dispatchHandler_ConcurrencyLimit(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	var activeCount atomic.Int32
@@ -224,6 +229,7 @@ func TestSocketModeHandler_dispatchHandler_PanicRecovery(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	var completed atomic.Bool
@@ -262,6 +268,7 @@ func TestSocketModeHandler_dispatchHandler_ContextCancelled(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	var called atomic.Bool
@@ -300,6 +307,7 @@ func TestSocketModeHandler_dispatcher_EventTypeInteractive(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	// Clear existing handlers and add our test handler
@@ -341,6 +349,7 @@ func TestSocketModeHandler_dispatcher_EventTypeEventsAPI(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	var handlerCalled atomic.Bool
@@ -381,6 +390,7 @@ func TestSocketModeHandler_dispatcher_EventTypeSlashCommand(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	var handlerCalled atomic.Bool
@@ -420,6 +430,7 @@ func TestSocketModeHandler_dispatcher_DefaultHandler(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	var defaultCalled atomic.Bool
@@ -454,6 +465,7 @@ func TestSocketModeHandler_socketmodeDispatcher_HandlerRegistered(t *testing.T) 
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	var handlerCalled atomic.Bool
@@ -488,6 +500,7 @@ func TestSocketModeHandler_socketmodeDispatcher_NoHandler(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	// Clear all handlers for this event type
@@ -517,6 +530,7 @@ func TestSocketModeHandler_interactionDispatcher_InvalidData(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	evt := &socketmode.Event{
@@ -546,6 +560,7 @@ func TestSocketModeHandler_interactionDispatcher_BlockActions(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	// Clear existing handlers to prevent real handlers from being triggered
@@ -595,6 +610,7 @@ func TestSocketModeHandler_eventAPIDispatcher_InvalidData(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	evt := &socketmode.Event{
@@ -625,6 +641,7 @@ func TestSocketModeHandler_slashCommandDispatcher_InvalidData(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	evt := &socketmode.Event{
@@ -654,6 +671,7 @@ func TestSocketModeHandler_handle(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	// Clear existing handlers
@@ -687,6 +705,7 @@ func TestSocketModeHandler_handleMultiple(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	// Clear existing handlers
@@ -723,6 +742,7 @@ func TestSocketModeHandler_handleInteraction(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	// Clear existing handlers
@@ -751,6 +771,7 @@ func TestSocketModeHandler_handleEventsAPI(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	// Clear existing handlers
@@ -779,6 +800,7 @@ func TestSocketModeHandler_handleDefault(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	var called bool
@@ -814,6 +836,7 @@ func TestSocketModeHandler_drainHandlers_Timeout(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	// Add a handler that takes longer than drain timeout
@@ -853,6 +876,7 @@ func TestSocketModeHandler_drainHandlers_Success(t *testing.T) {
 		cfg,
 		newTestManagerSettings(),
 		logger,
+		&types.NoopMetrics{},
 	)
 
 	// Add a handler that completes quickly

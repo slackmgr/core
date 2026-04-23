@@ -29,8 +29,9 @@ import (
 )
 
 const (
-	httpRequestMetric  = "http_server_request_duration_seconds"
-	httpInFlightMetric = "http_server_requests_in_flight"
+	httpRequestMetric           = "http_server_request_duration_seconds"
+	httpInFlightMetric          = "http_server_requests_in_flight"
+	httpAlertsRateLimitedMetric = "http_alerts_rate_limited_total"
 )
 
 const (
@@ -230,6 +231,7 @@ func (s *Server) Run(ctx context.Context) error {
 		[]float64{.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}, metricsLabels...)
 	s.metrics.RegisterGauge(httpInFlightMetric, "Number of HTTP requests currently being processed")
 	s.metrics.GaugeSet(httpInFlightMetric, 0)
+	s.metrics.RegisterCounter(httpAlertsRateLimitedMetric, "Total alert requests rejected by the per-channel rate limiter", "channel")
 
 	// Set release mode to mute a few annoying startup logs.
 	// The actual runtime mode is set below, depending on config.

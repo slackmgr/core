@@ -141,6 +141,7 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 				remaining: 0,
 				resetSecs: retrySecs,
 			})
+			s.metrics.CounterInc(httpAlertsRateLimitedMetric, channel)
 			s.writeErrorResponse(c, err, http.StatusTooManyRequests, channelAlerts[0])
 			return
 		}

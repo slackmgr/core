@@ -117,7 +117,7 @@ func (c *Client) RunSocketMode(ctx context.Context) error {
 
 	socketModeClient := c.api.NewSocketModeClient()
 
-	handler := controllers.NewSocketModeHandler(c, socketModeClient, c.commandQueue, c.issueFinder, c.cacheStore, c.cfg, c.managerSettings, c.logger)
+	handler := controllers.NewSocketModeHandler(c, socketModeClient, c.commandQueue, c.issueFinder, c.cacheStore, c.cfg, c.managerSettings, c.logger, c.metrics)
 
 	// Store the handler reference so SocketModeQuiet() can report its state.
 	c.socketHandler.Store(handler)

@@ -37,6 +37,13 @@ const (
 
 	// Rate limit gate blocked duration (observed in waitForGate)
 	rateLimitGateBlockedDurationMetric = "rate_limit_gate_blocked_duration_seconds"
+
+	// Alert grouping metrics
+	alertsGroupedTotalMetric = "alerts_grouped_total"
+	alertsIgnoredTotalMetric = "alerts_ignored_total"
+
+	// commandsProcessedTotalMetric counts commands processed, labelled by action type.
+	commandsProcessedTotalMetric = "commands_processed_total"
 )
 
 type cmdFunc func(ctx context.Context, issue *models.Issue, cmd *models.Command, logger types.Logger) (bool, error)
@@ -124,6 +131,13 @@ func newChannelManager(channelID string, slackClient SlackClient, db types.DB, l
 	// Rate limit gate
 	metrics.RegisterHistogram(rateLimitGateBlockedDurationMetric, "Time spent blocked waiting for the rate limit gate in seconds", []float64{0.1, 0.5, 1, 5, 10, 30, 60, 120})
 
+	// Alert grouping
+	metrics.RegisterCounter(alertsGroupedTotalMetric, "Total alerts added to an existing open issue", "channel")
+	metrics.RegisterCounter(alertsIgnoredTotalMetric, "Total alerts that matched an existing issue but caused no change", "channel")
+
+	// Command processing by type
+	metrics.RegisterCounter(commandsProcessedTotalMetric, "Total commands processed by action type", "action")
+
 	// Pre-warm per-channel label combinations so they appear at /metrics from start.
 	metrics.CounterAdd(alertsTotal, 0, channelID)
 	metrics.GaugeSet(channelOpenIssuesMetric, 0, channelID)
@@ -132,6 +146,8 @@ func newChannelManager(channelID string, slackClient SlackClient, db types.DB, l
 	metrics.CounterAdd(issuesEscalatedTotalMetric, 0, channelID)
 	metrics.CounterAdd(issuesCreatedTotalMetric, 0, channelID)
 	metrics.CounterAdd(channelLockAcquireFailuresTotalMetric, 0, channelID)
+	metrics.CounterAdd(alertsGroupedTotalMetric, 0, channelID)
+	metrics.CounterAdd(alertsIgnoredTotalMetric, 0, channelID)
 
 	// Pre-warm fixed-enum label combinations.
 	for _, event := range []string{"terminated", "resolved", "unresolved", "investigated", "uninvestigated", "muted", "unmuted"} {
@@ -142,6 +158,23 @@ func newChannelManager(channelID string, slackClient SlackClient, db types.DB, l
 		for _, result := range []string{"success", "discarded", "gate_timeout", "lock_timeout", "slack_error", "db_error", "move_race"} {
 			metrics.CounterAdd(queueMessagesProcessedTotalMetric, 0, qType, result)
 		}
+	}
+
+	for _, action := range []models.CommandAction{
+		models.CommandActionTerminateIssue,
+		models.CommandActionResolveIssue,
+		models.CommandActionUnresolveIssue,
+		models.CommandActionInvestigateIssue,
+		models.CommandActionUninvestigateIssue,
+		models.CommandActionMuteIssue,
+		models.CommandActionUnmuteIssue,
+		models.CommandActionMoveIssue,
+		models.CommandActionCreateIssue,
+		models.CommandActionShowIssueOptionButtons,
+		models.CommandActionHideIssueOptionButtons,
+		models.CommandActionWebhook,
+	} {
+		metrics.CounterAdd(commandsProcessedTotalMetric, 0, string(action))
 	}
 
 	return c
@@ -515,8 +548,10 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 	// The lock is released after the command is fully processed.
 	defer c.releaseLock(lock)
 
-	// Commands are attempted exactly once. Ack after processing regardless of outcome.
+	// Commands are attempted exactly once. Increment metric and ack after processing regardless of outcome.
 	cmdErr := c.execCmd(ctx, cmd)
+
+	c.metrics.CounterInc(commandsProcessedTotalMetric, string(cmd.Action))
 
 	cmd.Ack()
 
@@ -779,6 +814,7 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 
 	// No point in updating db or Slack if the alert was ignored by the existing issue
 	if !updated {
+		c.metrics.CounterInc(alertsIgnoredTotalMetric, c.channelID)
 		return nil
 	}
 
@@ -800,6 +836,8 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 	if err := c.db.SaveIssue(ctx, issue); err != nil {
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
+
+	c.metrics.CounterInc(alertsGroupedTotalMetric, c.channelID)
 
 	return nil
 }

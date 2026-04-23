@@ -18,6 +18,8 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
+const socketModeEventsTotalMetric = "socket_mode_events_total"
+
 // SocketModeHandler handles Slack Socket Mode events and interactions.
 type SocketModeHandler struct {
 	apiClient        SlackAPIClient
@@ -28,6 +30,7 @@ type SocketModeHandler struct {
 	cfg              *config.ManagerConfig
 	managerSettings  *models.ManagerSettingsWrapper
 	logger           types.Logger
+	metrics          types.Metrics
 
 	eventMap                       map[socketmode.EventType][]SocketModeHandlerFunc
 	interactionEventMap            map[slack.InteractionType][]SocketModeHandlerFunc
@@ -52,7 +55,7 @@ type SocketModeHandlerFunc func(context.Context, *socketmode.Event)
 
 // NewSocketModeHandler creates a new SocketModeHandler.
 func NewSocketModeHandler(apiClient SlackAPIClient, socketModeClient SocketModeClient, commandQueue FifoQueueProducer, issueFinder IssueFinder,
-	cacheStore store.StoreInterface, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper, logger types.Logger,
+	cacheStore store.StoreInterface, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper, logger types.Logger, metrics types.Metrics,
 ) *SocketModeHandler {
 	eventMap := make(map[socketmode.EventType][]SocketModeHandlerFunc)
 	interactionEventMap := make(map[slack.InteractionType][]SocketModeHandlerFunc)
@@ -69,6 +72,7 @@ func NewSocketModeHandler(apiClient SlackAPIClient, socketModeClient SocketModeC
 		cfg:                            cfg,
 		managerSettings:                managerSettings,
 		logger:                         logger,
+		metrics:                        metrics,
 		eventMap:                       eventMap,
 		eventAPIMap:                    eventAPIMap,
 		interactionEventMap:            interactionEventMap,
@@ -76,6 +80,8 @@ func NewSocketModeHandler(apiClient SlackAPIClient, socketModeClient SocketModeC
 		slashCommandMap:                slackCommandMap,
 		sem:                            semaphore.NewWeighted(cfg.SocketModeMaxWorkers),
 	}
+
+	metrics.RegisterCounter(socketModeEventsTotalMetric, "Total incoming Slack Socket Mode events by top-level type", "event_type")
 
 	// Internal slack client events
 	handler.registerInternalEventsController()
@@ -324,6 +330,8 @@ func (r *SocketModeHandler) runEventLoop(ctx context.Context) error {
 
 func (r *SocketModeHandler) dispatcher(ctx context.Context, evt socketmode.Event) {
 	var ishandled bool
+
+	r.metrics.CounterInc(socketModeEventsTotalMetric, string(evt.Type))
 
 	// Some eventType can be further decomposed
 	switch evt.Type { //nolint:exhaustive

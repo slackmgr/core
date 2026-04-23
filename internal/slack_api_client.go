@@ -24,9 +24,6 @@ const (
 	// methods, labelled by result ("hit" = served from cache, "miss" = required an API call).
 	slackClientCacheRequestsTotalMetric = "slack_client_cache_requests_total"
 
-	// slackAPICallsTotalMetric counts actual outbound HTTP calls made to the Slack API.
-	slackAPICallsTotalMetric = "slack_api_calls_total"
-
 	// slackAPIErrorsTotalMetric counts Slack API call errors, labelled by error_type.
 	slackAPIErrorsTotalMetric = "slack_api_errors_total"
 
@@ -36,6 +33,10 @@ const (
 	// slackAPIRateLimitDurationMetric is a histogram of Retry-After durations from Slack
 	// 429 responses — how many seconds the server asked us to back off.
 	slackAPIRateLimitDurationMetric = "slack_api_rate_limit_duration_seconds"
+
+	// slackAPICallDurationMetric is a histogram of individual outbound Slack HTTP call
+	// durations in seconds, labelled by the API action.
+	slackAPICallDurationMetric = "slack_api_call_duration_seconds"
 )
 
 // ErrNotConnected is returned when an API method is called before Connect().
@@ -108,7 +109,6 @@ func (c *SlackAPIClient) Connect(ctx context.Context) (*slack.AuthTestResponse, 
 	}
 
 	c.metrics.RegisterCounter(slackClientCacheRequestsTotalMetric, "Total calls to cacheable Slack client wrapper methods, by action and result", "slack_action", "result")
-	c.metrics.RegisterCounter(slackAPICallsTotalMetric, "Total outbound HTTP calls made to the Slack API", "slack_action")
 
 	for _, action := range []string{"conversations.info", "users.conversations", "users.info", "usergroups.users.list", "conversations.members"} {
 		for _, result := range []string{"hit", "miss"} {
@@ -118,6 +118,7 @@ func (c *SlackAPIClient) Connect(ctx context.Context) (*slack.AuthTestResponse, 
 	c.metrics.RegisterCounter(slackAPIErrorsTotalMetric, "Total Slack API call errors by error type", "slack_action", "error_type")
 	c.metrics.RegisterCounter(slackAPIRetriesTotalMetric, "Total Slack API retry attempts after a recoverable error", "slack_action", "error_type")
 	c.metrics.RegisterHistogram(slackAPIRateLimitDurationMetric, "Retry-After duration in seconds from Slack 429 responses", []float64{1, 5, 10, 30, 60, 120, 300})
+	c.metrics.RegisterHistogram(slackAPICallDurationMetric, "Duration of individual outbound Slack API calls in seconds", []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30}, "slack_action")
 
 	httpClient := &http.Client{
 		Timeout: time.Duration(c.cfg.HTTPTimeoutSeconds) * time.Second,
@@ -688,13 +689,13 @@ func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics typ
 			}
 		}
 
+		callStart := time.Now()
 		val1, val2, err := f(ctx)
+		metrics.Observe(slackAPICallDurationMetric, time.Since(callStart).Seconds(), action)
 
 		if sem != nil {
 			sem.Release(1)
 		}
-
-		metrics.CounterInc(slackAPICallsTotalMetric, action)
 
 		logger.
 			WithField("action", action).
