@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-04-23
+
+### Added
+- Six new Prometheus metrics: `slack_api_call_duration_seconds` histogram (p50/p95/p99 latency per Slack API method), `alerts_grouped_total` (alerts added to an existing open issue), `alerts_ignored_total` (alerts absorbed as duplicates), `commands_processed_total` (commands by action type), `socket_mode_events_total` (incoming Socket Mode events by type), `http_alerts_rate_limited_total` (alert requests rejected by the per-channel rate limiter)
+- Grafana dashboard (`dashboards/slackmgr.json`) covering all metrics across seven sections: Overview, Alert & Issue Flow, Open Issues & State, Slack API Health, Queue Processing, Lock Contention & DB Cache, REST API
+
+### Fixed
+- `commands_processed_total` is now incremented in `processCmd` (after `execCmd` returns) rather than mid-way through `execCmd`, ensuring exactly one increment per dispatched command regardless of which internal error path was taken
+- `issue_hash` DB cache hit ratio was always zero: `LoadOpenIssuesInChannel` was seeding the cache with raw DB JSON, which PostgreSQL JSONB normalises into a different key order than Go's marshaler produces, causing every hash comparison to fail; the cache is now seeded solely by `SaveIssues` using Go's canonical JSON
+
+### Removed
+- `slack_api_calls_total` counter removed; call rate is now derivable from the `slack_api_call_duration_seconds` histogram `_count` suffix
+
 ## [0.11.1] - 2026-04-22
 
 ### Fixed
@@ -299,7 +312,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/slackmgr/core/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/slackmgr/core/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/slackmgr/core/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/slackmgr/core/compare/v0.10.0...v0.10.1
