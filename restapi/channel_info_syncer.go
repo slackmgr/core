@@ -49,6 +49,7 @@ type managedChannelsData struct {
 
 // ChannelInfo contains information about a Slack channel. Returned by [ChannelInfoProvider.GetChannelInfo].
 type ChannelInfo struct {
+	Name               string
 	ChannelExists      bool
 	ChannelIsArchived  bool
 	ManagerIsInChannel bool
@@ -216,6 +217,7 @@ func (c *channelInfoSyncer) refreshChannelInfo(ctx context.Context, channel stri
 		}
 
 		info = &ChannelInfo{
+			Name:               slackChannel.Name,
 			ChannelExists:      true,
 			ChannelIsArchived:  slackChannel.IsArchived,
 			ManagerIsInChannel: managerIsInChannel,

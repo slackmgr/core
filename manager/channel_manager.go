@@ -50,6 +50,7 @@ type cmdFunc func(ctx context.Context, issue *models.Issue, cmd *models.Command,
 
 type channelManager struct {
 	channelID       string
+	channelName     string
 	slackClient     SlackClient
 	db              types.DB
 	webhookHandlers []WebhookHandler
@@ -65,7 +66,7 @@ type channelManager struct {
 	cmdFuncs        map[models.CommandAction]cmdFunc
 }
 
-func newChannelManager(channelID string, slackClient SlackClient, db types.DB, locker ChannelLocker, logger types.Logger, metrics types.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
+func newChannelManager(channelID string, channelName string, slackClient SlackClient, db types.DB, locker ChannelLocker, logger types.Logger, metrics types.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
 	managerSettings *models.ManagerSettingsWrapper, gate RateLimitGate,
 ) *channelManager {
 	logger = logger.WithField("channel_id", channelID)
@@ -77,6 +78,7 @@ func newChannelManager(channelID string, slackClient SlackClient, db types.DB, l
 
 	c := &channelManager{
 		channelID:       channelID,
+		channelName:     channelName,
 		slackClient:     slackClient,
 		db:              db,
 		locker:          locker,
@@ -139,15 +141,15 @@ func newChannelManager(channelID string, slackClient SlackClient, db types.DB, l
 	metrics.RegisterCounter(commandsProcessedTotalMetric, "Total commands processed by action type", "action")
 
 	// Pre-warm per-channel label combinations so they appear at /metrics from start.
-	metrics.CounterAdd(alertsTotal, 0, channelID)
-	metrics.GaugeSet(channelOpenIssuesMetric, 0, channelID)
-	metrics.CounterAdd(processActiveIssuesSkippedMetric, 0, channelID)
-	metrics.CounterAdd(issuesArchivedTotalMetric, 0, channelID)
-	metrics.CounterAdd(issuesEscalatedTotalMetric, 0, channelID)
-	metrics.CounterAdd(issuesCreatedTotalMetric, 0, channelID)
-	metrics.CounterAdd(channelLockAcquireFailuresTotalMetric, 0, channelID)
-	metrics.CounterAdd(alertsGroupedTotalMetric, 0, channelID)
-	metrics.CounterAdd(alertsIgnoredTotalMetric, 0, channelID)
+	metrics.CounterAdd(alertsTotal, 0, channelName)
+	metrics.GaugeSet(channelOpenIssuesMetric, 0, channelName)
+	metrics.CounterAdd(processActiveIssuesSkippedMetric, 0, channelName)
+	metrics.CounterAdd(issuesArchivedTotalMetric, 0, channelName)
+	metrics.CounterAdd(issuesEscalatedTotalMetric, 0, channelName)
+	metrics.CounterAdd(issuesCreatedTotalMetric, 0, channelName)
+	metrics.CounterAdd(channelLockAcquireFailuresTotalMetric, 0, channelName)
+	metrics.CounterAdd(alertsGroupedTotalMetric, 0, channelName)
+	metrics.CounterAdd(alertsIgnoredTotalMetric, 0, channelName)
 
 	// Pre-warm fixed-enum label combinations.
 	for _, event := range []string{"terminated", "resolved", "unresolved", "investigated", "uninvestigated", "muted", "unmuted"} {
@@ -396,7 +398,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	}
 
 	defer c.releaseLock(lock)
-	c.metrics.CounterInc(alertsTotal, c.channelID)
+	c.metrics.CounterInc(alertsTotal, c.channelName)
 
 	alert.SetDefaultValues(c.managerSettings.GetSettings())
 	alert.SlackChannelName = c.slackClient.GetChannelName(ctx, c.channelID)
@@ -630,7 +632,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 	// This can happen if there are multiple managers running in parallel, e.g. in a Kubernetes cluster.
 	if timeSinceLastProcessed < minInterval {
 		c.logger.WithField("last_processed", timeSinceLastProcessed).WithField("min_interval", minInterval).Debug("Skipping issue processing due to recent processing by other manager")
-		c.metrics.CounterInc(processActiveIssuesSkippedMetric, c.channelID)
+		c.metrics.CounterInc(processActiveIssuesSkippedMetric, c.channelName)
 		return processingState.OpenIssues, nil
 	}
 
@@ -709,7 +711,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 	}
 
 	if archivedCount > 0 {
-		c.metrics.CounterAdd(issuesArchivedTotalMetric, float64(archivedCount), c.channelID)
+		c.metrics.CounterAdd(issuesArchivedTotalMetric, float64(archivedCount), c.channelName)
 	}
 
 	movedIssues := make(map[string]struct{})
@@ -724,7 +726,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 			continue
 		}
 
-		c.metrics.CounterInc(issuesEscalatedTotalMetric, c.channelID)
+		c.metrics.CounterInc(issuesEscalatedTotalMetric, c.channelName)
 		movedIssues[result.Issue.ID] = struct{}{}
 		openIssues--
 	}
@@ -755,8 +757,8 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 	elapsed := time.Since(started)
 	c.logger.WithField("count", len(issuesToUpdate)).WithField("moved_count", len(movedIssues)).WithField("elapsed", elapsed).Debug("Issue processing completed")
 
-	c.metrics.Observe(processActiveIssuesDurationMetric, elapsed.Seconds(), c.channelID)
-	c.metrics.GaugeSet(channelOpenIssuesMetric, float64(openIssues), c.channelID)
+	c.metrics.Observe(processActiveIssuesDurationMetric, elapsed.Seconds(), c.channelName)
+	c.metrics.GaugeSet(channelOpenIssuesMetric, float64(openIssues), c.channelName)
 
 	return processingState.OpenIssues, nil
 }
@@ -814,7 +816,7 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 
 	// No point in updating db or Slack if the alert was ignored by the existing issue
 	if !updated {
-		c.metrics.CounterInc(alertsIgnoredTotalMetric, c.channelID)
+		c.metrics.CounterInc(alertsIgnoredTotalMetric, c.channelName)
 		return nil
 	}
 
@@ -837,7 +839,7 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 		return fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
-	c.metrics.CounterInc(alertsGroupedTotalMetric, c.channelID)
+	c.metrics.CounterInc(alertsGroupedTotalMetric, c.channelName)
 
 	return nil
 }
@@ -867,7 +869,7 @@ func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert
 	}
 
 	logger.Info("Issue created")
-	c.metrics.CounterInc(issuesCreatedTotalMetric, c.channelID)
+	c.metrics.CounterInc(issuesCreatedTotalMetric, c.channelName)
 
 	return nil
 }
@@ -1124,7 +1126,7 @@ func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, 
 	start := time.Now()
 	lock, err := c.locker.Obtain(ctx, channelID, ttl, maxWait)
 	if err != nil {
-		c.metrics.CounterInc(channelLockAcquireFailuresTotalMetric, c.channelID)
+		c.metrics.CounterInc(channelLockAcquireFailuresTotalMetric, c.channelName)
 		return nil, fmt.Errorf("failed to obtain lock for channel %s after %d seconds: %w", c.channelID, int(maxWait.Seconds()), err)
 	}
 

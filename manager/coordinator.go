@@ -315,7 +315,12 @@ func (c *coordinator) findOrCreateChannelManager(ctx context.Context, channelID 
 }
 
 func (c *coordinator) createChannelManager(ctx context.Context, channelID string) (*channelManager, error) {
-	channelManager := newChannelManager(channelID, c.slack, c.db, c.locker, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings, c.gate)
+	channelName := c.slack.GetChannelName(ctx, channelID)
+	if channelName == "" {
+		channelName = channelID
+	}
+
+	channelManager := newChannelManager(channelID, channelName, c.slack, c.db, c.locker, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings, c.gate)
 
 	c.metrics.GaugeAdd(activeChannelManagersMetric, 1)
 
