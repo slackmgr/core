@@ -187,11 +187,6 @@ func (d *dbCacheMiddleware) LoadOpenIssuesInChannel(ctx context.Context, channel
 		return nil, err
 	}
 
-	// Cache the issue body hashes to avoid unnecessary write operations.
-	for id, body := range issueBodies {
-		d.issueHashCache.Set(ctx, id, string(internal.HashBytes(body)), 30*24*time.Hour)
-	}
-
 	return issueBodies, nil
 }
 
