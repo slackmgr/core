@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-04-23
+
+### Changed
+- Grafana dashboard queries now aggregate across instances with `sum by (label)` / `max by (channel)` to prevent duplicate series in multi-pod deployments
+- Metric `channel` labels now use the human-readable Slack channel name instead of the channel ID; falls back to the channel ID if the name cannot be resolved. `ChannelInfo` in `restapi` gains a `Name` field populated from the Slack API
+
 ## [0.12.0] - 2026-04-23
 
 ### Added
@@ -312,7 +318,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/slackmgr/core/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/slackmgr/core/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/slackmgr/core/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/slackmgr/core/compare/v0.10.1...v0.11.0
