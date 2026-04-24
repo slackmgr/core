@@ -13,8 +13,6 @@ type prefixedMetrics struct {
 
 // NewPrefixedMetrics returns a types.Metrics that prepends prefix to every
 // metric name. If prefix is empty the inner instance is returned unchanged.
-//
-//nolint:ireturn // Must return the interface: when prefix is empty we return the caller's own implementation.
 func NewPrefixedMetrics(inner types.Metrics, prefix string) types.Metrics {
 	if prefix == "" {
 		return inner

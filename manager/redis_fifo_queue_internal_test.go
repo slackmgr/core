@@ -265,7 +265,6 @@ type mockChannelLocker struct {
 	mock.Mock
 }
 
-//nolint:ireturn // mock implementation returns interface
 func (m *mockChannelLocker) Obtain(ctx context.Context, key string, ttl, maxWait time.Duration) (ChannelLock, error) {
 	args := m.Called(ctx, key, ttl, maxWait)
 	if lock, ok := args.Get(0).(ChannelLock); ok {

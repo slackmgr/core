@@ -57,7 +57,7 @@ type WebhookCommandParams struct {
 
 // NewCommandFromQueueItem creates a Command instance from a FIFO queue item.
 // It unmarshals the JSON body of the queue item into a Command struct.
-func NewCommandFromQueueItem(queueItem *types.FifoQueueItem) (InFlightMessage, error) { //nolint:ireturn // constructor must return the InFlightMessage interface
+func NewCommandFromQueueItem(queueItem *types.FifoQueueItem) (InFlightMessage, error) {
 	if len(queueItem.Body) == 0 {
 		return nil, errors.New("command body is empty")
 	}

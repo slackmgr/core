@@ -48,7 +48,7 @@ func (s *stubSlackClient) DeletePost(_ context.Context, _, _ string) error { ret
 // alwaysFailLocker is a ChannelLocker that immediately returns an error, simulating a lock that can never be obtained.
 type alwaysFailLocker struct{}
 
-func (a *alwaysFailLocker) Obtain(_ context.Context, _ string, _ time.Duration, _ time.Duration) (ChannelLock, error) { //nolint:ireturn
+func (a *alwaysFailLocker) Obtain(_ context.Context, _ string, _ time.Duration, _ time.Duration) (ChannelLock, error) {
 	return nil, ErrChannelLockUnavailable
 }
 

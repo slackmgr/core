@@ -15,6 +15,7 @@ linters:
     - godot
     - gomodguard
     - interfacebloat
+    - ireturn
     - lll
     - maintidx
     - mnd
@@ -32,14 +33,6 @@ linters:
   settings:
     asasalint:
       use-builtin-exclusions: true
-    ireturn:
-      allow:
-        - anon
-        - error
-        - empty
-        - stdlib
-        - generic
-        - github.com/slackmgr/types.Logger
   exclusions:
     generated: lax
     presets:

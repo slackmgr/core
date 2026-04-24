@@ -94,7 +94,7 @@ func (r *RedisChannelLocker) WithMaxDrainWait(d time.Duration) *RedisChannelLock
 // If the lock is successfully obtained, it returns a [RedisChannelLock] instance.
 // If the lock cannot be obtained within the max wait duration, it returns [ErrChannelLockUnavailable].
 // The key is prefixed with the configured key prefix to avoid conflicts with other locks in Redis.
-func (r *RedisChannelLocker) Obtain(ctx context.Context, key string, ttl time.Duration, maxWait time.Duration) (ChannelLock, error) { //nolint:ireturn
+func (r *RedisChannelLocker) Obtain(ctx context.Context, key string, ttl time.Duration, maxWait time.Duration) (ChannelLock, error) {
 	var retryStrategy redislock.RetryStrategy
 
 	// If maxWait is zero or less than the retry backoff, we do not retry.
@@ -127,7 +127,7 @@ func (r *RedisChannelLocker) Obtain(ctx context.Context, key string, ttl time.Du
 // newRateLimitGate returns a RedisRateLimitGate backed by the same Redis client,
 // sharing the same key prefix and drain-wait timeout as this locker.
 // This satisfies the package-private rateLimitGateFactory interface used by manager.New().
-func (r *RedisChannelLocker) newRateLimitGate(logger types.Logger) RateLimitGate { //nolint:ireturn
+func (r *RedisChannelLocker) newRateLimitGate(logger types.Logger) RateLimitGate {
 	return NewRedisRateLimitGate(r.rawClient, logger, r.keyPrefix, r.maxDrainWait)
 }
 

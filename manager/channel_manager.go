@@ -1122,7 +1122,7 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 	return false, nil
 }
 
-func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, maxWait time.Duration) (ChannelLock, error) { //nolint:ireturn
+func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, maxWait time.Duration) (ChannelLock, error) {
 	start := time.Now()
 	lock, err := c.locker.Obtain(ctx, channelID, ttl, maxWait)
 	if err != nil {

@@ -16,7 +16,7 @@ type NoopChannelLock struct {
 }
 
 // Obtain returns a no-op channel lock that does nothing.
-func (n *NoopChannelLocker) Obtain(_ context.Context, key string, _ time.Duration, _ time.Duration) (ChannelLock, error) { //nolint:ireturn
+func (n *NoopChannelLocker) Obtain(_ context.Context, key string, _ time.Duration, _ time.Duration) (ChannelLock, error) {
 	return &NoopChannelLock{key: key}, nil
 }
 
