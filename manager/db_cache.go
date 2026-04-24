@@ -14,7 +14,12 @@ import (
 	"github.com/slackmgr/types"
 )
 
-const dbCacheRequestsTotalMetric = "db_cache_requests_total"
+const (
+	dbCacheRequestsTotalMetric         = "db_cache_requests_total"
+	metricOperationSaveIssue           = "save_issue"
+	metricOperationFindMoveMapping     = "find_move_mapping"
+	metricOperationFindProcessingState = "find_processing_state"
+)
 
 type dbCacheMiddleware struct {
 	db                          types.DB
@@ -33,7 +38,7 @@ func newDBCacheMiddleware(db types.DB, cacheStore store.StoreInterface, logger t
 
 	metrics.RegisterCounter(dbCacheRequestsTotalMetric, "Total number of DB cache lookups by operation and result", "operation", "result")
 
-	for _, op := range []string{"issue_hash", "move_mapping", "processing_state"} {
+	for _, op := range []string{metricOperationSaveIssue, metricOperationFindMoveMapping, metricOperationFindProcessingState} {
 		for _, result := range []string{"hit", "miss"} {
 			metrics.CounterAdd(dbCacheRequestsTotalMetric, 0, op, result)
 		}
@@ -90,17 +95,19 @@ func (d *dbCacheMiddleware) SaveIssues(ctx context.Context, issues ...types.Issu
 
 		// No point in updating db if the issue has not changed.
 		if existingHash, ok := d.issueHashCache.Get(ctx, cacheKey); ok && existingHash == issueHash {
-			d.metrics.CounterInc(dbCacheRequestsTotalMetric, "issue_hash", "hit")
+			d.metrics.CounterInc(dbCacheRequestsTotalMetric, metricOperationSaveIssue, "hit")
 			continue
 		}
 
-		d.metrics.CounterInc(dbCacheRequestsTotalMetric, "issue_hash", "miss")
+		d.metrics.CounterInc(dbCacheRequestsTotalMetric, metricOperationSaveIssue, "miss")
 
 		// The issue has changed, so we need to update it in the database.
 		issuesToUpdate = append(issuesToUpdate, issue)
 
 		// We must explicitly remove the old issue hash from the cache, since the upcoming cache Set may fail
 		// after we save the issue to the database, thus leaving the cache in an inconsistent state.
+		// Cache errors are normally just logged, but this is a critical step to ensure cache consistency,
+		// so we return an error if the cache delete operation fails.
 		if err := d.issueHashCache.Delete(ctx, cacheKey); err != nil {
 			return fmt.Errorf("failed to delete issue hash from cache: %w", err)
 		}
@@ -211,7 +218,7 @@ func (d *dbCacheMiddleware) FindMoveMapping(ctx context.Context, channelID, corr
 	cacheKey := moveMappingCacheKey(channelID, correlationID)
 
 	if mapping, ok := d.moveMappingCache.Get(ctx, cacheKey); ok {
-		d.metrics.CounterInc(dbCacheRequestsTotalMetric, "move_mapping", "hit")
+		d.metrics.CounterInc(dbCacheRequestsTotalMetric, metricOperationFindMoveMapping, "hit")
 
 		if mapping != "" {
 			return json.RawMessage(mapping), nil
@@ -220,7 +227,7 @@ func (d *dbCacheMiddleware) FindMoveMapping(ctx context.Context, channelID, corr
 		return nil, nil
 	}
 
-	d.metrics.CounterInc(dbCacheRequestsTotalMetric, "move_mapping", "miss")
+	d.metrics.CounterInc(dbCacheRequestsTotalMetric, metricOperationFindMoveMapping, "miss")
 
 	mapping, err := d.db.FindMoveMapping(ctx, channelID, correlationID)
 	if err != nil {
@@ -274,7 +281,7 @@ func (d *dbCacheMiddleware) SaveChannelProcessingState(ctx context.Context, stat
 
 func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, channelID string) (*types.ChannelProcessingState, error) {
 	if cachedJSONBody, ok := d.channelProcessingStateCache.Get(ctx, channelID); ok {
-		d.metrics.CounterInc(dbCacheRequestsTotalMetric, "processing_state", "hit")
+		d.metrics.CounterInc(dbCacheRequestsTotalMetric, metricOperationFindProcessingState, "hit")
 
 		var state types.ChannelProcessingState
 
@@ -285,7 +292,7 @@ func (d *dbCacheMiddleware) FindChannelProcessingState(ctx context.Context, chan
 		return &state, nil
 	}
 
-	d.metrics.CounterInc(dbCacheRequestsTotalMetric, "processing_state", "miss")
+	d.metrics.CounterInc(dbCacheRequestsTotalMetric, metricOperationFindProcessingState, "miss")
 
 	state, err := d.db.FindChannelProcessingState(ctx, channelID)
 	if err != nil {
