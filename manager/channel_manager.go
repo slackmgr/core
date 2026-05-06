@@ -1103,15 +1103,15 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 	}
 
 	data := &types.WebhookCallback{
-		ID:            cmd.WebhookParameters.WebhookID,
-		Timestamp:     time.Now(),
-		UserID:        cmd.UserID,
-		UserRealName:  cmd.UserRealName,
-		ChannelID:     cmd.SlackChannelID,
-		MessageID:     cmd.SlackPostID,
-		Input:         cmd.WebhookParameters.Input,
-		CheckboxInput: cmd.WebhookParameters.CheckboxInput,
-		Payload:       payload,
+		ID:             cmd.WebhookParameters.WebhookID,
+		Timestamp:      time.Now(),
+		UserID:         cmd.UserID,
+		UserRealName:   cmd.UserRealName,
+		ChannelID:      cmd.SlackChannelID,
+		MessageID:      cmd.SlackPostID,
+		PlainTextInput: cmd.WebhookParameters.PlainTextInput,
+		CheckboxInput:  cmd.WebhookParameters.CheckboxInput,
+		Payload:        payload,
 	}
 
 	// We do this in a separate goroutine to avoid blocking the command processing.

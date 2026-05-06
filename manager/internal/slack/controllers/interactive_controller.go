@@ -604,13 +604,13 @@ func (c *interactiveController) webhookViewSubmission(ctx context.Context, evt *
 	// Parse the incoming metadata
 	metadata := c.parsePrivateModalMetadata(interaction.View.PrivateMetadata)
 
-	input := getViewStatePlainTextValues(interaction.View)
+	plainTextinput := getViewStatePlainTextValues(interaction.View)
 	checkboxInput := getViewStateCheckboxSelectedValues(interaction.View)
 
 	params := &models.WebhookCommandParams{
-		WebhookID:     metadata.Get("webhookId"),
-		Input:         input,
-		CheckboxInput: checkboxInput,
+		WebhookID:      metadata.Get("webhookId"),
+		PlainTextInput: plainTextinput,
+		CheckboxInput:  checkboxInput,
 	}
 
 	// Send an async command to handle the webhook

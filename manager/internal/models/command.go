@@ -50,9 +50,9 @@ type Command struct {
 
 // WebhookCommandParams holds parameters specific to webhook commands.
 type WebhookCommandParams struct {
-	WebhookID     string              `json:"webhookId"`
-	Input         map[string]string   `json:"input,omitempty"`
-	CheckboxInput map[string][]string `json:"checkboxInput,omitempty"`
+	WebhookID      string              `json:"webhookId"`
+	PlainTextInput map[string]string   `json:"plainTextInput,omitempty"`
+	CheckboxInput  map[string][]string `json:"checkboxInput,omitempty"`
 }
 
 // NewCommandFromQueueItem creates a Command instance from a FIFO queue item.
