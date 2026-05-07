@@ -681,11 +681,14 @@ func getWebhookButtons(issue *models.Issue) []slack.BlockElement {
 		actionID := fmt.Sprintf("%s_%d", controllers.WebhookActionIDPrefix, index)
 		button := slack.NewButtonBlockElement(actionID, hook.ID, slack.NewTextBlockObject("plain_text", hook.ButtonText, false, false))
 
-		if hook.ButtonStyle == "default" {
-			hook.ButtonStyle = ""
+		buttonStyle := string(hook.ButtonStyle)
+
+		// The Slack API expects an empty string for the default button style.
+		if hook.ButtonStyle == types.WebhookButtonStyleDefault || !types.WebhookButtonStyleIsValid(hook.ButtonStyle) {
+			buttonStyle = ""
 		}
 
-		button = button.WithStyle(slack.Style(hook.ButtonStyle))
+		button = button.WithStyle(slack.Style(buttonStyle))
 
 		buttons = append(buttons, button)
 	}
