@@ -326,6 +326,26 @@ func TestServer_HandleAlerts_Validation(t *testing.T) {
 		assertJSONError(t, w, "POST body")
 	})
 
+	t.Run("returns 400 for empty body when ErrorReportChannelID is set", func(t *testing.T) {
+		t.Parallel()
+
+		server, queue, _ := newTestServer(t)
+		server.cfg.ErrorReportChannelID = "C-errors"
+		queue.On("Send", mock.Anything, "C-errors", mock.Anything, mock.Anything).Return(nil)
+
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.ContentLength = 0
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertJSONError(t, w, "POST body")
+	})
+
 	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
 		t.Parallel()
 

@@ -770,7 +770,7 @@ func timeoutResponse(c *gin.Context) {
 }
 
 func debugGetAlertChannelOrRouteKey(c *gin.Context, alert *types.Alert) string {
-	if alert.SlackChannelID != "" {
+	if alert != nil && alert.SlackChannelID != "" {
 		return fmt.Sprintf("%s (channel ID from alert body)", alert.SlackChannelID)
 	}
 
@@ -780,7 +780,7 @@ func debugGetAlertChannelOrRouteKey(c *gin.Context, alert *types.Alert) string {
 		return fmt.Sprintf("%s (channel ID from URL param)", channelIDFromParam)
 	}
 
-	if alert.RouteKey != "" {
+	if alert != nil && alert.RouteKey != "" {
 		return fmt.Sprintf("%s (route key)", alert.RouteKey)
 	}
 
