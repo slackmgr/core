@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.4] - 2026-05-07
+
+### Changed
+- Bump `github.com/slackmgr/types` to v0.5.1 (godoc fixes on `Webhook` fields; `Clean()` now defaults empty `ButtonStyle` to `WebhookButtonStyleDefault` and empty `AccessLevel` to `WebhookAccessLevelGlobalAdmins`)
+- `getWebhookButtons`: stop mutating `hook.ButtonStyle`; map `WebhookButtonStyleDefault` and invalid values to the empty Slack-API style locally
+
 ## [0.12.3] - 2026-05-06
 
 ### Changed
@@ -330,7 +336,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.12.3...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.12.4...HEAD
+[0.12.4]: https://github.com/slackmgr/core/compare/v0.12.3...v0.12.4
 [0.12.3]: https://github.com/slackmgr/core/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/slackmgr/core/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/slackmgr/core/compare/v0.12.0...v0.12.1
