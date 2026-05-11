@@ -26,12 +26,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 
 		apiClient := &mockSlackAPIClient{}
 
-		controller := &greetingsController{
-			clt:             client,
-			apiClient:       apiClient,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newGreetingsController(client, apiClient, logger, newTestManagerSettings())
 
 		// Invalid inner event type
 		innerEvent := slackevents.EventsAPIInnerEvent{
@@ -67,12 +62,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(nil, errors.New("api error")).Once()
 
-		controller := &greetingsController{
-			clt:             client,
-			apiClient:       apiClient,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newGreetingsController(client, apiClient, logger, newTestManagerSettings())
 
 		joinedEvent := &slackevents.MemberJoinedChannelEvent{
 			User:    "U12345",
@@ -113,12 +103,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 			IsBot: true,
 		}, nil).Once()
 
-		controller := &greetingsController{
-			clt:             client,
-			apiClient:       apiClient,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newGreetingsController(client, apiClient, logger, newTestManagerSettings())
 
 		joinedEvent := &slackevents.MemberJoinedChannelEvent{
 			User:    "U12345",
@@ -160,12 +145,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 			IsAppUser: true,
 		}, nil).Once()
 
-		controller := &greetingsController{
-			clt:             client,
-			apiClient:       apiClient,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newGreetingsController(client, apiClient, logger, newTestManagerSettings())
 
 		joinedEvent := &slackevents.MemberJoinedChannelEvent{
 			User:    "U12345",
@@ -209,12 +189,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 		}, nil).Once()
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(false, "", errors.New("api error")).Once()
 
-		controller := &greetingsController{
-			clt:             client,
-			apiClient:       apiClient,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newGreetingsController(client, apiClient, logger, newTestManagerSettings())
 
 		joinedEvent := &slackevents.MemberJoinedChannelEvent{
 			User:    "U12345",
@@ -257,12 +232,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 		}, nil).Once()
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(false, "", nil).Once()
 
-		controller := &greetingsController{
-			clt:             client,
-			apiClient:       apiClient,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newGreetingsController(client, apiClient, logger, newTestManagerSettings())
 
 		joinedEvent := &slackevents.MemberJoinedChannelEvent{
 			User:    "U12345",
@@ -308,12 +278,7 @@ func TestGreetingsController_memberJoinedChannel(t *testing.T) {
 		apiClient.On("UserIsInGroup", mock.Anything, mock.Anything, "U12345").Return(false).Maybe()
 		apiClient.On("PostEphemeral", mock.Anything, "C12345", "U12345", mock.Anything).Return("", nil).Once()
 
-		controller := &greetingsController{
-			clt:             client,
-			apiClient:       apiClient,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newGreetingsController(client, apiClient, logger, newTestManagerSettings())
 
 		joinedEvent := &slackevents.MemberJoinedChannelEvent{
 			User:    "U12345",
@@ -355,12 +320,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 
 		apiClient := &mockSlackAPIClient{}
 
-		controller := &greetingsController{
-			clt:             client,
-			apiClient:       apiClient,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newGreetingsController(client, apiClient, logger, newTestManagerSettings())
 
 		// Invalid inner event type
 		innerEvent := slackevents.EventsAPIInnerEvent{
@@ -396,12 +356,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(nil, errors.New("api error")).Once()
 
-		controller := &greetingsController{
-			clt:             client,
-			apiClient:       apiClient,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newGreetingsController(client, apiClient, logger, newTestManagerSettings())
 
 		leftEvent := &slackevents.MemberLeftChannelEvent{
 			User:    "U12345",
@@ -443,12 +398,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 			IsBot:    true,
 		}, nil).Once()
 
-		controller := &greetingsController{
-			clt:             client,
-			apiClient:       apiClient,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newGreetingsController(client, apiClient, logger, newTestManagerSettings())
 
 		leftEvent := &slackevents.MemberLeftChannelEvent{
 			User:    "U12345",
@@ -492,12 +442,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 		}, nil).Once()
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(false, "", errors.New("api error")).Once()
 
-		controller := &greetingsController{
-			clt:             client,
-			apiClient:       apiClient,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newGreetingsController(client, apiClient, logger, newTestManagerSettings())
 
 		leftEvent := &slackevents.MemberLeftChannelEvent{
 			User:    "U12345",
@@ -540,12 +485,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 		}, nil).Once()
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(true, "", nil).Once()
 
-		controller := &greetingsController{
-			clt:             client,
-			apiClient:       apiClient,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newGreetingsController(client, apiClient, logger, newTestManagerSettings())
 
 		leftEvent := &slackevents.MemberLeftChannelEvent{
 			User:    "U12345",
@@ -588,12 +528,7 @@ func TestGreetingsController_memberLeftChannel(t *testing.T) {
 		}, nil).Once()
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(false, "", nil).Once()
 
-		controller := &greetingsController{
-			clt:             client,
-			apiClient:       apiClient,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newGreetingsController(client, apiClient, logger, newTestManagerSettings())
 
 		leftEvent := &slackevents.MemberLeftChannelEvent{
 			User:    "U12345",

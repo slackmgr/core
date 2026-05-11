@@ -11,6 +11,12 @@ type internalEventsController struct {
 	logger types.Logger
 }
 
+func newInternalEventsController(logger types.Logger) *internalEventsController {
+	return &internalEventsController{
+		logger: logger,
+	}
+}
+
 func (c *internalEventsController) handleEventTypeClientInternal(_ context.Context, evt *socketmode.Event) {
 	c.logger.WithField("operation", "slack").WithField("event_type", evt.Type).Debugf("Slack client internal event")
 }

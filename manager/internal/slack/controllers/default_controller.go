@@ -12,6 +12,13 @@ type defaultController struct {
 	logger types.Logger
 }
 
+func newDefaultController(clt SocketModeClient, logger types.Logger) *defaultController {
+	return &defaultController{
+		clt:    clt,
+		logger: logger,
+	}
+}
+
 func (c *defaultController) handle(ctx context.Context, evt *socketmode.Event) {
 	c.clt.Ack(ctx, evt.Request)
 

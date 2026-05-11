@@ -12,6 +12,13 @@ type slashCommandsController struct {
 	logger types.Logger
 }
 
+func newSlashCommandsController(clt SocketModeClient, logger types.Logger) *slashCommandsController {
+	return &slashCommandsController{
+		clt:    clt,
+		logger: logger,
+	}
+}
+
 func (c *slashCommandsController) handleEventTypeSlashCommands(ctx context.Context, evt *socketmode.Event) {
 	c.clt.Ack(ctx, evt.Request)
 

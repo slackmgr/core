@@ -13,6 +13,13 @@ type eventsAPIController struct {
 	logger types.Logger
 }
 
+func newEventsAPIController(clt SocketModeClient, logger types.Logger) *eventsAPIController {
+	return &eventsAPIController{
+		clt:    clt,
+		logger: logger,
+	}
+}
+
 func (c *eventsAPIController) handleEventTypeEventsAPI(ctx context.Context, evt *socketmode.Event) {
 	c.clt.Ack(ctx, evt.Request)
 

@@ -22,10 +22,7 @@ func TestEventsAPIController_handleEventTypeEventsAPI(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &eventsAPIController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newEventsAPIController(client, logger)
 
 		innerEvent := slackevents.EventsAPIInnerEvent{
 			Type: "some_inner_type",
@@ -57,10 +54,7 @@ func TestEventsAPIController_handleEventTypeEventsAPI(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &eventsAPIController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newEventsAPIController(client, logger)
 
 		evt := &socketmode.Event{
 			Type:    socketmode.EventTypeEventsAPI,

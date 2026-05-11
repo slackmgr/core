@@ -31,6 +31,18 @@ type reactionsController struct {
 	managerSettings *models.ManagerSettingsWrapper
 }
 
+func newReactionsController(clt SocketModeClient, apiClient SlackAPIClient, commandQueue FifoQueueProducer, cache *internal.Cache, logger types.Logger, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper) *reactionsController {
+	return &reactionsController{
+		clt:             clt,
+		apiClient:       apiClient,
+		commandQueue:    commandQueue,
+		cache:           cache,
+		logger:          logger,
+		cfg:             cfg,
+		managerSettings: managerSettings,
+	}
+}
+
 func (c *reactionsController) reactionAdded(ctx context.Context, evt *socketmode.Event) {
 	c.clt.Ack(ctx, evt.Request)
 

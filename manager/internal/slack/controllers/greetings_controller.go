@@ -18,6 +18,15 @@ type greetingsController struct {
 	managerSettings *models.ManagerSettingsWrapper
 }
 
+func newGreetingsController(clt SocketModeClient, apiClient SlackAPIClient, logger types.Logger, managerSettings *models.ManagerSettingsWrapper) *greetingsController {
+	return &greetingsController{
+		clt:             clt,
+		apiClient:       apiClient,
+		logger:          logger,
+		managerSettings: managerSettings,
+	}
+}
+
 func (c *greetingsController) memberJoinedChannel(ctx context.Context, evt *socketmode.Event) {
 	c.clt.Ack(ctx, evt.Request)
 

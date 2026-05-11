@@ -26,10 +26,7 @@ func TestReactionsController_reactionAdded(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &reactionsController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newReactionsController(client, nil, nil, nil, logger, nil, nil)
 
 		evt := &socketmode.Event{
 			Type:    socketmode.EventTypeEventsAPI,
@@ -53,10 +50,7 @@ func TestReactionsController_reactionAdded(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &reactionsController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newReactionsController(client, nil, nil, nil, logger, nil, nil)
 
 		innerEvent := slackevents.EventsAPIInnerEvent{
 			Data: "not a ReactionAddedEvent",
@@ -87,11 +81,7 @@ func TestReactionsController_reactionAdded(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &reactionsController{
-			clt:             client,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newReactionsController(client, nil, nil, nil, logger, nil, newTestManagerSettings())
 
 		reactionEvent := &slackevents.ReactionAddedEvent{
 			Reaction: "unknown_reaction",
@@ -134,10 +124,7 @@ func TestReactionsController_reactionRemoved(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &reactionsController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newReactionsController(client, nil, nil, nil, logger, nil, nil)
 
 		evt := &socketmode.Event{
 			Type:    socketmode.EventTypeEventsAPI,
@@ -161,10 +148,7 @@ func TestReactionsController_reactionRemoved(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &reactionsController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newReactionsController(client, nil, nil, nil, logger, nil, nil)
 
 		innerEvent := slackevents.EventsAPIInnerEvent{
 			Data: "not a ReactionRemovedEvent",
@@ -195,11 +179,7 @@ func TestReactionsController_reactionRemoved(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &reactionsController{
-			clt:             client,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newReactionsController(client, nil, nil, nil, logger, nil, newTestManagerSettings())
 
 		reactionEvent := &slackevents.ReactionRemovedEvent{
 			Reaction: "unknown_reaction",
@@ -240,10 +220,7 @@ func TestReactionsController_getUserInfo(t *testing.T) {
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(false, "", errors.New("api error")).Once()
 
-		controller := &reactionsController{
-			apiClient: apiClient,
-			logger:    logger,
-		}
+		controller := newReactionsController(nil, apiClient, nil, nil, logger, nil, nil)
 
 		user, err := controller.getUserInfo(context.Background(), "C12345", "U12345", false, logger)
 
@@ -265,10 +242,7 @@ func TestReactionsController_getUserInfo(t *testing.T) {
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(false, "", nil).Once()
 
-		controller := &reactionsController{
-			apiClient: apiClient,
-			logger:    logger,
-		}
+		controller := newReactionsController(nil, apiClient, nil, nil, logger, nil, nil)
 
 		user, err := controller.getUserInfo(context.Background(), "C12345", "U12345", false, logger)
 
@@ -292,10 +266,7 @@ func TestReactionsController_getUserInfo(t *testing.T) {
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(true, "", nil).Once()
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(nil, errors.New("api error")).Once()
 
-		controller := &reactionsController{
-			apiClient: apiClient,
-			logger:    logger,
-		}
+		controller := newReactionsController(nil, apiClient, nil, nil, logger, nil, nil)
 
 		user, err := controller.getUserInfo(context.Background(), "C12345", "U12345", false, logger)
 
@@ -323,10 +294,7 @@ func TestReactionsController_getUserInfo(t *testing.T) {
 		apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(true, "", nil).Once()
 		apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(expectedUser, nil).Once()
 
-		controller := &reactionsController{
-			apiClient: apiClient,
-			logger:    logger,
-		}
+		controller := newReactionsController(nil, apiClient, nil, nil, logger, nil, nil)
 
 		user, err := controller.getUserInfo(context.Background(), "C12345", "U12345", false, logger)
 		if err != nil {
@@ -363,12 +331,7 @@ func TestReactionsController_getUserInfo(t *testing.T) {
 		cacheStore.On("Get", mock.Anything, mock.Anything).Return(nil, errors.New("not found")).Once()
 		cacheStore.On("Set", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
-		controller := &reactionsController{
-			apiClient:       apiClient,
-			cache:           internal.NewCache(cacheStore, "test:", logger),
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newReactionsController(nil, apiClient, nil, internal.NewCache(cacheStore, "test:", logger), logger, nil, newTestManagerSettings())
 
 		user, err := controller.getUserInfo(context.Background(), "C12345", "U12345", true, logger)
 
@@ -397,12 +360,7 @@ func TestReactionsController_postNotAdminAlert(t *testing.T) {
 		cacheStore := &mockCacheStore{}
 		cacheStore.On("Get", mock.Anything, mock.Anything).Return("cached", nil).Once()
 
-		controller := &reactionsController{
-			apiClient:       apiClient,
-			cache:           internal.NewCache(cacheStore, "test:", logger),
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newReactionsController(nil, apiClient, nil, internal.NewCache(cacheStore, "test:", logger), logger, nil, newTestManagerSettings())
 
 		controller.postNotAdminAlert(context.Background(), "C12345", "U12345", "Test User", logger)
 
@@ -424,12 +382,7 @@ func TestReactionsController_postNotAdminAlert(t *testing.T) {
 		cacheStore.On("Get", mock.Anything, mock.Anything).Return(nil, errors.New("not found")).Once()
 		cacheStore.On("Set", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
-		controller := &reactionsController{
-			apiClient:       apiClient,
-			cache:           internal.NewCache(cacheStore, "test:", logger),
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newReactionsController(nil, apiClient, nil, internal.NewCache(cacheStore, "test:", logger), logger, nil, newTestManagerSettings())
 
 		controller.postNotAdminAlert(context.Background(), "C12345", "U12345", "Test User", logger)
 
@@ -450,12 +403,7 @@ func TestReactionsController_postNotAdminAlert(t *testing.T) {
 		cacheStore := &mockCacheStore{}
 		cacheStore.On("Get", mock.Anything, mock.Anything).Return(nil, errors.New("not found")).Once()
 
-		controller := &reactionsController{
-			apiClient:       apiClient,
-			cache:           internal.NewCache(cacheStore, "test:", logger),
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-		}
+		controller := newReactionsController(nil, apiClient, nil, internal.NewCache(cacheStore, "test:", logger), logger, nil, newTestManagerSettings())
 
 		controller.postNotAdminAlert(context.Background(), "C12345", "U12345", "Test User", logger)
 
@@ -477,11 +425,7 @@ func TestReactionsController_sendReactionAddedCommand(t *testing.T) {
 
 		commandQueue := &mockFifoQueueProducer{}
 
-		controller := &reactionsController{
-			apiClient:    apiClient,
-			commandQueue: commandQueue,
-			logger:       logger,
-		}
+		controller := newReactionsController(nil, apiClient, commandQueue, nil, logger, nil, nil)
 
 		evt := &slackevents.ReactionAddedEvent{
 			Reaction: "white_check_mark",
@@ -517,11 +461,7 @@ func TestReactionsController_sendReactionAddedCommand(t *testing.T) {
 		commandQueue := &mockFifoQueueProducer{}
 		commandQueue.On("Send", mock.Anything, "C12345", mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil).Once()
 
-		controller := &reactionsController{
-			apiClient:    apiClient,
-			commandQueue: commandQueue,
-			logger:       logger,
-		}
+		controller := newReactionsController(nil, apiClient, commandQueue, nil, logger, nil, nil)
 
 		evt := &slackevents.ReactionAddedEvent{
 			Reaction: "white_check_mark",
@@ -558,11 +498,7 @@ func TestReactionsController_sendReactionAddedCommand(t *testing.T) {
 		commandQueue := &mockFifoQueueProducer{}
 		commandQueue.On("Send", mock.Anything, "C12345", mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(errors.New("queue error")).Once()
 
-		controller := &reactionsController{
-			apiClient:    apiClient,
-			commandQueue: commandQueue,
-			logger:       logger,
-		}
+		controller := newReactionsController(nil, apiClient, commandQueue, nil, logger, nil, nil)
 
 		evt := &slackevents.ReactionAddedEvent{
 			Reaction: "white_check_mark",

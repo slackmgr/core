@@ -157,18 +157,13 @@ func (r *SocketModeHandler) drainHandlers() {
 }
 
 func (r *SocketModeHandler) registerDefaultController() {
-	c := &defaultController{
-		clt:    r.socketModeClient,
-		logger: r.logger,
-	}
+	c := newDefaultController(r.socketModeClient, r.logger)
 
 	r.handleDefault(c.handle)
 }
 
 func (r *SocketModeHandler) registerInternalEventsController() {
-	c := &internalEventsController{
-		logger: r.logger,
-	}
+	c := newInternalEventsController(r.logger)
 
 	r.handleMultiple(
 		[]socketmode.EventType{
@@ -205,10 +200,7 @@ func (r *SocketModeHandler) registerInteractiveController() {
 }
 
 func (r *SocketModeHandler) registerSlashCommandsController() {
-	c := &slashCommandsController{
-		clt:    r.socketModeClient,
-		logger: r.logger,
-	}
+	c := newSlashCommandsController(r.socketModeClient, r.logger)
 
 	r.handle(socketmode.EventTypeSlashCommand, c.handleEventTypeSlashCommands)
 }
@@ -217,37 +209,21 @@ func (r *SocketModeHandler) registerReactionsController() {
 	cacheKeyPrefix := r.cfg.CacheKeyPrefix + "reactions-controller:"
 	cache := internal.NewCache(r.cacheStore, cacheKeyPrefix, r.logger)
 
-	c := &reactionsController{
-		clt:             r.socketModeClient,
-		apiClient:       r.apiClient,
-		commandQueue:    r.commandQueue,
-		cache:           cache,
-		logger:          r.logger,
-		cfg:             r.cfg,
-		managerSettings: r.managerSettings,
-	}
+	c := newReactionsController(r.socketModeClient, r.apiClient, r.commandQueue, cache, r.logger, r.cfg, r.managerSettings)
 
 	r.handleEventsAPI(string(slackevents.ReactionAdded), c.reactionAdded)
 	r.handleEventsAPI(string(slackevents.ReactionRemoved), c.reactionRemoved)
 }
 
 func (r *SocketModeHandler) registerGreetingsController() {
-	c := &greetingsController{
-		clt:             r.socketModeClient,
-		apiClient:       r.apiClient,
-		logger:          r.logger,
-		managerSettings: r.managerSettings,
-	}
+	c := newGreetingsController(r.socketModeClient, r.apiClient, r.logger, r.managerSettings)
 
 	r.handleEventsAPI(string(slackevents.MemberJoinedChannel), c.memberJoinedChannel)
 	r.handleEventsAPI(string(slackevents.MemberLeftChannel), c.memberLeftChannel)
 }
 
 func (r *SocketModeHandler) registerEventsAPIController() {
-	c := &eventsAPIController{
-		clt:    r.socketModeClient,
-		logger: r.logger,
-	}
+	c := newEventsAPIController(r.socketModeClient, r.logger)
 
 	r.handle(socketmode.EventTypeEventsAPI, c.handleEventTypeEventsAPI)
 }

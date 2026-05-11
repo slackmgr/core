@@ -31,9 +31,7 @@ func TestInternalEventsController_handleEventTypeClientInternal(t *testing.T) {
 			logger := &mockLogger{}
 			logger.On("Debugf", "Slack client internal event", mock.Anything).Once()
 
-			controller := &internalEventsController{
-				logger: logger,
-			}
+			controller := newInternalEventsController(logger)
 
 			evt := &socketmode.Event{
 				Type: tc.eventType,
@@ -52,9 +50,7 @@ func TestInternalEventsController_handleEventTypeHello(t *testing.T) {
 	logger := &mockLogger{}
 	logger.On("Info", "Slack socket mode connected").Once()
 
-	controller := &internalEventsController{
-		logger: logger,
-	}
+	controller := newInternalEventsController(logger)
 
 	evt := &socketmode.Event{
 		Type: socketmode.EventTypeHello,
@@ -71,9 +67,7 @@ func TestInternalEventsController_handleEventTypeDisconnect(t *testing.T) {
 	logger := &mockLogger{}
 	logger.On("Info", "Slack socket mode disconnected").Once()
 
-	controller := &internalEventsController{
-		logger: logger,
-	}
+	controller := newInternalEventsController(logger)
 
 	evt := &socketmode.Event{
 		Type: socketmode.EventTypeDisconnect,

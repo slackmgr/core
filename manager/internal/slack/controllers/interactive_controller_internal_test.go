@@ -28,10 +28,7 @@ func TestInteractiveController_globalShortcutHandler(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &interactiveController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newInteractiveController(client, nil, nil, nil, logger, nil)
 
 		evt := &socketmode.Event{
 			Type:    socketmode.EventTypeInteractive,
@@ -56,10 +53,7 @@ func TestInteractiveController_globalShortcutHandler(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &interactiveController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newInteractiveController(client, nil, nil, nil, logger, nil)
 
 		interaction := slack.InteractionCallback{
 			Type:       slack.InteractionTypeShortcut,
@@ -99,10 +93,7 @@ func TestInteractiveController_messageActionHandler(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &interactiveController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newInteractiveController(client, nil, nil, nil, logger, nil)
 
 		evt := &socketmode.Event{
 			Type:    socketmode.EventTypeInteractive,
@@ -127,10 +118,7 @@ func TestInteractiveController_messageActionHandler(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &interactiveController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newInteractiveController(client, nil, nil, nil, logger, nil)
 
 		interaction := slack.InteractionCallback{
 			Type:       slack.InteractionTypeMessageAction,
@@ -170,10 +158,7 @@ func TestInteractiveController_viewSubmissionHandler(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &interactiveController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newInteractiveController(client, nil, nil, nil, logger, nil)
 
 		evt := &socketmode.Event{
 			Type:    socketmode.EventTypeInteractive,
@@ -198,10 +183,7 @@ func TestInteractiveController_viewSubmissionHandler(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &interactiveController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newInteractiveController(client, nil, nil, nil, logger, nil)
 
 		interaction := slack.InteractionCallback{
 			Type: slack.InteractionTypeViewSubmission,
@@ -243,10 +225,7 @@ func TestInteractiveController_blockActionsHandler(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &interactiveController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newInteractiveController(client, nil, nil, nil, logger, nil)
 
 		evt := &socketmode.Event{
 			Type:    socketmode.EventTypeInteractive,
@@ -271,10 +250,7 @@ func TestInteractiveController_blockActionsHandler(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &interactiveController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newInteractiveController(client, nil, nil, nil, logger, nil)
 
 		interaction := slack.InteractionCallback{
 			Type: slack.InteractionTypeBlockActions,
@@ -313,10 +289,7 @@ func TestInteractiveController_blockActionsHandler(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &interactiveController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newInteractiveController(client, nil, nil, nil, logger, nil)
 
 		interaction := slack.InteractionCallback{
 			Type: slack.InteractionTypeBlockActions,
@@ -358,10 +331,7 @@ func TestInteractiveController_blockActionsHandler(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &interactiveController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newInteractiveController(client, nil, nil, nil, logger, nil)
 
 		interaction := slack.InteractionCallback{
 			Type: slack.InteractionTypeBlockActions,
@@ -405,10 +375,7 @@ func TestInteractiveController_defaultInteractiveHandler(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &interactiveController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newInteractiveController(client, nil, nil, nil, logger, nil)
 
 		evt := &socketmode.Event{
 			Type:    socketmode.EventTypeInteractive,
@@ -433,10 +400,7 @@ func TestInteractiveController_defaultInteractiveHandler(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &interactiveController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newInteractiveController(client, nil, nil, nil, logger, nil)
 
 		interaction := slack.InteractionCallback{
 			Type: "some_unknown_type",
@@ -959,9 +923,7 @@ func TestInteractiveController_parsePrivateModalMetadata(t *testing.T) {
 
 		logger := &mockLogger{}
 
-		controller := &interactiveController{
-			logger: logger,
-		}
+		controller := newInteractiveController(nil, nil, nil, nil, logger, nil)
 
 		metadata := controller.parsePrivateModalMetadata(`{"values":{"key1":"value1","key2":"value2"}}`)
 
@@ -975,9 +937,7 @@ func TestInteractiveController_parsePrivateModalMetadata(t *testing.T) {
 		logger := &mockLogger{}
 		logger.On("Errorf", mock.Anything, mock.Anything).Once()
 
-		controller := &interactiveController{
-			logger: logger,
-		}
+		controller := newInteractiveController(nil, nil, nil, nil, logger, nil)
 
 		metadata := controller.parsePrivateModalMetadata("invalid json")
 
@@ -1051,14 +1011,7 @@ func TestInteractiveController_handleWebhookRequest(t *testing.T) {
 
 		logger := &mockLogger{}
 
-		controller := &interactiveController{
-			apiClient:       apiClient,
-			commandQueue:    queue,
-			issueFinder:     issueFinder,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-			lastWebhook:     make(map[string]time.Time),
-		}
+		controller := newInteractiveController(nil, apiClient, queue, issueFinder, logger, newTestManagerSettings())
 
 		controller.handleWebhookRequest(context.Background(), newInteraction(), &slack.BlockAction{ActionID: actionID, Value: webhookID}, logger)
 
@@ -1092,14 +1045,7 @@ func TestInteractiveController_handleWebhookRequest(t *testing.T) {
 		logger := &mockLogger{}
 		logger.On("Errorf", "Failed to get user info: %s", mock.Anything).Once()
 
-		controller := &interactiveController{
-			apiClient:       apiClient,
-			commandQueue:    queue,
-			issueFinder:     issueFinder,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-			lastWebhook:     make(map[string]time.Time),
-		}
+		controller := newInteractiveController(nil, apiClient, queue, issueFinder, logger, newTestManagerSettings())
 
 		controller.handleWebhookRequest(context.Background(), newInteraction(), &slack.BlockAction{ActionID: actionID, Value: webhookID}, logger)
 
@@ -1132,14 +1078,7 @@ func TestInteractiveController_handleWebhookRequest(t *testing.T) {
 		logger := &mockLogger{}
 		logger.On("Errorf", "Failed to send command '%s': %s", mock.Anything).Once()
 
-		controller := &interactiveController{
-			apiClient:       apiClient,
-			commandQueue:    queue,
-			issueFinder:     issueFinder,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-			lastWebhook:     make(map[string]time.Time),
-		}
+		controller := newInteractiveController(nil, apiClient, queue, issueFinder, logger, newTestManagerSettings())
 
 		controller.handleWebhookRequest(context.Background(), newInteraction(), &slack.BlockAction{ActionID: actionID, Value: webhookID}, logger)
 
@@ -1172,14 +1111,7 @@ func TestInteractiveController_handleWebhookRequest(t *testing.T) {
 
 		logger := &mockLogger{}
 
-		controller := &interactiveController{
-			apiClient:       apiClient,
-			commandQueue:    queue,
-			issueFinder:     issueFinder,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-			lastWebhook:     make(map[string]time.Time),
-		}
+		controller := newInteractiveController(nil, apiClient, queue, issueFinder, logger, newTestManagerSettings())
 
 		controller.handleWebhookRequest(context.Background(), newInteraction(), &slack.BlockAction{ActionID: actionID, Value: webhookID}, logger)
 
@@ -1215,14 +1147,7 @@ func TestInteractiveController_handleWebhookRequest(t *testing.T) {
 
 		logger := &mockLogger{}
 
-		controller := &interactiveController{
-			apiClient:       apiClient,
-			commandQueue:    queue,
-			issueFinder:     issueFinder,
-			logger:          logger,
-			managerSettings: newTestManagerSettings(),
-			lastWebhook:     make(map[string]time.Time),
-		}
+		controller := newInteractiveController(nil, apiClient, queue, issueFinder, logger, newTestManagerSettings())
 
 		// Two clicks back-to-back on the same webhook button.
 		action := &slack.BlockAction{ActionID: actionID, Value: webhookID}
@@ -1248,9 +1173,7 @@ func TestInteractiveController_isWebhookClickAllowed(t *testing.T) {
 	t.Run("first click on new key is allowed and recorded", func(t *testing.T) {
 		t.Parallel()
 
-		controller := &interactiveController{
-			lastWebhook: make(map[string]time.Time),
-		}
+		controller := newInteractiveController(nil, nil, nil, nil, nil, nil)
 
 		assert.True(t, controller.isWebhookClickAllowed(channelID, messageTs, webhookID))
 		assert.Len(t, controller.lastWebhook, 1, "click should be recorded in the map")
@@ -1259,9 +1182,7 @@ func TestInteractiveController_isWebhookClickAllowed(t *testing.T) {
 	t.Run("second click within debounce window is rejected", func(t *testing.T) {
 		t.Parallel()
 
-		controller := &interactiveController{
-			lastWebhook: make(map[string]time.Time),
-		}
+		controller := newInteractiveController(nil, nil, nil, nil, nil, nil)
 
 		assert.True(t, controller.isWebhookClickAllowed(channelID, messageTs, webhookID))
 		assert.False(t, controller.isWebhookClickAllowed(channelID, messageTs, webhookID))
@@ -1270,9 +1191,7 @@ func TestInteractiveController_isWebhookClickAllowed(t *testing.T) {
 	t.Run("clicks on different webhooks are independent", func(t *testing.T) {
 		t.Parallel()
 
-		controller := &interactiveController{
-			lastWebhook: make(map[string]time.Time),
-		}
+		controller := newInteractiveController(nil, nil, nil, nil, nil, nil)
 
 		assert.True(t, controller.isWebhookClickAllowed(channelID, messageTs, "deploy"))
 		assert.True(t, controller.isWebhookClickAllowed(channelID, messageTs, "rollback"))
@@ -1281,9 +1200,7 @@ func TestInteractiveController_isWebhookClickAllowed(t *testing.T) {
 	t.Run("clicks in different channels are independent", func(t *testing.T) {
 		t.Parallel()
 
-		controller := &interactiveController{
-			lastWebhook: make(map[string]time.Time),
-		}
+		controller := newInteractiveController(nil, nil, nil, nil, nil, nil)
 
 		assert.True(t, controller.isWebhookClickAllowed("C111", messageTs, webhookID))
 		assert.True(t, controller.isWebhookClickAllowed("C222", messageTs, webhookID))
@@ -1292,9 +1209,7 @@ func TestInteractiveController_isWebhookClickAllowed(t *testing.T) {
 	t.Run("clicks on different message timestamps are independent", func(t *testing.T) {
 		t.Parallel()
 
-		controller := &interactiveController{
-			lastWebhook: make(map[string]time.Time),
-		}
+		controller := newInteractiveController(nil, nil, nil, nil, nil, nil)
 
 		assert.True(t, controller.isWebhookClickAllowed(channelID, "1700000000.000100", webhookID))
 		assert.True(t, controller.isWebhookClickAllowed(channelID, "1700000001.000200", webhookID))
@@ -1304,12 +1219,9 @@ func TestInteractiveController_isWebhookClickAllowed(t *testing.T) {
 		t.Parallel()
 
 		key := channelID + "::" + messageTs + "::" + webhookID
-		controller := &interactiveController{
-			lastWebhook: map[string]time.Time{
-				// Pretend the last click happened well outside MinWebhookClickInterval (2s).
-				key: time.Now().Add(-MinWebhookClickInterval - time.Second),
-			},
-		}
+		controller := newInteractiveController(nil, nil, nil, nil, nil, nil)
+		// Pretend the last click happened well outside MinWebhookClickInterval (2s).
+		controller.lastWebhook[key] = time.Now().Add(-MinWebhookClickInterval - time.Second)
 
 		assert.True(t, controller.isWebhookClickAllowed(channelID, messageTs, webhookID))
 	})

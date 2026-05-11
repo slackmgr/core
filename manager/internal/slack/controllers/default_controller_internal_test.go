@@ -21,10 +21,7 @@ func TestDefaultController_handle(t *testing.T) {
 		req := socketmode.Request{EnvelopeID: "test-envelope"}
 		client.On("Ack", &req).Once()
 
-		controller := &defaultController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newDefaultController(client, logger)
 
 		evt := &socketmode.Event{
 			Type:    "unknown_event_type",
@@ -46,10 +43,7 @@ func TestDefaultController_handle(t *testing.T) {
 		client := newMockSocketModeClient()
 		// Ack should not be called when Request is nil
 
-		controller := &defaultController{
-			clt:    client,
-			logger: logger,
-		}
+		controller := newDefaultController(client, logger)
 
 		evt := &socketmode.Event{
 			Type:    "unknown_event_type",
