@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
@@ -24,6 +26,10 @@ const (
 	ConfirmWebhookModal        = "confirm_webhook_modal"
 	WebhookActionIDPrefix      = "webhook_action"
 	OptionButtonActionIDPrefix = "option_button_action"
+
+	// MinWebhookClickInterval defines the minimum allowed interval between two clicks on the same webhook.
+	// This is to prevent accidental double clicks and potential issues caused by them.
+	MinWebhookClickInterval = 2 * time.Second
 )
 
 type IssueFinder interface {
@@ -41,6 +47,20 @@ type interactiveController struct {
 	issueFinder     IssueFinder
 	logger          types.Logger
 	managerSettings *models.ManagerSettingsWrapper
+	lastWebhook     map[string]time.Time
+	lastWebhookLock sync.Mutex
+}
+
+func newInteractiveController(clt SocketModeClient, apiClient SlackAPIClient, commandQueue FifoQueueProducer, issueFinder IssueFinder, logger types.Logger, managerSettings *models.ManagerSettingsWrapper) *interactiveController {
+	return &interactiveController{
+		clt:             clt,
+		apiClient:       apiClient,
+		commandQueue:    commandQueue,
+		issueFinder:     issueFinder,
+		logger:          logger,
+		managerSettings: managerSettings,
+		lastWebhook:     make(map[string]time.Time),
+	}
 }
 
 // globalShortcutHandler handles all incoming interaction messages of type 'shortcut'
@@ -533,6 +553,34 @@ func (c *interactiveController) handleWebhookRequest(ctx context.Context, intera
 		return
 	}
 
+	// Check if the user is clicking the same webhook too frequently, which may indicate accidental double clicks. If so, ignore the click.
+	if !c.isWebhookClickAllowed(interaction.Channel.ID, interaction.Message.Timestamp, webhook.ID) {
+		return
+	}
+
+	// Special case for webhooks with skipConfirmationDialog=true - we trigger them immediately without showing the confirmation modal
+	if webhook.SkipConfirmationDialog {
+		userInfo, err := c.apiClient.GetUserInfo(ctx, interaction.User.ID)
+		if err != nil {
+			logger.Errorf("Failed to get user info: %s", err)
+			return
+		}
+
+		params := &models.WebhookCommandParams{WebhookID: webhook.ID}
+
+		// Send an async command to handle the webhook
+		cmdAction := models.CommandActionWebhook
+		cmd := models.NewCommand(interaction.Channel.ID, interaction.Message.Timestamp, "", userInfo.ID, userInfo.RealName, cmdAction, nil)
+		cmd.WebhookParameters = params
+
+		if err := sendCommand(ctx, c.commandQueue, cmd); err != nil {
+			logger.Errorf("Failed to send command '%s': %s", cmdAction, err)
+		}
+
+		return
+	}
+
+	// Normal case - show the confirmation modal
 	metadata, err := newPrivateModalMetadata().
 		Set("channelId", interaction.Channel.ID).
 		Set("messageTs", interaction.Message.Timestamp).
@@ -621,6 +669,21 @@ func (c *interactiveController) webhookViewSubmission(ctx context.Context, evt *
 	if err := sendCommand(ctx, c.commandQueue, cmd); err != nil {
 		logger.Errorf("Failed to send command '%s': %s", cmdAction, err)
 	}
+}
+
+func (c *interactiveController) isWebhookClickAllowed(channelID, messageTs, webhookID string) bool {
+	c.lastWebhookLock.Lock()
+	defer c.lastWebhookLock.Unlock()
+
+	key := fmt.Sprintf("%s::%s::%s", channelID, messageTs, webhookID)
+	lastClickTime, exists := c.lastWebhook[key]
+
+	if !exists || time.Since(lastClickTime) > MinWebhookClickInterval {
+		c.lastWebhook[key] = time.Now()
+		return true
+	}
+
+	return false
 }
 
 func getInputValue(interaction slack.InteractionCallback, key1, key2 string) (string, error) {

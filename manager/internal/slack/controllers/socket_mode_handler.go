@@ -186,14 +186,7 @@ func (r *SocketModeHandler) registerInternalEventsController() {
 }
 
 func (r *SocketModeHandler) registerInteractiveController() {
-	c := &interactiveController{
-		clt:             r.socketModeClient,
-		apiClient:       r.apiClient,
-		commandQueue:    r.commandQueue,
-		issueFinder:     r.issueFinder,
-		logger:          r.logger,
-		managerSettings: r.managerSettings,
-	}
+	c := newInteractiveController(r.socketModeClient, r.apiClient, r.commandQueue, r.issueFinder, r.logger, r.managerSettings)
 
 	// Global shortcuts
 	r.handleInteraction(slack.InteractionTypeShortcut, c.globalShortcutHandler)

@@ -2,10 +2,14 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -979,5 +983,334 @@ func TestInteractiveController_parsePrivateModalMetadata(t *testing.T) {
 
 		assert.Empty(t, metadata.Get("key1"))
 		logger.AssertExpectations(t)
+	})
+}
+
+func TestInteractiveController_handleWebhookRequest(t *testing.T) {
+	t.Parallel()
+
+	const (
+		channelID   = "C12345"
+		messageTs   = "1700000000.000100"
+		userID      = "U12345"
+		userName    = "Test User"
+		webhookID   = "deploy"
+		actionID    = WebhookActionIDPrefix + "_deploy"
+		responseURL = "https://hooks.slack.com/response"
+	)
+
+	// newIssueWithWebhook builds a minimal issue containing a single webhook with the given properties.
+	newIssueWithWebhook := func(webhook *types.Webhook) *models.Issue {
+		alert := &models.Alert{
+			Alert: types.Alert{
+				SlackChannelID: channelID,
+				Webhooks:       []*types.Webhook{webhook},
+			},
+		}
+		return &models.Issue{LastAlert: alert}
+	}
+
+	newInteraction := func() slack.InteractionCallback {
+		return slack.InteractionCallback{
+			User:        slack.User{ID: userID},
+			TriggerID:   "trigger-123",
+			ResponseURL: responseURL,
+			Channel: slack.Channel{
+				GroupConversation: slack.GroupConversation{
+					Conversation: slack.Conversation{ID: channelID},
+				},
+			},
+			Message: slack.Message{
+				Msg: slack.Msg{Timestamp: messageTs},
+			},
+		}
+	}
+
+	t.Run("skip confirmation dialog dispatches command without opening modal", func(t *testing.T) {
+		t.Parallel()
+
+		webhook := &types.Webhook{
+			ID:                     webhookID,
+			URL:                    "https://example.com/hook",
+			AccessLevel:            types.WebhookAccessLevelChannelMembers,
+			SkipConfirmationDialog: true,
+		}
+		issue := newIssueWithWebhook(webhook)
+
+		issueFinder := &mockIssueFinder{}
+		issueFinder.On("FindIssueBySlackPost", mock.Anything, channelID, messageTs, false).Return(issue).Once()
+
+		apiClient := &mockSlackAPIClient{}
+		apiClient.On("GetUserInfo", mock.Anything, userID).Return(&slack.User{ID: userID, RealName: userName}, nil).Once()
+
+		queue := &mockFifoQueueProducer{}
+		queue.On("Send", mock.Anything, channelID, mock.Anything, mock.MatchedBy(func(body string) bool {
+			return assert.Contains(t, body, `"action":"webhook"`) &&
+				assert.Contains(t, body, `"webhookId":"deploy"`)
+		})).Return(nil).Once()
+
+		logger := &mockLogger{}
+
+		controller := &interactiveController{
+			apiClient:       apiClient,
+			commandQueue:    queue,
+			issueFinder:     issueFinder,
+			logger:          logger,
+			managerSettings: newTestManagerSettings(),
+			lastWebhook:     make(map[string]time.Time),
+		}
+
+		controller.handleWebhookRequest(context.Background(), newInteraction(), &slack.BlockAction{ActionID: actionID, Value: webhookID}, logger)
+
+		issueFinder.AssertExpectations(t)
+		apiClient.AssertExpectations(t)
+		queue.AssertExpectations(t)
+		logger.AssertExpectations(t)
+		// The modal must NOT be opened in the skip path.
+		apiClient.AssertNotCalled(t, "OpenModal", mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("skip confirmation logs error when GetUserInfo fails and does not dispatch", func(t *testing.T) {
+		t.Parallel()
+
+		webhook := &types.Webhook{
+			ID:                     webhookID,
+			URL:                    "https://example.com/hook",
+			AccessLevel:            types.WebhookAccessLevelChannelMembers,
+			SkipConfirmationDialog: true,
+		}
+		issue := newIssueWithWebhook(webhook)
+
+		issueFinder := &mockIssueFinder{}
+		issueFinder.On("FindIssueBySlackPost", mock.Anything, channelID, messageTs, false).Return(issue).Once()
+
+		apiClient := &mockSlackAPIClient{}
+		apiClient.On("GetUserInfo", mock.Anything, userID).Return(nil, errors.New("slack down")).Once()
+
+		queue := &mockFifoQueueProducer{}
+
+		logger := &mockLogger{}
+		logger.On("Errorf", "Failed to get user info: %s", mock.Anything).Once()
+
+		controller := &interactiveController{
+			apiClient:       apiClient,
+			commandQueue:    queue,
+			issueFinder:     issueFinder,
+			logger:          logger,
+			managerSettings: newTestManagerSettings(),
+			lastWebhook:     make(map[string]time.Time),
+		}
+
+		controller.handleWebhookRequest(context.Background(), newInteraction(), &slack.BlockAction{ActionID: actionID, Value: webhookID}, logger)
+
+		issueFinder.AssertExpectations(t)
+		apiClient.AssertExpectations(t)
+		logger.AssertExpectations(t)
+		queue.AssertNotCalled(t, "Send", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("skip confirmation logs error when sendCommand fails", func(t *testing.T) {
+		t.Parallel()
+
+		webhook := &types.Webhook{
+			ID:                     webhookID,
+			URL:                    "https://example.com/hook",
+			AccessLevel:            types.WebhookAccessLevelChannelMembers,
+			SkipConfirmationDialog: true,
+		}
+		issue := newIssueWithWebhook(webhook)
+
+		issueFinder := &mockIssueFinder{}
+		issueFinder.On("FindIssueBySlackPost", mock.Anything, channelID, messageTs, false).Return(issue).Once()
+
+		apiClient := &mockSlackAPIClient{}
+		apiClient.On("GetUserInfo", mock.Anything, userID).Return(&slack.User{ID: userID, RealName: userName}, nil).Once()
+
+		queue := &mockFifoQueueProducer{}
+		queue.On("Send", mock.Anything, channelID, mock.Anything, mock.Anything).Return(errors.New("queue full")).Once()
+
+		logger := &mockLogger{}
+		logger.On("Errorf", "Failed to send command '%s': %s", mock.Anything).Once()
+
+		controller := &interactiveController{
+			apiClient:       apiClient,
+			commandQueue:    queue,
+			issueFinder:     issueFinder,
+			logger:          logger,
+			managerSettings: newTestManagerSettings(),
+			lastWebhook:     make(map[string]time.Time),
+		}
+
+		controller.handleWebhookRequest(context.Background(), newInteraction(), &slack.BlockAction{ActionID: actionID, Value: webhookID}, logger)
+
+		issueFinder.AssertExpectations(t)
+		apiClient.AssertExpectations(t)
+		queue.AssertExpectations(t)
+		logger.AssertExpectations(t)
+	})
+
+	t.Run("default path opens confirmation modal", func(t *testing.T) {
+		t.Parallel()
+
+		webhook := &types.Webhook{
+			ID:          webhookID,
+			URL:         "https://example.com/hook",
+			AccessLevel: types.WebhookAccessLevelChannelMembers,
+			// SkipConfirmationDialog: false (default)
+		}
+		issue := newIssueWithWebhook(webhook)
+
+		issueFinder := &mockIssueFinder{}
+		issueFinder.On("FindIssueBySlackPost", mock.Anything, channelID, messageTs, false).Return(issue).Once()
+
+		apiClient := &mockSlackAPIClient{}
+		apiClient.On("OpenModal", mock.Anything, "trigger-123", mock.MatchedBy(func(req slack.ModalViewRequest) bool {
+			return req.CallbackID == ConfirmWebhookModal
+		})).Return(nil).Once()
+
+		queue := &mockFifoQueueProducer{}
+
+		logger := &mockLogger{}
+
+		controller := &interactiveController{
+			apiClient:       apiClient,
+			commandQueue:    queue,
+			issueFinder:     issueFinder,
+			logger:          logger,
+			managerSettings: newTestManagerSettings(),
+			lastWebhook:     make(map[string]time.Time),
+		}
+
+		controller.handleWebhookRequest(context.Background(), newInteraction(), &slack.BlockAction{ActionID: actionID, Value: webhookID}, logger)
+
+		issueFinder.AssertExpectations(t)
+		apiClient.AssertExpectations(t)
+		logger.AssertExpectations(t)
+		// Skip path should not run.
+		apiClient.AssertNotCalled(t, "GetUserInfo", mock.Anything, mock.Anything)
+		queue.AssertNotCalled(t, "Send", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("rapid double click is debounced and only dispatches once", func(t *testing.T) {
+		t.Parallel()
+
+		webhook := &types.Webhook{
+			ID:                     webhookID,
+			URL:                    "https://example.com/hook",
+			AccessLevel:            types.WebhookAccessLevelChannelMembers,
+			SkipConfirmationDialog: true,
+		}
+		issue := newIssueWithWebhook(webhook)
+
+		issueFinder := &mockIssueFinder{}
+		// FindIssueBySlackPost is called on every click — both pass through to it before debounce check.
+		issueFinder.On("FindIssueBySlackPost", mock.Anything, channelID, messageTs, false).Return(issue).Twice()
+
+		apiClient := &mockSlackAPIClient{}
+		// GetUserInfo and Send must run exactly once — the second click is debounced before reaching them.
+		apiClient.On("GetUserInfo", mock.Anything, userID).Return(&slack.User{ID: userID, RealName: userName}, nil).Once()
+
+		queue := &mockFifoQueueProducer{}
+		queue.On("Send", mock.Anything, channelID, mock.Anything, mock.Anything).Return(nil).Once()
+
+		logger := &mockLogger{}
+
+		controller := &interactiveController{
+			apiClient:       apiClient,
+			commandQueue:    queue,
+			issueFinder:     issueFinder,
+			logger:          logger,
+			managerSettings: newTestManagerSettings(),
+			lastWebhook:     make(map[string]time.Time),
+		}
+
+		// Two clicks back-to-back on the same webhook button.
+		action := &slack.BlockAction{ActionID: actionID, Value: webhookID}
+		controller.handleWebhookRequest(context.Background(), newInteraction(), action, logger)
+		controller.handleWebhookRequest(context.Background(), newInteraction(), action, logger)
+
+		issueFinder.AssertExpectations(t)
+		apiClient.AssertExpectations(t)
+		queue.AssertExpectations(t)
+		logger.AssertExpectations(t)
+	})
+}
+
+func TestInteractiveController_isWebhookClickAllowed(t *testing.T) {
+	t.Parallel()
+
+	const (
+		channelID = "C12345"
+		messageTs = "1700000000.000100"
+		webhookID = "deploy"
+	)
+
+	t.Run("first click on new key is allowed and recorded", func(t *testing.T) {
+		t.Parallel()
+
+		controller := &interactiveController{
+			lastWebhook: make(map[string]time.Time),
+		}
+
+		assert.True(t, controller.isWebhookClickAllowed(channelID, messageTs, webhookID))
+		assert.Len(t, controller.lastWebhook, 1, "click should be recorded in the map")
+	})
+
+	t.Run("second click within debounce window is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		controller := &interactiveController{
+			lastWebhook: make(map[string]time.Time),
+		}
+
+		assert.True(t, controller.isWebhookClickAllowed(channelID, messageTs, webhookID))
+		assert.False(t, controller.isWebhookClickAllowed(channelID, messageTs, webhookID))
+	})
+
+	t.Run("clicks on different webhooks are independent", func(t *testing.T) {
+		t.Parallel()
+
+		controller := &interactiveController{
+			lastWebhook: make(map[string]time.Time),
+		}
+
+		assert.True(t, controller.isWebhookClickAllowed(channelID, messageTs, "deploy"))
+		assert.True(t, controller.isWebhookClickAllowed(channelID, messageTs, "rollback"))
+	})
+
+	t.Run("clicks in different channels are independent", func(t *testing.T) {
+		t.Parallel()
+
+		controller := &interactiveController{
+			lastWebhook: make(map[string]time.Time),
+		}
+
+		assert.True(t, controller.isWebhookClickAllowed("C111", messageTs, webhookID))
+		assert.True(t, controller.isWebhookClickAllowed("C222", messageTs, webhookID))
+	})
+
+	t.Run("clicks on different message timestamps are independent", func(t *testing.T) {
+		t.Parallel()
+
+		controller := &interactiveController{
+			lastWebhook: make(map[string]time.Time),
+		}
+
+		assert.True(t, controller.isWebhookClickAllowed(channelID, "1700000000.000100", webhookID))
+		assert.True(t, controller.isWebhookClickAllowed(channelID, "1700000001.000200", webhookID))
+	})
+
+	t.Run("click is allowed again after debounce window has passed", func(t *testing.T) {
+		t.Parallel()
+
+		key := channelID + "::" + messageTs + "::" + webhookID
+		controller := &interactiveController{
+			lastWebhook: map[string]time.Time{
+				// Pretend the last click happened well outside MinWebhookClickInterval (2s).
+				key: time.Now().Add(-MinWebhookClickInterval - time.Second),
+			},
+		}
+
+		assert.True(t, controller.isWebhookClickAllowed(channelID, messageTs, webhookID))
 	})
 }

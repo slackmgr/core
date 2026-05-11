@@ -95,7 +95,7 @@ func TestWebhookInputView_ConfirmationText(t *testing.T) {
 		assert.Equal(t, "Are you *sure*?", header.Text.Text)
 	})
 
-	t.Run("no confirmation text uses plain text with URL", func(t *testing.T) {
+	t.Run("no confirmation text uses default plain text without URL", func(t *testing.T) {
 		t.Parallel()
 		webhook := &types.Webhook{URL: "https://example.com/hook"}
 
@@ -105,7 +105,8 @@ func TestWebhookInputView_ConfirmationText(t *testing.T) {
 		header, ok := blocks[0].(*slack.SectionBlock)
 		require.True(t, ok, "expected *slack.SectionBlock")
 		assert.Equal(t, slack.PlainTextType, header.Text.Type)
-		assert.Contains(t, header.Text.Text, "https://example.com/hook")
+		assert.Equal(t, "Please confirm that you wish to post this webhook", header.Text.Text)
+		assert.NotContains(t, header.Text.Text, "https://example.com/hook")
 	})
 }
 

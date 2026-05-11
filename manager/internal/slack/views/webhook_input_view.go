@@ -1,8 +1,6 @@
 package views
 
 import (
-	"fmt"
-
 	"github.com/slack-go/slack"
 	"github.com/slackmgr/types"
 )
@@ -19,7 +17,7 @@ func WebhookInputView(webhook *types.Webhook) []slack.Block {
 	if webhook.ConfirmationText != "" {
 		header = slack.NewTextBlockObject(slack.MarkdownType, webhook.ConfirmationText, false, false)
 	} else {
-		header = slack.NewTextBlockObject(slack.PlainTextType, fmt.Sprintf("Please confirm that you wish to post the webhook to %s.", webhook.URL), false, false)
+		header = slack.NewTextBlockObject(slack.PlainTextType, "Please confirm that you wish to post this webhook", false, false)
 	}
 
 	blocks = append(blocks, slack.NewSectionBlock(header, nil, nil))
