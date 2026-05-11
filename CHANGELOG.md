@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.7] - 2026-05-11
+
+### Added
+- Support for `Webhook.SkipConfirmationDialog`: when true, clicking the webhook button dispatches the webhook command immediately instead of opening a confirmation modal
+- Debounce on rapid webhook button clicks: repeated clicks on the same webhook within 2 seconds are ignored to prevent accidental double-triggering
+
+### Changed
+- Bump `github.com/slackmgr/types` to v0.6.0 (adds `Webhook.SkipConfirmationDialog`)
+- Default webhook confirmation header no longer includes the webhook URL
+
 ## [0.12.6] - 2026-05-08
 
 ### Changed
@@ -346,7 +356,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.12.6...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.12.7...HEAD
+[0.12.7]: https://github.com/slackmgr/core/compare/v0.12.6...v0.12.7
 [0.12.6]: https://github.com/slackmgr/core/compare/v0.12.5...v0.12.6
 [0.12.5]: https://github.com/slackmgr/core/compare/v0.12.4...v0.12.5
 [0.12.4]: https://github.com/slackmgr/core/compare/v0.12.3...v0.12.4
