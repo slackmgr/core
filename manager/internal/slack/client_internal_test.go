@@ -73,3 +73,29 @@ func TestFindCutPoint(t *testing.T) {
 		assert.True(t, utf8.ValidString(s[:cut]))
 	})
 }
+
+func TestFormatAlertCount(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		count int
+		want  string
+	}{
+		{"zero", 0, "0"},
+		{"single digit", 7, "7"},
+		{"three digits", 999, "999"},
+		{"four digits", 8017, "8,017"},
+		{"five digits", 80170, "80,170"},
+		{"six digits avoids hex color", 100000, "100,000"},
+		{"seven digits", 1234567, "1,234,567"},
+		{"negative", -100000, "-100,000"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, formatAlertCount(tt.count))
+		})
+	}
+}

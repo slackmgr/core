@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -604,7 +605,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 	if issue.FollowUpEnabled() {
 		first := "First: " + issue.Created.In(c.cfg.GetLocation()).Format("01-02 15:04:05")
 		last := "Last: " + issue.LastAlertReceived.In(c.cfg.GetLocation()).Format("01-02 15:04:05")
-		alertCount := fmt.Sprintf("#%d", issue.AlertCount)
+		alertCount := "#" + formatAlertCount(issue.AlertCount)
 
 		fields := make([]slack.MixedElement, 0, 3)
 		fields = append(fields, slack.NewTextBlockObject("plain_text", first, false, false))
@@ -664,6 +665,45 @@ func newMrkdwnTextBlock(text string) *slack.TextBlockObject {
 func newPlainTextTextBlock(text string) *slack.TextBlockObject {
 	text = strings.ReplaceAll(text, "<!everyone>", "everyone")
 	return slack.NewTextBlockObject("plain_text", text, true, false)
+}
+
+// formatAlertCount renders an issue's alert count for the Slack footer with
+// thousands separators (e.g. 100000 -> "100,000"). The separators also prevent
+// Slack from interpreting six-figure counts (e.g. "#100000") as a hex color
+// code, which would otherwise render as a small color swatch.
+func formatAlertCount(count int) string {
+	s := strconv.Itoa(count)
+
+	neg := strings.HasPrefix(s, "-")
+	if neg {
+		s = s[1:]
+	}
+
+	n := len(s)
+	if n <= 3 {
+		if neg {
+			return "-" + s
+		}
+		return s
+	}
+
+	var b strings.Builder
+	if neg {
+		b.WriteByte('-')
+	}
+
+	first := n % 3
+	if first == 0 {
+		first = 3
+	}
+
+	b.WriteString(s[:first])
+	for i := first; i < n; i += 3 {
+		b.WriteByte(',')
+		b.WriteString(s[i : i+3])
+	}
+
+	return b.String()
 }
 
 func getWebhookButtons(issue *models.Issue) []slack.BlockElement {
