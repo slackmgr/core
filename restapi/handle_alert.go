@@ -59,7 +59,8 @@ func (s *Server) handleAlerts(c *gin.Context) {
 
 func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started time.Time) {
 	if len(alerts) == 0 {
-		c.Status(http.StatusNoContent)
+		err := errors.New("request contains no alerts")
+		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
 

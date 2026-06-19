@@ -362,7 +362,7 @@ func TestServer_HandleAlerts_Validation(t *testing.T) {
 		assertJSONError(t, w, "parse")
 	})
 
-	t.Run("returns 204 for empty alerts array", func(t *testing.T) {
+	t.Run("returns 400 for empty alerts array", func(t *testing.T) {
 		t.Parallel()
 
 		server, _, _ := newTestServer(t)
@@ -375,7 +375,8 @@ func TestServer_HandleAlerts_Validation(t *testing.T) {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusNoContent, w.Code)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assertJSONError(t, w, "no alerts")
 	})
 }
 
