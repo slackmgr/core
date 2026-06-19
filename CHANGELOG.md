@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-19
+
+### Changed
+- `POST /alert` now returns `400 Bad Request` (instead of `204 No Content`) when the request body is an empty alert array (`[]`), matching the `/prometheus-alert` handling of an empty alert list
+
+### Fixed
+- Six-figure alert counts no longer render as a hex color in the Slack footer
+
 ## [0.12.7] - 2026-05-11
 
 ### Added
@@ -356,7 +364,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.12.7...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/slackmgr/core/compare/v0.12.7...v0.13.0
 [0.12.7]: https://github.com/slackmgr/core/compare/v0.12.6...v0.12.7
 [0.12.6]: https://github.com/slackmgr/core/compare/v0.12.5...v0.12.6
 [0.12.5]: https://github.com/slackmgr/core/compare/v0.12.4...v0.12.5
