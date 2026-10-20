@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `POST /slackalert[/:slackChannelId]` and `POST /slackalerts[/:slackChannelId]`: deprecated aliases for the alert endpoints, kept for legacy clients
 
 ### Changed
+- Bump `github.com/slackmgr/types` to v0.7.0 and `github.com/stretchr/testify` to v1.12.1
 - `GET /mappings` now returns the legacy format, extended with `alertType`: `{"rules":[{"teamName","description","alertType","equals","hasPrefix","matchesRegex","channel","matchAll"}]}` instead of a bare array of routing rules (**breaking** for consumers of the previous format). An empty description falls back to the rule name
 
 ### Fixed
