@@ -458,3 +458,40 @@ func TestAlert_LogFields(t *testing.T) {
 		assert.Equal(t, "corr-123", fields["correlation_id"])
 	})
 }
+
+func TestAlert_ApplyLegacyFields(t *testing.T) {
+	t.Parallel()
+
+	t.Run("does nothing for nil alert", func(t *testing.T) {
+		t.Parallel()
+
+		var alert *Alert
+
+		// Should not panic
+		alert.ApplyLegacyFields()
+	})
+
+	t.Run("uses deletion delay when archiving delay is not set", func(t *testing.T) {
+		t.Parallel()
+
+		alert := &Alert{Alert: types.Alert{DeletionDelaySeconds: 3600}} //nolint:staticcheck // legacy compatibility
+		alert.ApplyLegacyFields()
+		assert.Equal(t, 3600, alert.ArchivingDelaySeconds)
+	})
+
+	t.Run("keeps archiving delay when set", func(t *testing.T) {
+		t.Parallel()
+
+		alert := &Alert{Alert: types.Alert{ArchivingDelaySeconds: 120, DeletionDelaySeconds: 3600}} //nolint:staticcheck // legacy compatibility
+		alert.ApplyLegacyFields()
+		assert.Equal(t, 120, alert.ArchivingDelaySeconds)
+	})
+
+	t.Run("leaves archiving delay unset when deletion delay is not set", func(t *testing.T) {
+		t.Parallel()
+
+		alert := &Alert{Alert: types.Alert{}}
+		alert.ApplyLegacyFields()
+		assert.Equal(t, 0, alert.ArchivingDelaySeconds)
+	})
+}

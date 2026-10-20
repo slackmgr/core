@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `ManagerConfig.EnableLegacyFeatures` (default `false`): compatibility mode for clients built against the legacy Slack Manager. When enabled, the manager uses the deprecated `Alert.DeletionDelaySeconds` as the archiving delay when `ArchivingDelaySeconds` is not set, and populates the deprecated `WebhookCallback.Input` (JSON `input`) with a copy of `PlainTextInput`
+- `POST /slackalert[/:slackChannelId]` and `POST /slackalerts[/:slackChannelId]`: deprecated aliases for the alert endpoints, kept for legacy clients
+
+### Changed
+- `GET /mappings` now returns the legacy format `{"rules":[{"teamName","description","equals","hasPrefix","matchesRegex","channel","matchAll"}]}` instead of a bare array of routing rules (**breaking** for consumers of the previous format). Rules with an `alertType` are omitted, and an empty description falls back to the rule name
+
+### Fixed
+- Route keys and channel IDs with leading/trailing whitespace are now trimmed before routing and channel name mapping. Previously such alerts failed to match their routing rule or channel name
+- Channel names in escalation `moveToChannel` are now mapped to channel IDs by the API. Previously they were uppercased by `Alert.Clean()` and silently ignored by the manager
+
 ## [0.14.0] - 2026-10-20
 
 ### Changed

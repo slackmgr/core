@@ -98,6 +98,19 @@ func (a *Alert) SetDefaultValues(settings *config.ManagerSettings) {
 	}
 }
 
+// ApplyLegacyFields maps deprecated legacy alert fields to their current equivalents.
+// The deprecated DeletionDelaySeconds is used as the archiving delay when ArchivingDelaySeconds is not set.
+// Must be called before SetDefaultValues, which sets a default archiving delay.
+func (a *Alert) ApplyLegacyFields() {
+	if a == nil {
+		return
+	}
+
+	if a.ArchivingDelaySeconds <= 0 && a.DeletionDelaySeconds > 0 { //nolint:staticcheck // legacy compatibility
+		a.ArchivingDelaySeconds = a.DeletionDelaySeconds //nolint:staticcheck // legacy compatibility
+	}
+}
+
 // LogFields returns a map of key-value pairs representing the Alert's important fields for logging purposes.
 func (a *Alert) LogFields() map[string]any {
 	if a == nil {

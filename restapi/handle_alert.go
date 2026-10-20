@@ -310,9 +310,10 @@ func (s *Server) validateChannelInfo(channel string, channelInfo *ChannelInfo) e
 	return nil
 }
 
-// setSlackChannelID sets the SlackChannelID field on each alert.
+// setSlackChannelID sets the SlackChannelID field on each alert. It also maps any
+// channel names in escalation MoveToChannel fields to channel IDs.
 //
-// The channel ID is determined in the following order:
+// The channel ID and route key are trimmed before use. The channel ID is determined in the following order:
 //  1. If the alert has a SlackChannelID in the body, use that.
 //  2. If the URL contains a channel ID parameter, use that.
 //  3. If the alert has a non-empty route key, use the mapping rules to find the channel ID.
@@ -332,10 +333,15 @@ func (s *Server) setSlackChannelID(c *gin.Context, alerts ...*types.Alert) error
 
 	// Try to get the channel ID from the URL (if any).
 	if c != nil {
-		channelIDFromURLParam = c.Param("slackChannelId")
+		channelIDFromURLParam = strings.TrimSpace(c.Param("slackChannelId"))
 	}
 
 	for _, alert := range alerts {
+		alert.SlackChannelID = strings.TrimSpace(alert.SlackChannelID)
+		alert.RouteKey = strings.TrimSpace(alert.RouteKey)
+
+		s.mapEscalationChannelNames(alert)
+
 		// If the channel ID in the body is empty, use the channel ID from the URL (which may also be empty).
 		// If both are empty, the route key will be used to find a mapping below.
 		if alert.SlackChannelID == "" {
@@ -369,6 +375,22 @@ func (s *Server) setSlackChannelID(c *gin.Context, alerts ...*types.Alert) error
 	}
 
 	return nil
+}
+
+// mapEscalationChannelNames maps channel names in escalation MoveToChannel fields to channel IDs.
+// This must happen before alert.Clean(), which uppercases MoveToChannel.
+func (s *Server) mapEscalationChannelNames(alert *types.Alert) {
+	for _, e := range alert.Escalation {
+		if e == nil {
+			continue
+		}
+
+		e.MoveToChannel = strings.TrimSpace(e.MoveToChannel)
+
+		if e.MoveToChannel != "" {
+			e.MoveToChannel = s.channelInfoProvider.MapChannelNameToIDIfNeeded(e.MoveToChannel)
+		}
+	}
 }
 
 func (s *Server) logAlerts(text, reason string, started time.Time, alerts ...*types.Alert) {

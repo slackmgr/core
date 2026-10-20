@@ -400,6 +400,10 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	defer c.releaseLock(lock)
 	c.metrics.CounterInc(alertsTotal, c.channelName)
 
+	if c.cfg.EnableLegacyFeatures {
+		alert.ApplyLegacyFields()
+	}
+
 	alert.SetDefaultValues(c.managerSettings.GetSettings())
 	alert.SlackChannelName = c.slackClient.GetChannelName(ctx, c.channelID)
 
@@ -1112,6 +1116,10 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 		PlainTextInput: cmd.WebhookParameters.PlainTextInput,
 		CheckboxInput:  cmd.WebhookParameters.CheckboxInput,
 		Payload:        payload,
+	}
+
+	if c.cfg.EnableLegacyFeatures {
+		data.Input = data.PlainTextInput //nolint:staticcheck // legacy compatibility
 	}
 
 	// We do this in a separate goroutine to avoid blocking the command processing.

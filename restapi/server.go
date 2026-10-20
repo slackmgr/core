@@ -283,30 +283,7 @@ func (s *Server) Run(ctx context.Context) error {
 		timeout.WithResponse(timeoutResponse),
 	))
 
-	// We support both /alert and /alerts endpoints for backwards compatibility.
-	// Input is either a single alert (types.Alert), or an array of alerts.
-	engine.POST("/alert", s.handleAlerts)
-	engine.POST("/alert/:slackChannelId", s.handleAlerts)
-	engine.POST("/alerts", s.handleAlerts)
-	engine.POST("/alerts/:slackChannelId", s.handleAlerts)
-
-	// Webhooks from Prometheus alert manager.
-	// The alert format is defined in PrometheusWebhook.
-	engine.POST("/prometheus-alert", s.handlePrometheusWebhook)
-	engine.POST("/prometheus-alert/:slackChannelId", s.handlePrometheusWebhook)
-
-	// Test endpoint for alerts, which writes the input body as an info log message.
-	engine.POST("/alerts-test", s.handleAlertsTest)
-	engine.POST("/alerts-test/:slackChannelId", s.handleAlertsTest)
-
-	// Route mappings
-	engine.GET("/mappings", s.handleMappings)
-
-	// List channels managed by Slack Manager
-	engine.GET("/channels", s.handleChannels)
-
-	// Ping
-	engine.GET("/ping", s.ping)
+	s.registerRoutes(engine)
 
 	// Calculate timeouts for the HTTP server and handler middleware.
 	readTimeout := readHeaderTimeout + handlerTimeout + timeoutBuffer
@@ -412,6 +389,40 @@ func (s *Server) UpdateSettings(settings *config.APISettings) error {
 	s.logger.Infof("API settings updated")
 
 	return nil
+}
+
+// registerRoutes registers all HTTP routes on the engine.
+func (s *Server) registerRoutes(engine *gin.Engine) {
+	// We support both /alert and /alerts endpoints for backwards compatibility.
+	// Input is either a single alert (types.Alert), or an array of alerts.
+	engine.POST("/alert", s.handleAlerts)
+	engine.POST("/alert/:slackChannelId", s.handleAlerts)
+	engine.POST("/alerts", s.handleAlerts)
+	engine.POST("/alerts/:slackChannelId", s.handleAlerts)
+
+	// Deprecated aliases, kept for compatibility with legacy clients.
+	engine.POST("/slackalert", s.handleAlerts)
+	engine.POST("/slackalert/:slackChannelId", s.handleAlerts)
+	engine.POST("/slackalerts", s.handleAlerts)
+	engine.POST("/slackalerts/:slackChannelId", s.handleAlerts)
+
+	// Webhooks from Prometheus alert manager.
+	// The alert format is defined in PrometheusWebhook.
+	engine.POST("/prometheus-alert", s.handlePrometheusWebhook)
+	engine.POST("/prometheus-alert/:slackChannelId", s.handlePrometheusWebhook)
+
+	// Test endpoint for alerts, which writes the input body as an info log message.
+	engine.POST("/alerts-test", s.handleAlertsTest)
+	engine.POST("/alerts-test/:slackChannelId", s.handleAlertsTest)
+
+	// Route mappings (legacy format)
+	engine.GET("/mappings", s.handleMappings)
+
+	// List channels managed by Slack Manager
+	engine.GET("/channels", s.handleChannels)
+
+	// Ping
+	engine.GET("/ping", s.ping)
 }
 
 // setChannelInfoProvider allows tests to inject a mock ChannelInfoProvider.

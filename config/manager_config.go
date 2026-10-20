@@ -247,6 +247,19 @@ type ManagerConfig struct {
 	// Default: 5000 (5s). Must be between 2000 (2s) and 300000 (5m).
 	SocketModeDrainTimeoutMs int `json:"socketModeDrainTimeoutMs" mapstructure:"socketModeDrainTimeoutMs" yaml:"socketModeDrainTimeoutMs"`
 
+	// EnableLegacyFeatures enables compatibility features for clients built against the
+	// legacy Slack Manager. It is intended for migration periods and should be disabled
+	// once all clients have been updated.
+	//
+	// When true, the Manager:
+	//   - Uses the deprecated Alert.DeletionDelaySeconds as the archiving delay when
+	//     Alert.ArchivingDelaySeconds is not set.
+	//   - Populates the deprecated WebhookCallback.Input (JSON key "input") with a copy of
+	//     WebhookCallback.PlainTextInput.
+	//
+	// Default: false.
+	EnableLegacyFeatures bool `json:"enableLegacyFeatures" mapstructure:"enableLegacyFeatures" yaml:"enableLegacyFeatures"`
+
 	// location is the parsed *time.Location for the Location field, cached by Validate().
 	location *time.Location
 }

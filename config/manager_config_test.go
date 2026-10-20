@@ -18,6 +18,7 @@ func TestNewDefaultManagerConfig(t *testing.T) {
 	assert.Equal(t, "slack-manager:", cfg.CacheKeyPrefix)
 	assert.Equal(t, config.DefaultMetricsPrefix, cfg.MetricsPrefix)
 	assert.False(t, cfg.SkipDatabaseCache)
+	assert.False(t, cfg.EnableLegacyFeatures)
 	assert.Equal(t, config.DefaultLocation, cfg.Location)
 	require.NotNil(t, cfg.SlackClient)
 	assert.Equal(t, config.DefaultCoordinatorDrainTimeoutMs, cfg.CoordinatorDrainTimeoutMs)

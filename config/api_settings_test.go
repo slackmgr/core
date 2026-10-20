@@ -413,6 +413,26 @@ func TestAPISettings_Match(t *testing.T) {
 	}
 }
 
+func TestAPISettings_Match_TrimsInput(t *testing.T) {
+	t.Parallel()
+
+	settings := &config.APISettings{
+		RoutingRules: []*config.RoutingRule{
+			{Name: "typed", AlertType: "security", Equals: []string{"my-key"}, Channel: "C1111111111"},
+			{Name: "untyped", Equals: []string{"my-key"}, Channel: "C2222222222"},
+		},
+	}
+	require.NoError(t, settings.InitAndValidate(&mockLogger{}))
+
+	channel, ok := settings.Match("  My-Key\t", "", &mockLogger{})
+	assert.True(t, ok)
+	assert.Equal(t, "C2222222222", channel)
+
+	channel, ok = settings.Match(" my-key ", " Security ", &mockLogger{})
+	assert.True(t, ok)
+	assert.Equal(t, "C1111111111", channel)
+}
+
 func TestAPISettings_Match_NoRules(t *testing.T) {
 	t.Parallel()
 

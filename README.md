@@ -105,6 +105,9 @@ Slack Events ──────────────────────�
 
 - REST server on port 8080 accepting alerts
 - Endpoints: `POST /alert[s]`, `POST /prometheus-alert`, `GET /mappings`, `GET /channels`, `GET /ping`
+  - `POST /slackalert[s]` are deprecated aliases for `POST /alert[s]`, kept for legacy clients
+  - `GET /mappings` returns the routing rules in the legacy format: `{"rules":[{"teamName", "description", "equals", "hasPrefix", "matchesRegex", "channel", "matchAll"}]}`. Rules with an `alertType` are omitted, and an empty description falls back to the rule name
+- Channel names in `slackChannelId` and in escalation `moveToChannel` are mapped to channel IDs (for channels the Slack Manager is a member of)
 - Per-channel rate limiting
 - Validates and enqueues alerts for the manager to process
 
@@ -115,6 +118,7 @@ Slack Events ──────────────────────�
 - Manages issue lifecycle: creation, grouping, escalation, resolution, archival
 - Handles Slack interactions (reactions, slash commands, modals) via Socket Mode
 - Supports distributed deployments via Redis-backed channel locking
+- Optional legacy mode (`ManagerConfig.EnableLegacyFeatures`) for clients built against the legacy Slack Manager: honours the deprecated `deletionDelaySeconds` alert field, and adds the deprecated `input` key (a copy of `plainTextInput`) to webhook callbacks
 
 ### Deployment Topology
 

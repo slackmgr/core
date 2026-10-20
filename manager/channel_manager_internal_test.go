@@ -324,3 +324,113 @@ func TestChannelManager_ProcessAlert_AckNack(t *testing.T) {
 		})
 	}
 }
+
+func TestChannelManager_ProcessAlert_LegacyDeletionDelay(t *testing.T) {
+	t.Parallel()
+
+	const channelID = "C123456"
+
+	tests := []struct {
+		name                  string
+		legacyEnabled         bool
+		archivingDelaySeconds int
+		deletionDelaySeconds  int
+		expectedArchiveDelay  int
+	}{
+		{name: "legacy_disabled_ignores_deletion_delay", legacyEnabled: false, deletionDelaySeconds: 3600, expectedArchiveDelay: 600},
+		{name: "legacy_enabled_uses_deletion_delay", legacyEnabled: true, deletionDelaySeconds: 3600, expectedArchiveDelay: 3600},
+		{name: "legacy_enabled_prefers_archiving_delay", legacyEnabled: true, archivingDelaySeconds: 120, deletionDelaySeconds: 3600, expectedArchiveDelay: 120},
+		{name: "legacy_enabled_without_deletion_delay_uses_default", legacyEnabled: true, expectedArchiveDelay: 600},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			savedArchiveDelay := -1
+			db := &customStubDB{
+				saveAlertFn: func(_ context.Context, alert *types.Alert) error {
+					savedArchiveDelay = alert.ArchivingDelaySeconds
+					return nil
+				},
+			}
+
+			cm := newTestChannelManager(t, channelID, db, &stubSlackClient{}, &NoopChannelLocker{})
+			cm.cfg.EnableLegacyFeatures = tt.legacyEnabled
+
+			alert, _, _ := newTestAlertFromData(t, types.Alert{
+				SlackChannelID:        channelID,
+				Header:                "Test Alert",
+				Severity:              types.AlertError,
+				CorrelationID:         "corr-123",
+				ArchivingDelaySeconds: tt.archivingDelaySeconds,
+				DeletionDelaySeconds:  tt.deletionDelaySeconds, //nolint:staticcheck // legacy compatibility
+			})
+
+			require.NoError(t, cm.processAlert(t.Context(), alert))
+			assert.Equal(t, tt.expectedArchiveDelay, savedArchiveDelay)
+		})
+	}
+}
+
+// captureWebhookHandler is a WebhookHandler that forwards the callback data to a channel.
+type captureWebhookHandler struct {
+	ch chan *types.WebhookCallback
+}
+
+func (h *captureWebhookHandler) ShouldHandleWebhook(_ context.Context, _ string) bool { return true }
+
+func (h *captureWebhookHandler) HandleWebhook(_ context.Context, _ string, data *types.WebhookCallback, _ types.Logger) error {
+	h.ch <- data
+	return nil
+}
+
+func TestChannelManager_HandleWebhook_LegacyInput(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		legacyEnabled bool
+		expectedInput map[string]string
+	}{
+		{name: "legacy_disabled_omits_input", legacyEnabled: false, expectedInput: nil},
+		{name: "legacy_enabled_copies_plain_text_input", legacyEnabled: true, expectedInput: map[string]string{"reason": "because"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := &captureWebhookHandler{ch: make(chan *types.WebhookCallback, 1)}
+
+			cm := newTestChannelManager(t, "C123456", &stubDB{}, &stubSlackClient{}, &NoopChannelLocker{})
+			cm.webhookHandlers = []WebhookHandler{handler}
+			cm.cfg.EnableLegacyFeatures = tt.legacyEnabled
+
+			alert, _, _ := newTestAlertFromData(t, types.Alert{
+				SlackChannelID: "C123456",
+				Header:         "Test Alert",
+				Webhooks:       []*types.Webhook{{ID: "hook1", URL: "https://example.com/hook", ButtonText: "Go"}},
+			})
+
+			issue := models.NewIssue(alert, &mockLogger{})
+			cmd := &models.Command{
+				WebhookParameters: &models.WebhookCommandParams{
+					WebhookID:      "hook1",
+					PlainTextInput: map[string]string{"reason": "because"},
+				},
+			}
+
+			_, err := cm.handleWebhook(t.Context(), issue, cmd, &mockLogger{})
+			require.NoError(t, err)
+
+			select {
+			case data := <-handler.ch:
+				assert.Equal(t, map[string]string{"reason": "because"}, data.PlainTextInput)
+				assert.Equal(t, tt.expectedInput, data.Input) //nolint:staticcheck // legacy compatibility
+			case <-time.After(time.Second):
+				t.Fatal("webhook handler was not called")
+			}
+		})
+	}
+}

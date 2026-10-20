@@ -284,15 +284,8 @@ func TestServer_HandleChannels(t *testing.T) {
 func TestServer_HandleMappings(t *testing.T) {
 	t.Parallel()
 
-	t.Run("returns routing rules", func(t *testing.T) {
-		t.Parallel()
-
-		server, _, _ := newTestServer(t)
-		server.apiSettings.Store(&config.APISettings{
-			RoutingRules: []*config.RoutingRule{
-				{Name: "test-rule", Equals: []string{"test"}, Channel: "C123"},
-			},
-		})
+	getMappings := func(t *testing.T, server *Server) (*httptest.ResponseRecorder, map[string]any) {
+		t.Helper()
 
 		router := gin.New()
 		router.GET("/mappings", server.handleMappings)
@@ -301,10 +294,159 @@ func TestServer_HandleMappings(t *testing.T) {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+
+		return w, body
+	}
+
+	t.Run("returns routing rules in legacy format", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.apiSettings.Store(&config.APISettings{
+			RoutingRules: []*config.RoutingRule{
+				{
+					Name:         "test-rule",
+					Description:  "Test rule",
+					Equals:       []string{"test"},
+					HasPrefix:    []string{"prefix-"},
+					MatchesRegex: []string{"^re-.*$"},
+					Channel:      "C123456789",
+				},
+				{Name: "catch-all", MatchAll: true, Channel: "C987654321"},
+			},
+		})
+
+		w, body := getMappings(t, server)
+
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "test")
-		assert.Contains(t, w.Body.String(), "C123")
+		assert.Contains(t, w.Header().Get("Content-Type"), "application/json")
+		require.Len(t, body, 1)
+
+		rules, ok := body["rules"].([]any)
+		require.True(t, ok)
+		require.Len(t, rules, 2)
+
+		assert.Equal(t, map[string]any{
+			"teamName":     "test-rule",
+			"description":  "Test rule",
+			"equals":       []any{"test"},
+			"hasPrefix":    []any{"prefix-"},
+			"matchesRegex": []any{"^re-.*$"},
+			"channel":      "C123456789",
+			"matchAll":     false,
+		}, rules[0])
+
+		assert.Equal(t, map[string]any{
+			"teamName":     "catch-all",
+			"description":  "catch-all", // falls back to the rule name
+			"equals":       nil,
+			"hasPrefix":    nil,
+			"matchesRegex": nil,
+			"channel":      "C987654321",
+			"matchAll":     true,
+		}, rules[1])
 	})
+
+	t.Run("omits rules restricted to an alert type", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.apiSettings.Store(&config.APISettings{
+			RoutingRules: []*config.RoutingRule{
+				{Name: "typed", AlertType: "security", Equals: []string{"test"}, Channel: "C123456789"},
+				{Name: "untyped", Equals: []string{"test"}, Channel: "C987654321"},
+			},
+		})
+
+		_, body := getMappings(t, server)
+
+		rules, ok := body["rules"].([]any)
+		require.True(t, ok)
+		require.Len(t, rules, 1)
+
+		rule, ok := rules[0].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "untyped", rule["teamName"])
+	})
+
+	t.Run("returns empty rules list when no rules exist", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+
+		_, body := getMappings(t, server)
+
+		assert.Equal(t, []any{}, body["rules"])
+	})
+}
+
+func TestServer_RegisterRoutes(t *testing.T) {
+	t.Parallel()
+
+	server, _, _ := newTestServer(t)
+	engine := gin.New()
+	server.registerRoutes(engine)
+
+	routes := make(map[string]struct{})
+	for _, r := range engine.Routes() {
+		routes[r.Method+" "+r.Path] = struct{}{}
+	}
+
+	expected := []string{
+		"POST /alert",
+		"POST /alert/:slackChannelId",
+		"POST /alerts",
+		"POST /alerts/:slackChannelId",
+		"POST /slackalert",
+		"POST /slackalert/:slackChannelId",
+		"POST /slackalerts",
+		"POST /slackalerts/:slackChannelId",
+		"POST /prometheus-alert",
+		"POST /prometheus-alert/:slackChannelId",
+		"POST /alerts-test",
+		"POST /alerts-test/:slackChannelId",
+		"GET /mappings",
+		"GET /channels",
+		"GET /ping",
+	}
+
+	for _, route := range expected {
+		assert.Contains(t, routes, route)
+	}
+
+	assert.Len(t, routes, len(expected))
+}
+
+func TestServer_LegacyAlertRoutes(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []string{"/slackalert", "/slackalerts"} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
+			server, queue, channelInfo := newTestServer(t)
+			channelInfo.On("MapChannelNameToIDIfNeeded", "C123456789").Return("C123456789")
+			channelInfo.On("GetChannelInfo", mock.Anything, "C123456789").Return(&ChannelInfo{
+				ChannelExists:      true,
+				ManagerIsInChannel: true,
+			}, nil)
+			queue.On("Send", mock.Anything, "C123456789", mock.Anything, mock.Anything).Return(nil)
+
+			engine := gin.New()
+			server.registerRoutes(engine)
+
+			body := `{"alerts":[{"slackChannelId":"C123456789","header":"Test","severity":"error"}]}`
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusAccepted, w.Code)
+			queue.AssertNumberOfCalls(t, "Send", 1)
+		})
+	}
 }
 
 func TestServer_HandleAlerts_Validation(t *testing.T) {
@@ -851,6 +993,64 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Equal(t, "C999888777", alert.SlackChannelID)
+	})
+
+	t.Run("trims channel ID from alert body before mapping", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, channelInfo := newTestServer(t)
+		channelInfo.On("MapChannelNameToIDIfNeeded", "general").Return("C999888777")
+
+		alert := &types.Alert{SlackChannelID: "  general  "}
+		err := server.setSlackChannelID(nil, alert)
+
+		require.NoError(t, err)
+		assert.Equal(t, "C999888777", alert.SlackChannelID)
+	})
+
+	t.Run("trims route key before matching", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.apiSettings.Store(&config.APISettings{
+			RoutingRules: []*config.RoutingRule{
+				{Name: "prod-alerts", Equals: []string{"production"}, Channel: "C111222333"},
+			},
+		})
+		require.NoError(t, server.apiSettings.Load().InitAndValidate(&mockLogger{}))
+
+		alert := &types.Alert{RouteKey: "  Production \n"}
+		err := server.setSlackChannelID(nil, alert)
+
+		require.NoError(t, err)
+		assert.Equal(t, "C111222333", alert.SlackChannelID)
+		assert.Equal(t, "Production", alert.RouteKey)
+	})
+
+	t.Run("maps escalation moveToChannel names to IDs", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, channelInfo := newTestServer(t)
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("MapChannelNameToIDIfNeeded", "escalations").Return("C555666777")
+		channelInfo.On("MapChannelNameToIDIfNeeded", "unknown-channel").Return("unknown-channel")
+
+		alert := &types.Alert{
+			SlackChannelID: "C123",
+			Escalation: []*types.Escalation{
+				nil,
+				{DelaySeconds: 60, MoveToChannel: ""},
+				{DelaySeconds: 90, MoveToChannel: " escalations "},
+				{DelaySeconds: 120, MoveToChannel: "unknown-channel"},
+			},
+		}
+		err := server.setSlackChannelID(nil, alert)
+
+		require.NoError(t, err)
+		assert.Empty(t, alert.Escalation[1].MoveToChannel)
+		assert.Equal(t, "C555666777", alert.Escalation[2].MoveToChannel)
+		assert.Equal(t, "unknown-channel", alert.Escalation[3].MoveToChannel)
+		channelInfo.AssertNumberOfCalls(t, "MapChannelNameToIDIfNeeded", 3)
 	})
 
 	t.Run("uses route key to find channel via routing rules", func(t *testing.T) {

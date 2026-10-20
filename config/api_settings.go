@@ -282,14 +282,14 @@ func (s *APISettings) InitAndValidate(logger types.Logger) error {
 // channels even when they share the same route key.
 //
 // Results are cached in a thread-safe map for performance, as route matching occurs
-// frequently during alert processing. Both the route key and alert type are normalized
-// to lowercase before matching.
+// frequently during alert processing. Both the route key and alert type are trimmed and
+// normalized to lowercase before matching.
 //
 // Returns the target channel ID and true if a match is found, or ("", false) if no
 // routing rule matches the given route key and alert type.
 func (s *APISettings) Match(routeKey, alertType string, logger types.Logger) (string, bool) {
-	routeKey = strings.ToLower(routeKey)
-	alertType = strings.ToLower(alertType)
+	routeKey = strings.ToLower(strings.TrimSpace(routeKey))
+	alertType = strings.ToLower(strings.TrimSpace(alertType))
 	cacheKey := routeKey + ":" + alertType
 
 	// Check cache with read lock
