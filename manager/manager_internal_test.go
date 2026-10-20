@@ -143,8 +143,11 @@ func (s *stubCacheStore) Get(_ context.Context, _ any) (any, error) { return nil
 func (s *stubCacheStore) GetWithTTL(_ context.Context, _ any) (any, time.Duration, error) {
 	return nil, 0, nil
 }
+
 func (s *stubCacheStore) Set(_ context.Context, _ any, _ any, _ ...store.Option) error { return nil }
-func (s *stubCacheStore) Delete(_ context.Context, _ any) error                        { return nil }
+
+func (s *stubCacheStore) Delete(_ context.Context, _ any) error { return nil }
+
 func (s *stubCacheStore) Invalidate(_ context.Context, _ ...store.InvalidateOption) error {
 	return nil
 }

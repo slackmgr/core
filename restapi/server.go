@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cachestore "github.com/eko/gocache/lib/v4/store"
@@ -80,7 +81,7 @@ type Server struct {
 	channelInfoProvider ChannelInfoProvider
 	logger              types.Logger
 	metrics             types.Metrics
-	apiSettings         *config.APISettings
+	apiSettings         atomic.Pointer[config.APISettings] // swapped atomically by UpdateSettings while handlers read it
 	cfg                 *config.APIConfig
 	defaultPretty       bool
 	hooks               Hooks
@@ -93,15 +94,18 @@ type Server struct {
 //   - [Server.WithMetrics] — sets the metrics implementation (defaults to no-op)
 //   - [Server.WithSettings] — sets the initial API settings (defaults to zero-value)
 func New(alertQueue FifoQueueProducer, logger types.Logger, cfg *config.APIConfig) *Server {
-	return &Server{
+	s := &Server{
 		alertQueue:        alertQueue,
 		limitersByChannel: make(map[string]*rate.Limiter),
 		limitersLock:      &sync.Mutex{},
 		logger:            logger,
 		metrics:           &types.NoopMetrics{},
-		apiSettings:       &config.APISettings{},
 		cfg:               cfg,
 	}
+
+	s.apiSettings.Store(&config.APISettings{})
+
+	return s
 }
 
 // WithRawAlertConsumer registers a [FifoQueueConsumer] that reads alerts outside of
@@ -146,7 +150,7 @@ func (s *Server) WithSettings(settings *config.APISettings) *Server {
 	if settings == nil {
 		return s
 	}
-	s.apiSettings = settings
+	s.apiSettings.Store(settings)
 	return s
 }
 
@@ -182,7 +186,7 @@ func (s *Server) Run(ctx context.Context) error {
 		s.logger.Error("No encryption key configured. The server will start, but alerts with webhook payloads will be rejected with HTTP 400.")
 	}
 
-	if err := s.apiSettings.InitAndValidate(s.logger); err != nil {
+	if err := s.apiSettings.Load().InitAndValidate(s.logger); err != nil {
 		return fmt.Errorf("failed to initialize API settings: %w", err)
 	}
 
@@ -390,8 +394,8 @@ func (s *Server) Run(ctx context.Context) error {
 	return errg.Wait()
 }
 
-// UpdateSettings hot-reloads API settings without restarting. The new settings are
-// validated before being applied; if validation fails the existing settings remain
+// UpdateSettings hot-reloads API settings without restarting. It is safe to call
+// concurrently with request handling. The new settings are validated before being applied; if validation fails the existing settings remain
 // active and an error is returned. Passing nil replaces the current settings with
 // zero-value defaults.
 func (s *Server) UpdateSettings(settings *config.APISettings) error {
@@ -403,7 +407,7 @@ func (s *Server) UpdateSettings(settings *config.APISettings) error {
 		return fmt.Errorf("failed to initialize updated API settings (the existing settings will continue to be used): %w", err)
 	}
 
-	s.apiSettings = settings
+	s.apiSettings.Store(settings)
 
 	s.logger.Infof("API settings updated")
 
@@ -729,8 +733,7 @@ func (s *Server) recoveryMiddleware() gin.HandlerFunc {
 				var brokenPipe bool
 
 				if ne, ok := rec.(*net.OpError); ok {
-					var se *os.SyscallError
-					if errors.As(ne, &se) {
+					if se, ok := errors.AsType[*os.SyscallError](ne); ok {
 						seStr := strings.ToLower(se.Error())
 						if strings.Contains(seStr, "broken pipe") || strings.Contains(seStr, "connection reset by peer") {
 							brokenPipe = true

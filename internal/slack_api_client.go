@@ -740,9 +740,7 @@ func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics typ
 // and if so waits an appropriate amount of time before the next retry attempt
 // An error is returned if the retry should not be attempted (e.g. if we've exceeded max attempts or context deadline).
 func waitForAPIError(ctx context.Context, started time.Time, logger types.Logger, attempt int, action string, cfg *config.SlackClientConfig, gate rateLimitSignaler, metrics types.Metrics, err error) error {
-	var rateLimitError *slack.RateLimitedError
-
-	if errors.As(err, &rateLimitError) {
+	if rateLimitError, ok := errors.AsType[*slack.RateLimitedError](err); ok {
 		remainingWaitTime := time.Until(started.Add(time.Duration(cfg.MaxRateLimitErrorWaitTimeSeconds) * time.Second))
 
 		if attempt >= cfg.MaxAttemptsForRateLimitError || remainingWaitTime < time.Second {

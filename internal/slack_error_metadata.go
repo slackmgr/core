@@ -94,8 +94,7 @@ func getSlackErrorMetricLabel(err error) string {
 		return "unknown"
 	}
 
-	var rateLimitErr *slack.RateLimitedError
-	if errors.As(err, &rateLimitErr) {
+	if _, ok := errors.AsType[*slack.RateLimitedError](err); ok {
 		return "rate_limited"
 	}
 

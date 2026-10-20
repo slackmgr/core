@@ -86,7 +86,6 @@ func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*types.Alert {
 		notificationDelay := find(promAlert.Annotations, promAlert.Labels, "notificationdelayseconds")
 		archivingDelay := find(promAlert.Annotations, promAlert.Labels, "archivingdelayseconds", "deletiondelayseconds")
 		ignoreIfTextContains := find(promAlert.Annotations, promAlert.Labels, "ignoreiftextcontains")
-		failOnRateLimitError := find(promAlert.Annotations, promAlert.Labels, "failonratelimiterror")
 
 		// No specific fallback text found, use the header.
 		if fallbackText == "" {
@@ -176,7 +175,6 @@ func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*types.Alert {
 			IconEmoji:                 icon,
 			NotificationDelaySeconds:  notificationDelaySeconds,
 			ArchivingDelaySeconds:     archivingDelaySeconds,
-			FailOnRateLimitError:      failOnRateLimitError == True,
 			Metadata:                  metadata,
 		}
 

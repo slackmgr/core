@@ -7,5 +7,5 @@ import (
 )
 
 func (s *Server) handleMappings(c *gin.Context) {
-	c.IndentedJSON(http.StatusOK, s.apiSettings.RoutingRules)
+	c.IndentedJSON(http.StatusOK, s.apiSettings.Load().RoutingRules)
 }

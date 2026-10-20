@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Minimum Go version is now 1.26 (required by `golang.org/x/net` v0.60.0)
+- Bump `golang.org/x/net` to v0.60.0 and `github.com/quic-go/quic-go` to v0.59.1 (security fixes)
+- Prometheus webhooks no longer map the `failOnRateLimitError` label/annotation to the deprecated, unused `Alert.FailOnRateLimitError` field
+
+### Fixed
+- Data race in `restapi.Server.UpdateSettings`: API settings are now swapped atomically, so hot-reloading is safe while requests are being routed
+
 ## [0.13.0] - 2026-06-19
 
 ### Changed

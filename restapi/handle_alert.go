@@ -324,6 +324,10 @@ func (s *Server) setSlackChannelID(c *gin.Context, alerts ...*types.Alert) error
 		return nil
 	}
 
+	// Load the settings once, so that all alerts in the request are routed using the same settings,
+	// even if they are hot-reloaded concurrently.
+	apiSettings := s.apiSettings.Load()
+
 	channelIDFromURLParam := ""
 
 	// Try to get the channel ID from the URL (if any).
@@ -350,7 +354,7 @@ func (s *Server) setSlackChannelID(c *gin.Context, alerts ...*types.Alert) error
 
 		// Find an alert mapping rule matching the route key and alert type (if any).
 		// If the route key is empty, the fallback mapping will be used, if it exists.
-		if channel, ok := s.apiSettings.Match(alert.RouteKey, alert.Type, s.logger); ok {
+		if channel, ok := apiSettings.Match(alert.RouteKey, alert.Type, s.logger); ok {
 			alert.SlackChannelID = channel
 			continue
 		}

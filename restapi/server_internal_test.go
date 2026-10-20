@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -178,7 +179,7 @@ func newTestServer(t *testing.T) (*Server, *mockFifoQueueProducer, *mockChannelI
 
 	server := New(queue, logger, cfg)
 	server.setChannelInfoProvider(channelInfo)
-	server.apiSettings = &config.APISettings{}
+	server.apiSettings.Store(&config.APISettings{})
 
 	return server, queue, channelInfo
 }
@@ -287,11 +288,11 @@ func TestServer_HandleMappings(t *testing.T) {
 		t.Parallel()
 
 		server, _, _ := newTestServer(t)
-		server.apiSettings = &config.APISettings{
+		server.apiSettings.Store(&config.APISettings{
 			RoutingRules: []*config.RoutingRule{
 				{Name: "test-rule", Equals: []string{"test"}, Channel: "C123"},
 			},
-		}
+		})
 
 		router := gin.New()
 		router.GET("/mappings", server.handleMappings)
@@ -859,7 +860,7 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 		channelInfo.On("MapChannelNameToIDIfNeeded", mock.Anything).Return("")
 
 		// Set up routing rules
-		server.apiSettings = &config.APISettings{
+		server.apiSettings.Store(&config.APISettings{
 			RoutingRules: []*config.RoutingRule{
 				{
 					Name:    "prod-alerts",
@@ -867,8 +868,8 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 					Channel: "C111222333",
 				},
 			},
-		}
-		require.NoError(t, server.apiSettings.InitAndValidate(&mockLogger{}))
+		})
+		require.NoError(t, server.apiSettings.Load().InitAndValidate(&mockLogger{}))
 
 		alert := &types.Alert{RouteKey: "production"}
 		err := server.setSlackChannelID(nil, alert)
@@ -884,7 +885,7 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 		channelInfo.On("MapChannelNameToIDIfNeeded", mock.Anything).Return("")
 
 		// Set up routing rules with a fallback
-		server.apiSettings = &config.APISettings{
+		server.apiSettings.Store(&config.APISettings{
 			RoutingRules: []*config.RoutingRule{
 				{
 					Name:     "fallback",
@@ -892,8 +893,8 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 					Channel:  "C444555666",
 				},
 			},
-		}
-		require.NoError(t, server.apiSettings.InitAndValidate(&mockLogger{}))
+		})
+		require.NoError(t, server.apiSettings.Load().InitAndValidate(&mockLogger{}))
 
 		alert := &types.Alert{RouteKey: "unknown-key"}
 		err := server.setSlackChannelID(nil, alert)
@@ -909,8 +910,8 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 		channelInfo.On("MapChannelNameToIDIfNeeded", mock.Anything).Return("")
 
 		// No routing rules
-		server.apiSettings = &config.APISettings{}
-		require.NoError(t, server.apiSettings.InitAndValidate(&mockLogger{}))
+		server.apiSettings.Store(&config.APISettings{})
+		require.NoError(t, server.apiSettings.Load().InitAndValidate(&mockLogger{}))
 
 		alert := &types.Alert{RouteKey: "unmapped-key", Type: "test"}
 		err := server.setSlackChannelID(nil, alert)
@@ -926,8 +927,8 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 		channelInfo.On("MapChannelNameToIDIfNeeded", mock.Anything).Return("")
 
 		// No routing rules
-		server.apiSettings = &config.APISettings{}
-		require.NoError(t, server.apiSettings.InitAndValidate(&mockLogger{}))
+		server.apiSettings.Store(&config.APISettings{})
+		require.NoError(t, server.apiSettings.Load().InitAndValidate(&mockLogger{}))
 
 		alert := &types.Alert{} // No SlackChannelID, no RouteKey
 		err := server.setSlackChannelID(nil, alert)
@@ -1889,7 +1890,7 @@ func TestServer_UpdateSettings(t *testing.T) {
 		err := server.UpdateSettings(newSettings)
 
 		require.NoError(t, err)
-		assert.Equal(t, newSettings, server.apiSettings)
+		assert.Same(t, newSettings, server.apiSettings.Load())
 	})
 
 	t.Run("handles nil settings", func(t *testing.T) {
@@ -1900,7 +1901,51 @@ func TestServer_UpdateSettings(t *testing.T) {
 		err := server.UpdateSettings(nil)
 
 		require.NoError(t, err)
-		assert.NotNil(t, server.apiSettings)
+		assert.NotNil(t, server.apiSettings.Load())
+	})
+
+	// Run with -race: UpdateSettings must be safe to call while requests are routed.
+	t.Run("is safe to call concurrently with routing", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, channelInfo := newTestServer(t)
+		channelInfo.On("MapChannelNameToIDIfNeeded", mock.Anything).Return("")
+
+		newSettings := func() *config.APISettings {
+			return &config.APISettings{
+				RoutingRules: []*config.RoutingRule{
+					{Name: "fallback", MatchAll: true, Channel: "C123ABC456"},
+				},
+			}
+		}
+
+		require.NoError(t, server.UpdateSettings(newSettings()))
+
+		var wg sync.WaitGroup
+
+		for range 4 {
+			wg.Go(func() {
+				for range 50 {
+					if err := server.UpdateSettings(newSettings()); err != nil {
+						t.Error(err)
+						return
+					}
+				}
+			})
+
+			wg.Go(func() {
+				for range 50 {
+					alert := &types.Alert{RouteKey: "anything"}
+					if err := server.setSlackChannelID(nil, alert); err != nil {
+						t.Error(err)
+						return
+					}
+					assert.Equal(t, "C123ABC456", alert.SlackChannelID)
+				}
+			})
+		}
+
+		wg.Wait()
 	})
 }
 
@@ -2101,7 +2146,7 @@ func newTestServerWithInitializedSettings(t *testing.T) (*Server, *mockFifoQueue
 
 	server, queue, channelInfo := newTestServer(t)
 	// Initialize settings to set up the internal matchCache
-	_ = server.apiSettings.InitAndValidate(&mockLogger{})
+	_ = server.apiSettings.Load().InitAndValidate(&mockLogger{})
 	return server, queue, channelInfo
 }
 
