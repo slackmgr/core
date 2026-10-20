@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-20
+
 ### Changed
+- Update GitHub Actions to latest versions (`actions/checkout` v7.0.1, `actions/setup-go` v7.0.0, `github/codeql-action` v4.39.0, `golangci/golangci-lint-action` v9.3.0)
 - Minimum Go version is now 1.26 (required by `golang.org/x/net` v0.60.0)
 - Bump `golang.org/x/net` to v0.60.0 and `github.com/quic-go/quic-go` to v0.59.1 (security fixes)
 - Prometheus webhooks no longer map the `failOnRateLimitError` label/annotation to the deprecated, unused `Alert.FailOnRateLimitError` field
@@ -372,7 +375,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/slackmgr/core/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/slackmgr/core/compare/v0.12.7...v0.13.0
 [0.12.7]: https://github.com/slackmgr/core/compare/v0.12.6...v0.12.7
 [0.12.6]: https://github.com/slackmgr/core/compare/v0.12.5...v0.12.6
