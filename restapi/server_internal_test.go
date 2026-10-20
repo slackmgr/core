@@ -331,6 +331,7 @@ func TestServer_HandleMappings(t *testing.T) {
 		assert.Equal(t, map[string]any{
 			"teamName":     "test-rule",
 			"description":  "Test rule",
+			"alertType":    "",
 			"equals":       []any{"test"},
 			"hasPrefix":    []any{"prefix-"},
 			"matchesRegex": []any{"^re-.*$"},
@@ -341,6 +342,7 @@ func TestServer_HandleMappings(t *testing.T) {
 		assert.Equal(t, map[string]any{
 			"teamName":     "catch-all",
 			"description":  "catch-all", // falls back to the rule name
+			"alertType":    "",
 			"equals":       nil,
 			"hasPrefix":    nil,
 			"matchesRegex": nil,
@@ -349,7 +351,7 @@ func TestServer_HandleMappings(t *testing.T) {
 		}, rules[1])
 	})
 
-	t.Run("omits rules restricted to an alert type", func(t *testing.T) {
+	t.Run("includes rules restricted to an alert type", func(t *testing.T) {
 		t.Parallel()
 
 		server, _, _ := newTestServer(t)
@@ -364,11 +366,17 @@ func TestServer_HandleMappings(t *testing.T) {
 
 		rules, ok := body["rules"].([]any)
 		require.True(t, ok)
-		require.Len(t, rules, 1)
+		require.Len(t, rules, 2)
 
-		rule, ok := rules[0].(map[string]any)
+		typed, ok := rules[0].(map[string]any)
 		require.True(t, ok)
-		assert.Equal(t, "untyped", rule["teamName"])
+		assert.Equal(t, "typed", typed["teamName"])
+		assert.Equal(t, "security", typed["alertType"])
+
+		untyped, ok := rules[1].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "untyped", untyped["teamName"])
+		assert.Empty(t, untyped["alertType"])
 	})
 
 	t.Run("returns empty rules list when no rules exist", func(t *testing.T) {

@@ -106,7 +106,7 @@ Slack Events ──────────────────────�
 - REST server on port 8080 accepting alerts
 - Endpoints: `POST /alert[s]`, `POST /prometheus-alert`, `GET /mappings`, `GET /channels`, `GET /ping`
   - `POST /slackalert[s]` are deprecated aliases for `POST /alert[s]`, kept for legacy clients
-  - `GET /mappings` returns the routing rules in the legacy format: `{"rules":[{"teamName", "description", "equals", "hasPrefix", "matchesRegex", "channel", "matchAll"}]}`. Rules with an `alertType` are omitted, and an empty description falls back to the rule name
+  - `GET /mappings` returns the routing rules in the legacy format, extended with `alertType`: `{"rules":[{"teamName", "description", "alertType", "equals", "hasPrefix", "matchesRegex", "channel", "matchAll"}]}`. An empty description falls back to the rule name. Legacy clients ignore `alertType`, so they may match typed rules that the API would not apply to their (untyped) alerts
 - Channel names in `slackChannelId` and in escalation `moveToChannel` are mapped to channel IDs (for channels the Slack Manager is a member of)
 - Per-channel rate limiting
 - Validates and enqueues alerts for the manager to process

@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `POST /slackalert[/:slackChannelId]` and `POST /slackalerts[/:slackChannelId]`: deprecated aliases for the alert endpoints, kept for legacy clients
 
 ### Changed
-- `GET /mappings` now returns the legacy format `{"rules":[{"teamName","description","equals","hasPrefix","matchesRegex","channel","matchAll"}]}` instead of a bare array of routing rules (**breaking** for consumers of the previous format). Rules with an `alertType` are omitted, and an empty description falls back to the rule name
+- `GET /mappings` now returns the legacy format, extended with `alertType`: `{"rules":[{"teamName","description","alertType","equals","hasPrefix","matchesRegex","channel","matchAll"}]}` instead of a bare array of routing rules (**breaking** for consumers of the previous format). An empty description falls back to the rule name
 
 ### Fixed
 - Route keys and channel IDs with leading/trailing whitespace are now trimmed before routing and channel name mapping. Previously such alerts failed to match their routing rule or channel name
