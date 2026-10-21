@@ -15,7 +15,7 @@ import (
 	slack "github.com/slack-go/slack"
 	"github.com/slackmgr/core/config"
 	"github.com/slackmgr/core/internal"
-	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/core/internal/models"
 	"github.com/slackmgr/core/manager/internal/slack/controllers"
 	"github.com/slackmgr/types"
 	"golang.org/x/sync/errgroup"

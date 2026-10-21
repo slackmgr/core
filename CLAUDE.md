@@ -21,7 +21,7 @@ make test-integration  # Integration tests with build tag
 go test -v -run TestName ./path/to/package
 
 # Run tests for a specific package
-go test -v ./manager/internal/models/
+go test -v ./internal/models/
 ```
 
 ## Code Quality Requirements
@@ -135,7 +135,7 @@ manager.Run(ctx)
 
 - `restapi/` - REST API server and handlers
 - `manager/` - Alert processing and issue management orchestration
-- `manager/internal/models/` - Core data structures (Issue, Alert, Command, IssueCollection)
+- `internal/models/` - Core data structures (Issue, Alert, Command, IssueCollection), shared by `manager` and `insights`
 - `manager/internal/slack/` - Slack integration layer with controllers for different event types
 - `manager/internal/slack/views/` - Slack UI components (modals, message blocks)
 - `config/` - Configuration structures for API and Manager

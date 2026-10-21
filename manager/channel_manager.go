@@ -9,7 +9,7 @@ import (
 
 	"github.com/slackmgr/core/config"
 	"github.com/slackmgr/core/internal"
-	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/core/internal/models"
 	"github.com/slackmgr/types"
 )
 

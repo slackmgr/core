@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/slackmgr/core/internal"
-	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/core/internal/models"
 	"github.com/slackmgr/types"
 	"golang.org/x/sync/errgroup"
 )

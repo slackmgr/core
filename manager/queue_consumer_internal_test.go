@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/core/internal/models"
 	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

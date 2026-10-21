@@ -14,7 +14,7 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/slackmgr/core/config"
 	coreinternal "github.com/slackmgr/core/internal"
-	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/core/internal/models"
 	slack "github.com/slackmgr/core/manager/internal/slack"
 	"github.com/slackmgr/types"
 	"golang.org/x/sync/errgroup"

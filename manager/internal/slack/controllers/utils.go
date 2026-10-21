@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/core/internal/models"
 )
 
 func sendCommand(ctx context.Context, fifoQueue FifoQueueProducer, cmd *models.Command) error {

@@ -3,7 +3,7 @@ package manager
 import (
 	"context"
 
-	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/core/internal/models"
 )
 
 // SlackClient is the internal Slack API interface used by the coordinator and channel

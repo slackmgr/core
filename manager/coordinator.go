@@ -10,7 +10,7 @@ import (
 	"github.com/eko/gocache/lib/v4/store"
 	"github.com/segmentio/ksuid"
 	"github.com/slackmgr/core/config"
-	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/core/internal/models"
 	"github.com/slackmgr/types"
 )
 

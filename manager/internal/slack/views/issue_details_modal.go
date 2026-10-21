@@ -10,7 +10,7 @@ import (
 
 	"github.com/slack-go/slack"
 	"github.com/slackmgr/core/config"
-	"github.com/slackmgr/core/manager/internal/models"
+	"github.com/slackmgr/core/internal/models"
 )
 
 //go:embed issue_details_modal_assets/*
