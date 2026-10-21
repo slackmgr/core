@@ -12,7 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `POST /slackalert[/:slackChannelId]` and `POST /slackalerts[/:slackChannelId]`: deprecated aliases for the alert endpoints, kept for legacy clients
 
 ### Changed
-- Bump `github.com/slackmgr/types` to v0.7.0 and `github.com/stretchr/testify` to v1.12.1
+- Bump `github.com/slackmgr/types` to v0.7.1 and update all direct dependencies, including `github.com/slack-go/slack` v0.30.1, `github.com/bsm/redislock` v0.10.0, `github.com/redis/go-redis/v9` v9.23.0, `github.com/eko/gocache/lib/v4` v4.4.0 and `github.com/stretchr/testify` v1.12.1
+- `RedisChannelLocker.Obtain` now returns transient Redis errors as-is instead of `ErrChannelLockUnavailable` (behaviour change in `redislock` v0.10.0), so Redis outages are logged as errors rather than as lock contention
+- CI and code scanning workflows read the Go version (major.minor) from `go.mod` and install the latest patch release (`check-latest: true`), so all jobs, including both govulncheck runs, use the same Go version. Previously CI ran exactly Go 1.26.0, and govulncheck failed on standard library vulnerabilities fixed in later patches
+- README: Go requirement corrected to 1.26+
 - `GET /mappings` now returns the legacy format, extended with `alertType`: `{"rules":[{"teamName","description","alertType","equals","hasPrefix","matchesRegex","channel","matchAll"}]}` instead of a bare array of routing rules (**breaking** for consumers of the previous format). An empty description falls back to the rule name
 
 ### Fixed

@@ -136,7 +136,7 @@ In practice this means the API service can be treated like any other HTTP micros
 go get github.com/slackmgr/core
 ```
 
-Requires Go 1.25+.
+Requires Go 1.26+.
 
 ## Quick Start
 
