@@ -344,7 +344,7 @@
     },
     {
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "description": "Alert queue processing outcomes per second, stacked by result. Non-success results (slack_error, db_error, lock_timeout, gate_timeout, move_race) indicate transient failures requiring investigation.",
+      "description": "Alert queue processing outcomes per second, stacked by result. Non-success results (slack_error, db_error, lock_timeout, gate_timeout, move_race, unreadable) indicate transient failures requiring investigation. 'unreadable' means the message payload could not be decoded.",
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "palette-classic"},
@@ -387,6 +387,10 @@
           {
             "matcher": {"id": "byName", "options": "move_race"},
             "properties": [{"id": "color", "value": {"fixedColor": "yellow", "mode": "fixed"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "unreadable"},
+            "properties": [{"id": "color", "value": {"fixedColor": "purple", "mode": "fixed"}}]
           }
         ]
       },
@@ -1209,6 +1213,10 @@
           {
             "matcher": {"id": "byName", "options": "move_race"},
             "properties": [{"id": "color", "value": {"fixedColor": "yellow", "mode": "fixed"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "unreadable"},
+            "properties": [{"id": "color", "value": {"fixedColor": "purple", "mode": "fixed"}}]
           }
         ]
       },
@@ -1620,8 +1628,19 @@
       ],
       "title": "Rate-Limited Alert Requests by Channel",
       "type": "timeseries"
-    }
-
+    },
+    {"collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 101}, "id": 41, "title": "Alert intake", "type": "row"},
+    {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "description": "Rate of alerts rejected by the REST API before queueing, by reason. Sustained non-zero values indicate client errors, rate limiting or queue/encryption problems.", "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "short"}, "overrides": []}, "gridPos": {"h": 8, "w": 8, "x": 0, "y": 102}, "id": 42, "options": {"legend": {"calcs": ["lastNotNull", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}, "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "sum by (reason) (rate(slackmgr_alerts_rejected_total[$__rate_interval]))", "legendFormat": "{{reason}}", "refId": "A"}], "title": "Rejected Alerts by Reason", "type": "timeseries"},
+    {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "description": "Rate of alerts intentionally filtered by the REST API (e.g. matching an ignore term).", "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "short"}, "overrides": []}, "gridPos": {"h": 8, "w": 8, "x": 8, "y": 102}, "id": 43, "options": {"legend": {"calcs": ["lastNotNull", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}, "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "sum by (reason) (rate(slackmgr_alerts_filtered_total[$__rate_interval]))", "legendFormat": "{{reason}}", "refId": "A"}], "title": "Filtered Alerts by Reason", "type": "timeseries"},
+    {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "description": "Rate of resolved alerts received for which no open issue existed, by channel.", "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "short"}, "overrides": []}, "gridPos": {"h": 8, "w": 8, "x": 16, "y": 102}, "id": 44, "options": {"legend": {"calcs": ["lastNotNull", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}, "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "sum by (channel) (rate(slackmgr_alerts_resolved_without_issue_total[$__rate_interval]))", "legendFormat": "{{channel}}", "refId": "A"}], "title": "Resolved Without Issue by Channel", "type": "timeseries"},
+    {"collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 110}, "id": 45, "title": "Slack posts", "type": "row"},
+    {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "description": "Rate of Slack message posts by result (created, updated, deleted, throttled, failed).", "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "short"}, "overrides": [{"matcher": {"id": "byName", "options": "throttled"}, "properties": [{"id": "color", "value": {"fixedColor": "orange", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "failed"}, "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]}]}, "gridPos": {"h": 8, "w": 18, "x": 0, "y": 111}, "id": 46, "options": {"legend": {"calcs": ["lastNotNull", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}, "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "sum by (result) (rate(slackmgr_slack_posts_total[$__rate_interval]))", "legendFormat": "{{result}}", "refId": "A"}], "title": "Slack Posts by Result", "type": "timeseries"},
+    {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "description": "Share of Slack post attempts that were throttled: throttled / (created + updated + throttled).", "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 1, "mappings": [], "noValue": "0%", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.05}, {"color": "red", "value": 0.2}]}, "unit": "percentunit"}, "overrides": []}, "gridPos": {"h": 8, "w": 6, "x": 18, "y": 111}, "id": 47, "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"}, "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "sum(rate(slackmgr_slack_posts_total{result=\"throttled\"}[$__rate_interval])) / sum(rate(slackmgr_slack_posts_total{result=~\"created|updated|throttled\"}[$__rate_interval]))", "legendFormat": "", "refId": "A"}], "title": "Slack Posts Throttled Share", "type": "stat"},
+    {"collapsed": false, "gridPos": {"h": 1, "w": 24, "x": 0, "y": 119}, "id": 48, "title": "Insights recorder", "type": "row"},
+    {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "description": "Rate of insights events successfully written to the database.", "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "short"}, "overrides": []}, "gridPos": {"h": 8, "w": 6, "x": 0, "y": 120}, "id": 49, "options": {"legend": {"calcs": ["lastNotNull", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}, "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "sum(rate(slackmgr_insights_events_written_total[$__rate_interval]))", "legendFormat": "written", "refId": "A"}], "title": "Insights Events Written", "type": "timeseries"},
+    {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "description": "Rate of insights events dropped, by reason (buffer_full, write_error, panic, shutdown). Should be 0 during normal operation.", "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "short"}, "overrides": [{"matcher": {"id": "byRegexp", "options": ".*"}, "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]}]}, "gridPos": {"h": 8, "w": 6, "x": 6, "y": 120}, "id": 50, "options": {"legend": {"calcs": ["lastNotNull", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}, "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "sum by (reason) (rate(slackmgr_insights_events_dropped_total[$__rate_interval]))", "legendFormat": "{{reason}}", "refId": "A"}], "title": "Insights Events Dropped by Reason", "type": "timeseries"},
+    {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "description": "Current number of insights events waiting in the in-memory buffer.", "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "short"}, "overrides": []}, "gridPos": {"h": 8, "w": 6, "x": 12, "y": 120}, "id": 51, "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}, "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "max(slackmgr_insights_buffer_size)", "legendFormat": "buffer size", "refId": "A"}], "title": "Insights Buffer Size", "type": "timeseries"},
+    {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "description": "Latency of insights database writes.", "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "s"}, "overrides": []}, "gridPos": {"h": 8, "w": 6, "x": 18, "y": 120}, "id": 52, "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}, "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "histogram_quantile(0.50, sum by (le) (rate(slackmgr_insights_write_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p50", "refId": "A"}, {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "histogram_quantile(0.95, sum by (le) (rate(slackmgr_insights_write_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p95", "refId": "B"}], "title": "Insights Write Duration (p50 / p95)", "type": "timeseries"}
   ],
   "refresh": "30s",
   "schemaVersion": 39,
@@ -1647,6 +1666,6 @@
   "timezone": "browser",
   "title": "slackmgr",
   "uid": "slackmgr-overview",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
