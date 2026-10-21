@@ -260,6 +260,13 @@ type ManagerConfig struct {
 	// Default: false.
 	EnableLegacyFeatures bool `json:"enableLegacyFeatures" mapstructure:"enableLegacyFeatures" yaml:"enableLegacyFeatures"`
 
+	// Insights controls recording of insights events (alert outcomes, issue lifecycle, commands,
+	// Slack posts and channel snapshots). Insights are only recorded when an insights sink is
+	// available, typically discovered from the database. See InsightsConfig for details.
+	//
+	// Default: nil, which means default values. Zero or negative fields are set to their defaults by Validate.
+	Insights *InsightsConfig `json:"insights" mapstructure:"insights" yaml:"insights"`
+
 	// location is the parsed *time.Location for the Location field, cached by Validate().
 	location *time.Location
 }
@@ -304,6 +311,7 @@ func NewDefaultManagerConfig() *ManagerConfig {
 //   - ChannelManagerDrainTimeoutMs: must be between 2000 ms and 300000 ms
 //   - SocketModeMaxWorkers: must be between 10 and 1000
 //   - SocketModeDrainTimeoutMs: must be between 2000 ms and 300000 ms
+//   - Insights: if non-nil, defaults are applied to unset fields and it must pass its own validation
 func (c *ManagerConfig) Validate() error {
 	if c.EncryptionKey != "" && !encryptionKeyRegex.MatchString(c.EncryptionKey) {
 		return fmt.Errorf("encryption key must be a %d character alphanumeric string", EncryptionKeyLength)
@@ -351,6 +359,14 @@ func (c *ManagerConfig) Validate() error {
 
 	if c.SocketModeDrainTimeoutMs < MinDrainTimeoutMs || c.SocketModeDrainTimeoutMs > MaxDrainTimeoutMs {
 		return fmt.Errorf("socket mode drain timeout must be between %d ms and %d ms", MinDrainTimeoutMs, MaxDrainTimeoutMs)
+	}
+
+	if c.Insights != nil {
+		c.Insights.SetDefaults()
+
+		if err := c.Insights.Validate(); err != nil {
+			return fmt.Errorf("insights config is invalid: %w", err)
+		}
 	}
 
 	return nil

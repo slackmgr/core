@@ -140,6 +140,13 @@ type APIConfig struct {
 	// SlackClient contains configuration for connecting to the Slack API, including
 	// authentication tokens and API behavior settings.
 	SlackClient *SlackClientConfig `json:"slackClient" mapstructure:"slackClient" yaml:"slackClient"`
+
+	// Insights controls recording of alert intake insights events (queued, filtered and rejected alerts).
+	// They are only recorded when the host sets an insights sink with Server.WithInsightsSink.
+	// ChannelStatsIntervalSeconds is not used by the API. See InsightsConfig for details.
+	//
+	// Default: nil, which means default values. Zero or negative fields are set to their defaults by Validate.
+	Insights *InsightsConfig `json:"insights" mapstructure:"insights" yaml:"insights"`
 }
 
 // RateLimitConfig configures the token bucket rate limiter for alert processing.
@@ -238,6 +245,7 @@ func NewDefaultAPIConfig() *APIConfig {
 //   - MaxUsersInAlertChannel: must be between 1 and 10,000
 //   - RateLimitPerAlertChannel: must not be nil, and all fields must be valid
 //   - SlackClient: must not be nil, and must pass its own validation
+//   - Insights: if non-nil, defaults are applied to unset fields and it must pass its own validation
 func (c *APIConfig) Validate() error {
 	if err := c.validateRestPort(); err != nil {
 		return err
@@ -277,6 +285,14 @@ func (c *APIConfig) Validate() error {
 
 	if err := c.SlackClient.Validate(); err != nil {
 		return fmt.Errorf("slack client config is invalid: %w", err)
+	}
+
+	if c.Insights != nil {
+		c.Insights.SetDefaults()
+
+		if err := c.Insights.Validate(); err != nil {
+			return fmt.Errorf("insights config is invalid: %w", err)
+		}
 	}
 
 	return nil
