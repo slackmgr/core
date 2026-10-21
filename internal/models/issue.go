@@ -81,6 +81,14 @@ type Issue struct {
 	MovedByUser             string          `json:"movedByUser"`
 	IsEscalated             bool            `json:"isEscalated"`
 
+	// FirstInvestigatedAt is when the issue was first marked as investigated. Unlike InvestigatedSince,
+	// it is never reset, so it can be used to compute the time to first investigation.
+	FirstInvestigatedAt time.Time `json:"firstInvestigatedAt"`
+
+	// ReopenCount is the number of times the issue went from resolved back to unresolved,
+	// by a new alert or an unresolve request.
+	ReopenCount int `json:"reopenCount"`
+
 	// cachedJSONBody is used to store the raw JSON body of the issue, after marshalling.
 	// This is used to avoid marshalling in both the database cache middleware and the database driver.
 	// The middleware uses the MarshalJSONAndCache method to marshal the issue and store the raw JSON body in this field,
@@ -177,16 +185,25 @@ func (issue *Issue) FollowUpEnabled() bool {
 // ensuring the issue doesn't appear until the original delay period has elapsed,
 // regardless of how many alerts are added to the issue.
 func (issue *Issue) AddAlert(alert *Alert, logger types.Logger) bool {
+	updated, _ := issue.AddAlertWithReason(alert, logger)
+	return updated
+}
+
+// AddAlertWithReason works like [Issue.AddAlert], and additionally returns the reason the alert was ignored
+// (one of the types.InsightsReason* values for ignored alerts) when it returns false.
+func (issue *Issue) AddAlertWithReason(alert *Alert, logger types.Logger) (bool, string) {
 	if !alert.Timestamp.After(issue.LastAlert.Timestamp) {
-		return false
+		return false, types.InsightsReasonNotNewer
 	}
 
-	if issue.IsResolved() && alert.Severity == types.AlertResolved {
-		return false
+	wasResolved := issue.IsResolved()
+
+	if wasResolved && alert.Severity == types.AlertResolved {
+		return false, types.InsightsReasonAlreadyResolved
 	}
 
 	if !issue.LastAlert.IssueFollowUpEnabled {
-		return false
+		return false, types.InsightsReasonFollowUpDisabled
 	}
 
 	// Increase the new alert severity if the issue is escalated AND the current severity is not RESOLVED or INFO
@@ -222,9 +239,13 @@ func (issue *Issue) AddAlert(alert *Alert, logger types.Logger) bool {
 	issue.setArchivingTime()
 	issue.sanitizeSlackMentions(false)
 
+	if wasResolved && !issue.IsResolved() {
+		issue.ReopenCount++
+	}
+
 	logger.WithFields(issue.LogFields()).Info("Update issue")
 
-	return true
+	return true, ""
 }
 
 // GetSlackAction returns the Slack action needed for this issue
@@ -328,6 +349,13 @@ func (issue *Issue) RegisterUnresolveRequest() {
 		return
 	}
 
+	wasResolved := issue.IsResolved()
+	defer func() {
+		if wasResolved && !issue.IsResolved() {
+			issue.ReopenCount++
+		}
+	}()
+
 	issue.IsEmojiResolved = false
 	issue.ResolvedByUser = ""
 	issue.ResolveTime = nowFunc().UTC().Add(issue.AutoResolvePeriod)
@@ -345,6 +373,10 @@ func (issue *Issue) RegisterInvestigateRequest(user string) {
 	issue.InvestigatedByUser = user
 	issue.InvestigatedSince = nowFunc().UTC()
 	issue.SlackPostNeedsUpdate = true
+
+	if issue.FirstInvestigatedAt.IsZero() {
+		issue.FirstInvestigatedAt = issue.InvestigatedSince
+	}
 }
 
 func (issue *Issue) RegisterUninvestigateRequest() {
@@ -548,6 +580,7 @@ func (issue *Issue) ApplyEscalationRules() *EscalationResult {
 	result.Escalated = true
 
 	// Note the fact that we are escalating the issue
+	newlyEscalated := !issue.IsEscalated
 	issue.IsEscalated = true
 
 	// Add mentions, if any
@@ -562,6 +595,7 @@ func (issue *Issue) ApplyEscalationRules() *EscalationResult {
 	escalatedPriority := types.SeverityPriority(escalation.Severity)
 
 	// Update the issue severity
+	result.PrevSeverity = issue.LastAlert.Severity
 	issue.LastAlert.Severity = escalation.Severity
 
 	// Register the new channel to move the issue to, if applicable
@@ -570,6 +604,7 @@ func (issue *Issue) ApplyEscalationRules() *EscalationResult {
 	}
 
 	escalationHasIncreased := escalatedPriority > currentPriority
+	result.Changed = newlyEscalated || escalationHasIncreased
 
 	// Flag that the Slack post needs an update, if the escalation has gone up
 	if escalationHasIncreased {
