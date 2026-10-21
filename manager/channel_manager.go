@@ -45,6 +45,9 @@ const (
 	// commandsProcessedTotalMetric counts commands processed, labelled by action type.
 	commandsProcessedTotalMetric = "commands_processed_total"
 
+	// alertsResolvedWithoutIssueTotalMetric counts resolved alerts that were ignored because no open issue existed.
+	alertsResolvedWithoutIssueTotalMetric = "alerts_resolved_without_issue_total"
+
 	// Queue types and results used as label values for queueMessagesProcessedTotalMetric.
 	queueTypeAlert        = "alert"
 	queueTypeCommand      = "command"
@@ -153,6 +156,7 @@ func newChannelManager(channelID string, channelName string, slackClient SlackCl
 	// Alert grouping
 	metrics.RegisterCounter(alertsGroupedTotalMetric, "Total alerts added to an existing open issue", "channel")
 	metrics.RegisterCounter(alertsIgnoredTotalMetric, "Total alerts that matched an existing issue but caused no change", "channel")
+	metrics.RegisterCounter(alertsResolvedWithoutIssueTotalMetric, "Total resolved alerts ignored because no open issue existed for the correlation ID", "channel")
 
 	// Command processing by type
 	metrics.RegisterCounter(commandsProcessedTotalMetric, "Total commands processed by action type", "action")
@@ -167,6 +171,7 @@ func newChannelManager(channelID string, channelName string, slackClient SlackCl
 	metrics.CounterAdd(channelLockAcquireFailuresTotalMetric, 0, channelName)
 	metrics.CounterAdd(alertsGroupedTotalMetric, 0, channelName)
 	metrics.CounterAdd(alertsIgnoredTotalMetric, 0, channelName)
+	metrics.CounterAdd(alertsResolvedWithoutIssueTotalMetric, 0, channelName)
 
 	// Pre-warm fixed-enum label combinations.
 	for _, event := range []string{"terminated", "resolved", "unresolved", "investigated", "uninvestigated", "muted", "unmuted"} {
@@ -865,6 +870,7 @@ func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert
 	// Do not create a new issue for an alert that is already resolved
 	if alert.IssueFollowUpEnabled && alert.Severity == types.AlertResolved {
 		logger.Info("Resolved alert ignored for new issue")
+		c.metrics.CounterInc(alertsResolvedWithoutIssueTotalMetric, c.channelName)
 		return nil
 	}
 

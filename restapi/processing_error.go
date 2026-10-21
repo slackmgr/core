@@ -6,6 +6,7 @@ import "fmt"
 // with an indication of whether the error is retryable.
 type processingError struct {
 	isRetryable bool
+	reason      string
 	err         error
 }
 
@@ -38,4 +39,10 @@ func (e *processingError) IsRetryable() bool {
 // Unwrap returns the underlying error.
 func (e *processingError) Unwrap() error {
 	return e.err
+}
+
+// withReason sets the alert rejection reason for a non-retryable error and returns the error.
+func (e *processingError) withReason(reason string) *processingError {
+	e.reason = reason
+	return e
 }

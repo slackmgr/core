@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -433,4 +434,40 @@ func TestChannelManager_HandleWebhook_LegacyInput(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestChannelManager_ProcessAlert_ResolvedWithoutIssue(t *testing.T) {
+	t.Parallel()
+
+	const channelID = "C654321"
+
+	var savedAlerts atomic.Int32
+
+	db := &customStubDB{
+		saveAlertFn: func(_ context.Context, _ *types.Alert) error {
+			savedAlerts.Add(1)
+			return nil
+		},
+	}
+
+	cm := newTestChannelManager(t, channelID, db, &stubSlackClient{}, &NoopChannelLocker{})
+	metrics := newRecordingMetrics()
+	cm.metrics = metrics
+
+	alert, ackCalled, nackCalled := newTestAlertFromData(t, types.Alert{
+		SlackChannelID:       channelID,
+		Header:               "Resolved",
+		Severity:             types.AlertResolved,
+		CorrelationID:        "corr-resolved",
+		IssueFollowUpEnabled: true,
+		AutoResolveSeconds:   3600,
+	})
+
+	require.NoError(t, cm.processAlert(context.Background(), alert))
+
+	assert.True(t, *ackCalled)
+	assert.False(t, *nackCalled)
+	assert.Equal(t, int32(1), savedAlerts.Load(), "the alert is still saved to the alerts table")
+	assert.InDelta(t, 1.0, metrics.counter(alertsResolvedWithoutIssueTotalMetric, channelID), 0)
+	assert.InDelta(t, 0.0, metrics.counter(issuesCreatedTotalMetric, channelID), 0)
 }

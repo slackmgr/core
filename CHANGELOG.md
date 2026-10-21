@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `alerts_resolved_without_issue_total{channel}` metric: resolved alerts that the manager ignored because no open issue existed for the correlation ID (issue follow-up enabled). These alerts are still saved and acked as successful, but previously only produced a log line
+- `alerts_rejected_total{reason}` metric (API): alerts rejected before queuing, by reason (`invalid_body`, `empty_request`, `validation`, `no_route`, `too_many_in_request`, `channel_lookup_failed`, `channel_not_found`, `channel_archived`, `not_in_channel`, `too_many_users`, `rate_limited`, `missing_encryption_key`, `encryption_failed`, `queue_error`). When a request fails, every alert in it that was not yet queued counts. Covers both HTTP endpoints and raw alert queue consumers
+- `alerts_filtered_total{reason}` metric (API): valid alerts discarded because they matched an `ignoreIfTextContains` term
+
 ### Fixed
 - The manager now acks queue messages that cannot be unmarshalled, and counts them as `queue_messages_processed_total{result="unreadable"}`. Previously they were neither acked nor nacked. With Redis Streams this held the channel's stream lock until it expired, and because pending messages are reclaimed before new ones, a single unreadable message could stall all later alerts for that channel indefinitely
 

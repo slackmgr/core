@@ -34,6 +34,7 @@ func (s *Server) handleAlerts(c *gin.Context) {
 	// ContentLength == -1 means chunked encoding (unknown length), which is valid.
 	if c.Request.ContentLength == 0 {
 		err := errors.New("missing POST body")
+		s.countRejected(rejectReasonInvalidBody, 1)
 		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
@@ -41,6 +42,7 @@ func (s *Server) handleAlerts(c *gin.Context) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		err = fmt.Errorf("failed to read POST body: %w", err)
+		s.countRejected(rejectReasonInvalidBody, 1)
 		s.writeErrorResponse(c, err, http.StatusInternalServerError, nil)
 		return
 	}
@@ -50,6 +52,7 @@ func (s *Server) handleAlerts(c *gin.Context) {
 	alerts, err := parseAlertInput(body)
 	if err != nil {
 		err = fmt.Errorf("failed to parse POST body: %w", err)
+		s.countRejected(rejectReasonInvalidBody, 1)
 		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
@@ -57,15 +60,29 @@ func (s *Server) handleAlerts(c *gin.Context) {
 	s.processAlerts(c, alerts, started)
 }
 
+// processAlerts validates, filters, rate limits and queues the alerts of a single request.
+// If any alert fails, the request fails, and all alerts not yet queued are counted as rejected.
+//
+// Note: alerts are queued channel by channel, so a failure for one channel (e.g. rate limiting) may happen after
+// alerts for another channel in the same request have already been queued.
 func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started time.Time) {
 	if len(alerts) == 0 {
 		err := errors.New("request contains no alerts")
+		s.countRejected(rejectReasonEmptyRequest, 1)
 		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
 
+	// pending is the number of alerts in the request that are neither filtered nor queued yet.
+	pending := len(alerts)
+
+	reject := func(reason string, err error, statusCode int, alert *types.Alert) {
+		s.countRejected(reason, pending)
+		s.writeErrorResponse(c, err, statusCode, alert)
+	}
+
 	if err := s.setSlackChannelID(c, alerts...); err != nil {
-		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
+		reject(rejectReasonOf(err, rejectReasonNoRoute), err, http.StatusBadRequest, nil)
 		return
 	}
 
@@ -77,7 +94,7 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 
 		if err := alert.Validate(); err != nil {
 			err = fmt.Errorf("input validation failed: %w", err)
-			s.writeErrorResponse(c, err, http.StatusBadRequest, alert)
+			reject(rejectReasonValidation, err, http.StatusBadRequest, alert)
 			return
 		}
 
@@ -85,6 +102,8 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 
 		if ignore {
 			s.logAlerts("Alert ignored", ignoreReason, started, alert)
+			s.countFiltered(filterReasonIgnoreTerm)
+			pending--
 			continue
 		}
 
@@ -110,7 +129,7 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 	for channel, channelAlerts := range alertsByChannel {
 		if len(channelAlerts) > alertLimitPerChannel {
 			err := fmt.Errorf("too many alerts for channel %s: %d alerts (limit: %d)", channel, len(channelAlerts), alertLimitPerChannel)
-			s.writeErrorResponse(c, err, http.StatusBadRequest, channelAlerts[0])
+			reject(rejectReasonTooManyInRequest, err, http.StatusBadRequest, channelAlerts[0])
 			return
 		}
 	}
@@ -122,12 +141,12 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 		channelInfo, err := s.channelInfoProvider.GetChannelInfo(c.Request.Context(), channel)
 		if err != nil {
 			err = fmt.Errorf("failed to fetch info for channel %s: %w", channel, err)
-			s.writeErrorResponse(c, err, http.StatusInternalServerError, channelAlerts[0])
+			reject(rejectReasonChannelLookupFailed, err, http.StatusInternalServerError, channelAlerts[0])
 			return
 		}
 
 		if err := s.validateChannelInfo(channel, channelInfo); err != nil {
-			s.writeErrorResponse(c, err, http.StatusBadRequest, channelAlerts[0])
+			reject(rejectReasonOf(err, rejectReasonValidation), err, http.StatusBadRequest, channelAlerts[0])
 			return
 		}
 
@@ -147,7 +166,7 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 				channelLabel = channel
 			}
 			s.metrics.CounterInc(httpAlertsRateLimitedMetric, channelLabel)
-			s.writeErrorResponse(c, err, http.StatusTooManyRequests, channelAlerts[0])
+			reject(rejectReasonRateLimited, err, http.StatusTooManyRequests, channelAlerts[0])
 			return
 		}
 
@@ -160,22 +179,24 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 		for _, alert := range channelAlerts {
 			if len(alert.Webhooks) > 0 && s.cfg.EncryptionKey == "" {
 				err := errors.New("alert contains webhooks, but no encryption key is configured")
-				s.writeErrorResponse(c, err, http.StatusBadRequest, alert)
+				reject(rejectReasonMissingEncryptionKey, err, http.StatusBadRequest, alert)
 				return
 			}
 
 			for _, w := range alert.Webhooks {
 				if err := internal.EncryptWebhookPayload(w, []byte(s.cfg.EncryptionKey)); err != nil {
 					err = fmt.Errorf("failed to encrypt webhook payload: %w", err)
-					s.writeErrorResponse(c, err, http.StatusInternalServerError, alert)
+					reject(rejectReasonEncryptionFailed, err, http.StatusInternalServerError, alert)
 					return
 				}
 			}
 
 			if err := s.queueAlert(c.Request.Context(), alert); err != nil {
-				s.writeErrorResponse(c, err, http.StatusInternalServerError, alert)
+				reject(rejectReasonQueueError, err, http.StatusInternalServerError, alert)
 				return
 			}
+
+			pending--
 
 			s.logAlerts("Alert accepted", "", started, alert)
 		}
@@ -196,7 +217,7 @@ func (s *Server) processQueuedAlert(ctx context.Context, alert *types.Alert) err
 	// Attempt to set the Slack channel ID (if not already set).
 	// Any errors here are non-retryable, as they indicate invalid input.
 	if err := s.setSlackChannelID(nil, alert); err != nil {
-		return newNonRetryableProcessingError("failed to determine Slack channel ID: %w", err)
+		return newNonRetryableProcessingError("failed to determine Slack channel ID: %w", err).withReason(rejectReasonNoRoute)
 	}
 
 	alert.Clean()
@@ -204,13 +225,14 @@ func (s *Server) processQueuedAlert(ctx context.Context, alert *types.Alert) err
 	// Validate the alert body.
 	// Any errors here are non-retryable, as they indicate invalid input.
 	if err := alert.Validate(); err != nil {
-		return newNonRetryableProcessingError("input validation failed: %w", err)
+		return newNonRetryableProcessingError("input validation failed: %w", err).withReason(rejectReasonValidation)
 	}
 
 	ignore, ignoreReason := ignoreAlert(alert)
 
 	if ignore {
 		s.logAlerts("Alert ignored", ignoreReason, started, alert)
+		s.countFiltered(filterReasonIgnoreTerm)
 		return nil
 	}
 
@@ -224,18 +246,18 @@ func (s *Server) processQueuedAlert(ctx context.Context, alert *types.Alert) err
 	// Check that the channel is valid for posting alerts.
 	// Any errors here are non-retryable, as they indicate invalid input.
 	if err := s.validateChannelInfo(alert.SlackChannelID, channelInfo); err != nil {
-		return newNonRetryableProcessingError("alert channel validation failed: %w", err)
+		return newNonRetryableProcessingError("alert channel validation failed: %w", err).withReason(rejectReasonOf(err, rejectReasonValidation))
 	}
 
 	// Encrypt any webhook payloads.
 	// Errors here are non-retryable, as they indicate invalid input or invalid API configuration.
 	if len(alert.Webhooks) > 0 && s.cfg.EncryptionKey == "" {
-		return newNonRetryableProcessingError("alert contains webhooks, but no encryption key is configured")
+		return newNonRetryableProcessingError("alert contains webhooks, but no encryption key is configured").withReason(rejectReasonMissingEncryptionKey)
 	}
 
 	for _, w := range alert.Webhooks {
 		if err := internal.EncryptWebhookPayload(w, []byte(s.cfg.EncryptionKey)); err != nil {
-			return newNonRetryableProcessingError("failed to encrypt webhook payload: %w", err)
+			return newNonRetryableProcessingError("failed to encrypt webhook payload: %w", err).withReason(rejectReasonEncryptionFailed)
 		}
 	}
 
@@ -292,19 +314,19 @@ func (s *Server) handleAlertsTest(c *gin.Context) {
 
 func (s *Server) validateChannelInfo(channel string, channelInfo *ChannelInfo) error {
 	if !channelInfo.ChannelExists {
-		return fmt.Errorf("unable to find channel %s in workspace", channel)
+		return newAlertRejection(rejectReasonChannelNotFound, "unable to find channel %s in workspace", channel)
 	}
 
 	if channelInfo.ChannelIsArchived {
-		return fmt.Errorf("channel %s is archived", channel)
+		return newAlertRejection(rejectReasonChannelArchived, "channel %s is archived", channel)
 	}
 
 	if !channelInfo.ManagerIsInChannel {
-		return fmt.Errorf("the Slack Manager integration is not in channel %s", channel)
+		return newAlertRejection(rejectReasonNotInChannel, "the Slack Manager integration is not in channel %s", channel)
 	}
 
 	if channelInfo.UserCount > s.cfg.MaxUsersInAlertChannel {
-		return fmt.Errorf("the number of users (%d) in channel %s exceeds the limit (%d)", channelInfo.UserCount, channel, s.cfg.MaxUsersInAlertChannel)
+		return newAlertRejection(rejectReasonTooManyUsers, "the number of users (%d) in channel %s exceeds the limit (%d)", channelInfo.UserCount, channel, s.cfg.MaxUsersInAlertChannel)
 	}
 
 	return nil

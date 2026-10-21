@@ -236,6 +236,7 @@ func (s *Server) Run(ctx context.Context) error {
 	s.metrics.RegisterGauge(httpInFlightMetric, "Number of HTTP requests currently being processed")
 	s.metrics.GaugeSet(httpInFlightMetric, 0)
 	s.metrics.RegisterCounter(httpAlertsRateLimitedMetric, "Total alert requests rejected by the per-channel rate limiter", "channel")
+	s.registerAlertIntakeMetrics()
 
 	// Set release mode to mute a few annoying startup logs.
 	// The actual runtime mode is set below, depending on config.
@@ -469,6 +470,7 @@ func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueCons
 				// If the alert is invalid, we *ack* the message to avoid re-processing it.
 				if err := json.Unmarshal([]byte(item.Body), &alert); err != nil {
 					logger.Errorf("Failed to json unmarshal queued alert: %s", err)
+					s.countRejected(rejectReasonInvalidBody, 1)
 
 					if item.Ack != nil {
 						item.Ack()
@@ -493,6 +495,8 @@ func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueCons
 
 						continue
 					}
+
+					s.countRejected(rejectReasonOf(err, rejectReasonValidation), 1)
 				}
 
 				// At this point, the alert has been processed successfully OR it failed with a non-retryable error.
