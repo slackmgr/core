@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-21
+
 ### Added
 - `ManagerConfig.EnableLegacyFeatures` (default `false`): compatibility mode for clients built against the legacy Slack Manager. When enabled, the manager uses the deprecated `Alert.DeletionDelaySeconds` as the archiving delay when `ArchivingDelaySeconds` is not set, and populates the deprecated `WebhookCallback.Input` (JSON `input`) with a copy of `PlainTextInput`
 - `POST /slackalert[/:slackChannelId]` and `POST /slackalerts[/:slackChannelId]`: deprecated aliases for the alert endpoints, kept for legacy clients
@@ -390,7 +392,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/slackmgr/core/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/slackmgr/core/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/slackmgr/core/compare/v0.12.7...v0.13.0
 [0.12.7]: https://github.com/slackmgr/core/compare/v0.12.6...v0.12.7
