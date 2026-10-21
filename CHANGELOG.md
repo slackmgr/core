@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `alerts_filtered_total{reason}` metric (API): valid alerts discarded because they matched an `ignoreIfTextContains` term
 
 ### Changed
+- Bump `github.com/slackmgr/types` to v0.8.0
 - Internal: the `models` package moved from `manager/internal/models` to `internal/models` (no public API change)
 
 ### Fixed

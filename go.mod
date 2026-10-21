@@ -14,7 +14,7 @@ require (
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/segmentio/ksuid v1.0.4
 	github.com/slack-go/slack v0.30.1
-	github.com/slackmgr/types v0.7.1
+	github.com/slackmgr/types v0.8.0
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/sync v0.24.0
 	golang.org/x/time v0.16.0
