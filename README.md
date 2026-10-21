@@ -130,6 +130,87 @@ The manager is stateful and long-running. It holds open Slack Socket Mode connec
 
 In practice this means the API service can be treated like any other HTTP microservice — ephemeral, horizontally scaled, CI/CD-deployed frequently — while the manager is operated more like a stateful backend: given dedicated resources, updated carefully, and kept away from the blast radius of the ingestion layer.
 
+## Insights
+
+Insights is an optional, queryable history of what the Slack Manager does, intended for dashboards: alert outcomes, issue lifecycle, user commands, Slack posts and periodic channel snapshots. It complements logs and metrics: metrics remain the operational view, insights are the per-channel, per-issue, human-oriented view.
+
+### Recording
+
+The manager records insights events when an insights sink is available. The sink is discovered from the database (a `types.DB` that implements `types.InsightsSinkProvider`, e.g. the Postgres plugin with `postgres.WithInsightsEnabled()`), or set explicitly with `Manager.WithInsightsSink`. Without a sink, nothing is recorded and the cost is a nil check.
+
+Recording never affects alert processing:
+
+- Events are put in a bounded in-memory buffer with a non-blocking enqueue. When the buffer is full, events are dropped and counted (`insights_events_dropped_total{reason="buffer_full"}`).
+- Events are built only from data already in memory. No extra database reads, Slack calls or locks.
+- A single background goroutine writes events in batches, never as part of issue or alert writes.
+- Sink errors and panics are recovered, counted and logged (rate-limited). After a failed write, the recorder backs off exponentially.
+- At shutdown, buffered events are flushed with a hard deadline (`ShutdownFlushTimeoutMs`, default 2s).
+- Lost events are reported in the event stream itself, as `insights.gap` events.
+
+Tune or disable recording with `ManagerConfig.Insights` (`config.InsightsConfig`):
+
+| Field | Default | Description |
+|---|---|---|
+| `Disabled` | `false` | Disable recording even if a sink is available |
+| `BufferSize` | `10000` | In-memory buffer capacity |
+| `BatchSize` | `500` | Maximum events per write |
+| `FlushIntervalMs` | `1000` | Maximum wait before a partial batch is written |
+| `WriteTimeoutMs` | `5000` | Deadline of a single write |
+| `ShutdownFlushTimeoutMs` | `2000` | Maximum time spent flushing at shutdown |
+| `ChannelStatsIntervalSeconds` | `300` | Minimum interval between channel snapshots per channel |
+
+The API server can also record alert intake events (queued, filtered and rejected alerts) with `Server.WithInsightsSink` and `APIConfig.Insights`. This is optional; without it, rejections are still counted in the `alerts_rejected_total{reason}` and `alerts_filtered_total{reason}` metrics.
+
+### Events
+
+Every event has a type and an optional reason. Events carry identifiers and classifications only, never alert content. All types, reasons and value keys are documented constants in `github.com/slackmgr/types` (`InsightsEvent*`, `InsightsReason*`, `InsightsValue*`). Key definitions:
+
+| Concept | Definition |
+|---|---|
+| Accepted alert | Processed by the manager and acked as successful: `alert.new_issue` + `alert.grouped` + `alert.ignored` |
+| Ignored alert | Processed and saved, but intentionally without effect. Reasons: `not_newer`, `already_resolved`, `follow_up_disabled`, `resolved_without_issue` |
+| Dropped alert | Queued, but permanently discarded by the manager without processing: `invalid`, `missing_encryption_key`, `corrupt_issue`, `unreadable` |
+| Retried alert | Processing attempt aborted and the alert returned to the queue (not terminal): `lock_timeout`, `gate_timeout`, `slack_error`, `db_error`, `move_race` |
+| Rejected / filtered alert | Refused by the API (client got an error), or discarded by the alert's own `ignoreIfTextContains` rule (API recording only) |
+| Updated issue | An existing open issue changed by a new alert (`issue.updated`) |
+| Resolved / reopened issue | Explicit transition by an alert or a user. Auto-resolve by timeout is implicit, and shown in `issue.archived` and in the current state |
+| Escalated issue | An escalation rule raised the severity or became active for the first time |
+| Archived issue | Reason is how the issue ended (`user_resolved`, `alert_resolved`, `auto_resolved`, `auto_resolved_inconclusive`, `terminated`, `fire_and_forget`), with lifecycle values (open time, time to resolve, time to first investigation, alert and reopen counts) |
+
+Delivery is best effort: events can be lost (shown by `insights.gap`) and, in rare retry paths, duplicated.
+
+### Reading
+
+The `insights` package answers dashboard questions on top of a `types.InsightsReader`:
+
+```go
+reader := postgres.NewInsightsReader(logger, opts...) // read-only, never runs migrations
+_ = reader.Connect(ctx)
+_ = reader.CheckSchema(ctx)
+
+svc := insights.New(reader)
+f := insights.Filter{From: from, To: to, ChannelIDs: channels}
+
+summary, _ := svc.Summary(ctx, f)                       // all activity counts
+series, _ := svc.Series(ctx, insights.SeriesQuery{Filter: f, Bucket: time.Hour,
+    Metrics: []insights.Metric{{Type: types.InsightsEventIssueCreated}}})
+state, _ := svc.CurrentState(ctx, insights.CurrentStateQuery{ChannelIDs: channels})
+```
+
+| Method | Answers |
+|---|---|
+| `Summary` | Counts of all alert, issue, command, Slack post and webhook events, by reason, plus lost events |
+| `Series` | Zero-filled time series of any event type (and reason), optionally per channel |
+| `OpenIssuesSeries` | Open issues over time per channel, from channel snapshots |
+| `Breakdown` | Top-N values of a dimension, e.g. noisiest route keys, hosts or correlation IDs, most active users |
+| `CurrentState` | Open issues by channel and severity, resolved-but-not-archived, muted, investigated, escalated, moved, stale; oldest, stale and noisiest issues |
+| `Lifecycle` | Time to resolve, time to first investigation, open time, alerts and reopens per issue (avg, p50, p90, p99, max); resolution mix |
+| `Flapping` | Issues reopened most often |
+| `MoveFlows` | Issue moves between channels, by reason |
+| `IssueTimeline` / `Events` | Paginated event listings, e.g. all events of one issue |
+
+Activity methods return `types.ErrInsightsNotSupported` when no reader is available. `CurrentState` also works with any `types.DB` (`insights.NewFromDB` or `insights.WithDB`), including plugins without insights support.
+
 ## Installation
 
 ```bash

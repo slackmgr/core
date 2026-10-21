@@ -8,9 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Insights: an optional, queryable history of what the Slack Manager does, for dashboards. Requires `github.com/slackmgr/types` v0.8.0
+  - The manager records insights events (alert outcomes, issue lifecycle, commands, webhooks, Slack posts, channel snapshots) when an insights sink is available, discovered from the database (`types.InsightsSinkProvider`) or set with `Manager.WithInsightsSink`. Recording is asynchronous and isolated: non-blocking enqueue into a bounded buffer, batched writes on a background goroutine, contained errors and panics, backoff, and a hard shutdown flush deadline
+  - `ManagerConfig.Insights` and `APIConfig.Insights` (`config.InsightsConfig`) to tune or disable recording
+  - `Server.WithInsightsSink`: optional recording of alert intake events (queued, filtered, rejected) in the API server
+  - New `insights` package: `Recorder`, and `Service` with `Summary`, `Series`, `OpenIssuesSeries`, `Breakdown`, `CurrentState`, `Lifecycle`, `Flapping`, `MoveFlows`, `IssueTimeline` and `Events`
+  - Metrics `insights_events_written_total`, `insights_events_dropped_total{reason}`, `insights_write_duration_seconds` and `insights_buffer_size`
+- `slack_posts_total{result}` metric: Slack post operations for issues (`created`, `updated`, `deleted`, `throttled`, `failed`)
+- Issues track `firstInvestigatedAt` and `reopenCount` (new fields in the stored issue JSON)
+- Grafana dashboard: alert intake, Slack posts and insights recorder panels
 - `alerts_resolved_without_issue_total{channel}` metric: resolved alerts that the manager ignored because no open issue existed for the correlation ID (issue follow-up enabled). These alerts are still saved and acked as successful, but previously only produced a log line
 - `alerts_rejected_total{reason}` metric (API): alerts rejected before queuing, by reason (`invalid_body`, `empty_request`, `validation`, `no_route`, `too_many_in_request`, `channel_lookup_failed`, `channel_not_found`, `channel_archived`, `not_in_channel`, `too_many_users`, `rate_limited`, `missing_encryption_key`, `encryption_failed`, `queue_error`). When a request fails, every alert in it that was not yet queued counts. Covers both HTTP endpoints and raw alert queue consumers
 - `alerts_filtered_total{reason}` metric (API): valid alerts discarded because they matched an `ignoreIfTextContains` term
+
+### Changed
+- Internal: the `models` package moved from `manager/internal/models` to `internal/models` (no public API change)
 
 ### Fixed
 - The manager now acks queue messages that cannot be unmarshalled, and counts them as `queue_messages_processed_total{result="unreadable"}`. Previously they were neither acked nor nacked. With Redis Streams this held the channel's stream lock until it expired, and because pending messages are reclaimed before new ones, a single unreadable message could stall all later alerts for that channel indefinitely

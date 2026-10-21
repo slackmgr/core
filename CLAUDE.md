@@ -138,6 +138,7 @@ manager.Run(ctx)
 - `internal/models/` - Core data structures (Issue, Alert, Command, IssueCollection), shared by `manager` and `insights`
 - `manager/internal/slack/` - Slack integration layer with controllers for different event types
 - `manager/internal/slack/views/` - Slack UI components (modals, message blocks)
+- `insights/` - Insights `Recorder` (async, isolated event recording used by manager and API) and read `Service` (dashboard queries on a `types.InsightsReader`)
 - `config/` - Configuration structures for API and Manager
 - `internal/` - Shared internal utilities (cache, encryption, channel summary, low-level Slack API wrapper)
 
@@ -149,6 +150,12 @@ manager.Run(ctx)
 - `github.com/eko/gocache` - Caching abstraction with Redis backend
 - `github.com/bsm/redislock` - Distributed locking for multi-instance deployments
 - `github.com/stretchr/testify` - Testing assertions and mocks
+
+## Insights
+
+- Emit sites must never block, allocate heavily, or do extra I/O: guard with `recorder.Enabled()`, build events only from in-memory data (`models.Issue.InsightsEvent`, `models.Alert.InsightsEvent`), and call `Record` (non-blocking). A nil `*insights.Recorder` is valid.
+- The recorder sink is discovered on the raw DB in `Manager.Run`, before the DB cache middleware wraps it.
+- Event types, reasons and value keys live in `github.com/slackmgr/types` (`InsightsEvent*`, `InsightsReason*`, `InsightsValue*`); add new ones there first.
 
 ## Concurrency Patterns
 
