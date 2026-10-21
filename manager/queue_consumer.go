@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 
+	"github.com/slackmgr/core/insights"
 	"github.com/slackmgr/core/internal"
 	"github.com/slackmgr/core/internal/models"
 	"github.com/slackmgr/types"
@@ -13,7 +14,9 @@ import (
 // Items that cannot be converted (e.g. malformed JSON) are acked and discarded, since retrying cannot succeed.
 // Leaving them unacknowledged would make the queue redeliver them indefinitely, and for queues with strict
 // per-channel ordering (Redis Streams) block all later messages in the same channel.
-func queueConsumer(ctx context.Context, queue FifoQueue, queueType string, sinkCh chan<- models.InFlightMessage, msgConstructor models.InFlightMsgConstructor, logger types.Logger, metrics types.Metrics) error {
+//
+// For the alert queue, discarded messages are recorded as insights events (recorder may be nil).
+func queueConsumer(ctx context.Context, queue FifoQueue, queueType string, sinkCh chan<- models.InFlightMessage, msgConstructor models.InFlightMsgConstructor, logger types.Logger, metrics types.Metrics, recorder *insights.Recorder) error {
 	logger.WithField("queue_name", queue.Name()).Info("Queue consumer started")
 	defer logger.WithField("queue_name", queue.Name()).Info("Queue consumer exited")
 
@@ -38,6 +41,11 @@ func queueConsumer(ctx context.Context, queue FifoQueue, queueType string, sinkC
 				logger.WithField("message_id", item.MessageID).WithField("channel_id", item.SlackChannelID).Errorf("Discarding unreadable message: %s", err)
 				item.Ack()
 				metrics.CounterInc(queueMessagesProcessedTotalMetric, queueType, queueResultUnreadable)
+
+				if queueType == queueTypeAlert && recorder.Enabled() {
+					recorder.Record(types.InsightsEvent{Type: types.InsightsEventAlertDropped, Reason: types.InsightsReasonUnreadable, ChannelID: item.SlackChannelID})
+				}
+
 				continue
 			}
 

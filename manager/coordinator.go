@@ -10,6 +10,7 @@ import (
 	"github.com/eko/gocache/lib/v4/store"
 	"github.com/segmentio/ksuid"
 	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/insights"
 	"github.com/slackmgr/core/internal/models"
 	"github.com/slackmgr/types"
 )
@@ -35,6 +36,12 @@ type coordinator struct {
 	gate            RateLimitGate
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
+
+	// insights records insights events. A nil recorder is valid and records nothing.
+	insights *insights.Recorder
+
+	// channelStatsInterval is passed on to channel managers, see channelManager.channelStatsInterval.
+	channelStatsInterval time.Duration
 }
 
 func newCoordinator(db types.DB, alertQueue FifoQueue, slack SlackClient, cacheStore store.StoreInterface,
@@ -321,6 +328,8 @@ func (c *coordinator) createChannelManager(ctx context.Context, channelID string
 	}
 
 	channelManager := newChannelManager(channelID, channelName, c.slack, c.db, c.locker, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings, c.gate)
+	channelManager.insights = c.insights
+	channelManager.channelStatsInterval = c.channelStatsInterval
 
 	c.metrics.GaugeAdd(activeChannelManagersMetric, 1)
 
@@ -347,9 +356,26 @@ func (c *coordinator) runChannelManagerAsync(ctx context.Context, channelManager
 	channelManager.run(ctx)
 }
 
-func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.Command) error {
+func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.Command) (err error) {
 	// Commands are attempted exactly once, so we ack regardless of any errors below.
 	defer cmd.Ack()
+
+	if c.insights.Enabled() {
+		defer func() {
+			eventType := types.InsightsEventCommandExecuted
+			if err != nil {
+				eventType = types.InsightsEventCommandFailed
+			}
+
+			c.insights.Record(types.InsightsEvent{
+				Type:      eventType,
+				Reason:    string(cmd.Action),
+				ChannelID: cmd.SlackChannelID,
+				ActorID:   cmd.UserID,
+				ActorName: cmd.UserRealName,
+			})
+		}()
+	}
 
 	alert := types.NewAlert(types.AlertSeverity(cmd.ParamAsString("severity")))
 

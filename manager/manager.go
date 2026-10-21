@@ -13,6 +13,7 @@ import (
 	gocache_store "github.com/eko/gocache/store/go_cache/v4"
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/insights"
 	coreinternal "github.com/slackmgr/core/internal"
 	"github.com/slackmgr/core/internal/models"
 	slack "github.com/slackmgr/core/manager/internal/slack"
@@ -41,6 +42,7 @@ type Manager struct {
 	cfg             *config.ManagerConfig
 	managerSettings *models.ManagerSettingsWrapper
 	hooks           Hooks
+	insightsSink    types.InsightsSink
 }
 
 // rateLimitGateFactory is a package-private interface satisfied by ChannelLocker implementations
@@ -127,6 +129,19 @@ func (m *Manager) WithSettings(settings *config.ManagerSettings) *Manager {
 	return m
 }
 
+// WithInsightsSink sets the sink for insights events explicitly. If not called, the sink is discovered from
+// the database: if it implements [types.InsightsSinkProvider] and returns a non-nil sink, insights are recorded.
+// Recording can be disabled with ManagerConfig.Insights.Disabled. Passing nil is a no-op.
+//
+// Insights recording never blocks or slows down alert processing; see the insights package for details.
+func (m *Manager) WithInsightsSink(sink types.InsightsSink) *Manager {
+	if sink == nil {
+		return m
+	}
+	m.insightsSink = sink
+	return m
+}
+
 // WithHooks registers optional lifecycle callbacks for startup and shutdown
 // probe support. See [Hooks] for the available hooks and when they fire.
 func (m *Manager) WithHooks(hooks Hooks) *Manager {
@@ -209,6 +224,13 @@ func (m *Manager) Run(ctx context.Context) error {
 		mc.connectMetrics(m.metrics)
 	}
 
+	// Create the insights recorder. The sink is discovered on the raw database, before the cache middleware wraps it.
+	// The recorder runs outside the errgroup below, so it can never fail or block the manager.
+	recorder := m.newInsightsRecorder()
+	recorder.Start() //nolint:contextcheck // The recorder has its own lifecycle, independent of the Run context.
+
+	defer recorder.Shutdown(m.insightsConfig().shutdownFlushTimeout()) //nolint:contextcheck // Flushes with its own hard deadline after Run's context is cancelled.
+
 	// Add the DB cache middleware if not skipped by config.
 	// In multi-instance deployments, validate that the provided cache store is a known distributed implementation
 	// to prevent subtle and hard-to-debug cache consistency issues.
@@ -222,6 +244,7 @@ func (m *Manager) Run(ctx context.Context) error {
 	}
 
 	m.slackClient = slack.New(m.commandQueue, m.cacheStore, m.logger, m.metrics, m.cfg, m.managerSettings, coreinternal.WithRateLimitGate(m.gate))
+	m.slackClient.SetInsightsRecorder(recorder)
 
 	if err := m.slackClient.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect Slack client: %w", err)
@@ -230,6 +253,8 @@ func (m *Manager) Run(ctx context.Context) error {
 	m.gate.SetReadyCheck(m.slackClient.SocketModeQuiet)
 
 	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.cacheStore, m.locker, m.logger, m.metrics, m.webhookHandlers, m.gate, m.cfg, m.managerSettings)
+	m.coordinator.insights = recorder
+	m.coordinator.channelStatsInterval = time.Duration(m.insightsConfig().ChannelStatsIntervalSeconds) * time.Second
 
 	if err := m.coordinator.init(ctx); err != nil {
 		return fmt.Errorf("failed to initialize coordinator: %w", err)
@@ -243,11 +268,11 @@ func (m *Manager) Run(ctx context.Context) error {
 	errg, ctx := errgroup.WithContext(ctx)
 
 	errg.Go(func() error {
-		return queueConsumer(ctx, m.commandQueue, queueTypeCommand, commandCh, models.NewCommandFromQueueItem, m.logger, m.metrics)
+		return queueConsumer(ctx, m.commandQueue, queueTypeCommand, commandCh, models.NewCommandFromQueueItem, m.logger, m.metrics, recorder)
 	})
 
 	errg.Go(func() error {
-		return queueConsumer(ctx, m.alertQueue, queueTypeAlert, alertCh, models.NewAlertFromQueueItem, m.logger, m.metrics)
+		return queueConsumer(ctx, m.alertQueue, queueTypeAlert, alertCh, models.NewAlertFromQueueItem, m.logger, m.metrics, recorder)
 	})
 
 	errg.Go(func() error {
@@ -287,6 +312,62 @@ func (m *Manager) UpdateSettings(settings *config.ManagerSettings) error {
 	m.logger.Infof("Manager settings updated")
 
 	return nil
+}
+
+// insightsConfig returns the insights config, with defaults applied. It never returns nil.
+func (m *Manager) insightsConfig() *managerInsightsConfig {
+	if m.cfg.Insights == nil {
+		return &managerInsightsConfig{config.NewDefaultInsightsConfig()}
+	}
+
+	m.cfg.Insights.SetDefaults()
+
+	return &managerInsightsConfig{m.cfg.Insights}
+}
+
+// newInsightsRecorder creates the insights recorder, or returns nil if insights are disabled or no sink is available.
+func (m *Manager) newInsightsRecorder() *insights.Recorder {
+	cfg := m.insightsConfig()
+
+	if cfg.Disabled {
+		m.logger.Info("Insights recording is disabled by config")
+		return nil
+	}
+
+	sink := m.insightsSink
+
+	if sink == nil {
+		if provider, ok := m.db.(types.InsightsSinkProvider); ok {
+			sink = provider.InsightsSink()
+		}
+	}
+
+	if sink == nil {
+		m.logger.Debug("No insights sink available, insights recording is disabled")
+		return nil
+	}
+
+	m.logger.Info("Insights recording is enabled")
+
+	return insights.NewRecorder(sink, m.logger, m.metrics, cfg.recorderOptions()...)
+}
+
+// managerInsightsConfig adds conversion helpers to config.InsightsConfig.
+type managerInsightsConfig struct {
+	*config.InsightsConfig
+}
+
+func (c *managerInsightsConfig) shutdownFlushTimeout() time.Duration {
+	return time.Duration(c.ShutdownFlushTimeoutMs) * time.Millisecond
+}
+
+func (c *managerInsightsConfig) recorderOptions() []insights.RecorderOption {
+	return []insights.RecorderOption{
+		insights.WithBufferSize(c.BufferSize),
+		insights.WithBatchSize(c.BatchSize),
+		insights.WithFlushInterval(time.Duration(c.FlushIntervalMs) * time.Millisecond),
+		insights.WithWriteTimeout(time.Duration(c.WriteTimeoutMs) * time.Millisecond),
+	}
 }
 
 // stripMajorVersion removes a Go module major-version suffix (/vN where N >= 2) from

@@ -14,6 +14,7 @@ import (
 	"github.com/eko/gocache/lib/v4/store"
 	slack "github.com/slack-go/slack"
 	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/insights"
 	"github.com/slackmgr/core/internal"
 	"github.com/slackmgr/core/internal/models"
 	"github.com/slackmgr/core/manager/internal/slack/controllers"
@@ -24,6 +25,18 @@ import (
 const (
 	// PostIDInvalidChannel represents the post ID for issues with invalid channel ID
 	PostIDInvalidChannel = "INVALID_CHANNEL_ID"
+)
+
+// slackPostsTotalMetric counts Slack post operations for issues, by result.
+const slackPostsTotalMetric = "slack_posts_total"
+
+// Result label values for slackPostsTotalMetric.
+const (
+	slackPostResultCreated   = "created"
+	slackPostResultUpdated   = "updated"
+	slackPostResultDeleted   = "deleted"
+	slackPostResultThrottled = "throttled"
+	slackPostResultFailed    = "failed"
 )
 
 type postUpdateMethod string
@@ -52,6 +65,7 @@ type Client struct {
 	cfg                *config.ManagerConfig
 	managerSettings    *models.ManagerSettingsWrapper
 	slackAPIClientOpts []func(*internal.SlackAPIClient)
+	insights           *insights.Recorder
 
 	// socketHandler is set atomically when RunSocketMode starts.
 	// Uses atomic.Pointer for safe cross-goroutine access.
@@ -59,6 +73,12 @@ type Client struct {
 }
 
 func New(commandHandler FifoQueueProducer, cacheStore store.StoreInterface, logger types.Logger, metrics types.Metrics, cfg *config.ManagerConfig, managerSettings *models.ManagerSettingsWrapper, slackAPIClientOpts ...func(*internal.SlackAPIClient)) *Client {
+	metrics.RegisterCounter(slackPostsTotalMetric, "Total Slack post operations for issues, by result", "result")
+
+	for _, result := range []string{slackPostResultCreated, slackPostResultUpdated, slackPostResultDeleted, slackPostResultThrottled, slackPostResultFailed} {
+		metrics.CounterAdd(slackPostsTotalMetric, 0, result)
+	}
+
 	return &Client{
 		commandQueue:       commandHandler,
 		cacheStore:         cacheStore,
@@ -72,6 +92,12 @@ func New(commandHandler FifoQueueProducer, cacheStore store.StoreInterface, logg
 
 func (c *Client) SetIssueFinder(issueFinder IssueFinder) {
 	c.issueFinder = issueFinder
+}
+
+// SetInsightsRecorder sets the recorder for Slack post insights events. A nil recorder disables recording.
+// It must be called before the client is used.
+func (c *Client) SetInsightsRecorder(recorder *insights.Recorder) {
+	c.insights = recorder
 }
 
 func (c *Client) Connect(ctx context.Context) error {
@@ -237,6 +263,7 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 		// We may temporarily ignore issues with too much activity (to reduce risk of rate limit trouble)
 		if c.throttleIssue(issue, action, openIssueCount) {
 			c.logger.WithFields(issue.LogFields()).Info("Throttle Slack post")
+			c.recordPost(slackPostResultThrottled, types.InsightsEventSlackPostThrottled, string(action), issue)
 			continue
 		}
 
@@ -275,6 +302,7 @@ func (c *Client) UpdateSingleIssueWithThrottling(ctx context.Context, issue *mod
 	// We may temporarily ignore issues with too much activity (to reduce risk of rate limit trouble)
 	if c.throttleIssue(issue, action, issuesInChannel) {
 		c.logger.WithFields(issue.LogFields()).Info("Throttle Slack post")
+		c.recordPost(slackPostResultThrottled, types.InsightsEventSlackPostThrottled, string(action), issue)
 		return nil
 	}
 
@@ -319,6 +347,8 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string,
 	}
 
 	if deleteOrUpdateErr != nil {
+		c.recordPostFailure(issue, deleteOrUpdateErr)
+
 		if deleteOrUpdateErr.Error() != internal.SlackErrChannelNotFound && deleteOrUpdateErr.Error() != internal.SlackErrIsArchived && deleteOrUpdateErr.Error() != internal.SlackErrMessageNotFound && deleteOrUpdateErr.Error() != internal.SlackErrCantDeleteMessage {
 			return fmt.Errorf("failed to delete Slack post for issue %s and message %s in channel %s: %w", issue.CorrelationID, issue.SlackPostID, issue.LastAlert.SlackChannelID, deleteOrUpdateErr)
 		}
@@ -326,6 +356,7 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string,
 		logger.WithField("error", deleteOrUpdateErr.Error()).Info("Failed to delete Slack post for issue")
 	} else {
 		logger.Info("Delete Slack post")
+		c.recordPost(slackPostResultDeleted, types.InsightsEventSlackPostDeleted, "", issue)
 	}
 
 	issue.RegisterSlackPostDeleted()
@@ -439,6 +470,8 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 
 	postID, err := c.api.ChatPostMessage(ctx, issue.LastAlert.SlackChannelID, options...)
 	if err != nil {
+		c.recordPostFailure(issue, err)
+
 		// Channel not found or channel is archived.
 		// Log error and use dummy post ID to avoid further updates on this issue.
 		if err.Error() == internal.SlackErrChannelNotFound || err.Error() == internal.SlackErrIsArchived {
@@ -473,6 +506,7 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 	issue.RegisterSlackPostCreatedOrUpdated(postID, action)
 
 	logger.Info("Create Slack post")
+	c.recordPost(slackPostResultCreated, types.InsightsEventSlackPostCreated, string(action), issue)
 
 	return nil
 }
@@ -484,6 +518,8 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, reason string,
 
 	postID, err := c.api.ChatUpdateMessage(ctx, issue.LastAlert.SlackChannelID, options...)
 	if err != nil {
+		c.recordPostFailure(issue, err)
+
 		logger = logger.WithField("reason", err.Error())
 
 		// Channel not found or channel is archived.
@@ -528,6 +564,7 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, reason string,
 	issue.RegisterSlackPostCreatedOrUpdated(postID, action)
 
 	logger.Info("Update Slack post")
+	c.recordPost(slackPostResultUpdated, types.InsightsEventSlackPostUpdated, string(action), issue)
 
 	return nil
 }
@@ -936,4 +973,36 @@ func (c *Client) throttleIssue(issue *models.Issue, action models.SlackAction, i
 
 	// Throttle if the time since the last Slack post is smaller than the calculated limit
 	return timeSinceLastPost < limit
+}
+
+// recordPost counts a Slack post operation, and records an insights event for it if insights are enabled.
+func (c *Client) recordPost(result string, eventType types.InsightsEventType, reason string, issue *models.Issue) {
+	c.metrics.CounterInc(slackPostsTotalMetric, result)
+
+	if !c.insights.Enabled() || issue == nil || issue.LastAlert == nil {
+		return
+	}
+
+	c.insights.Record(issue.InsightsEvent(eventType, reason))
+}
+
+// recordPostFailure records a failed Slack post operation, classifying the Slack error.
+func (c *Client) recordPostFailure(issue *models.Issue, err error) {
+	c.recordPost(slackPostResultFailed, types.InsightsEventSlackPostFailed, postFailureReason(err), issue)
+}
+
+// postFailureReason classifies a Slack API error as one of the types.InsightsReason* values for failed posts.
+func postFailureReason(err error) string {
+	switch err.Error() {
+	case internal.SlackErrChannelNotFound, internal.SlackErrIsArchived:
+		return types.InsightsReasonChannelUnavailable
+	case internal.SlackErrInvalidBlocks:
+		return types.InsightsReasonInvalidBlocks
+	case internal.SlackErrNotInChannel:
+		return types.InsightsReasonNotInChannel
+	case internal.SlackErrMessageNotFound, internal.SlackErrCantUpdateMessage, internal.SlackErrCantDeleteMessage:
+		return types.InsightsReasonMessageNotFound
+	default:
+		return types.InsightsReasonAPIError
+	}
 }

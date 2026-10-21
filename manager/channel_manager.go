@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/insights"
 	"github.com/slackmgr/core/internal"
 	"github.com/slackmgr/core/internal/models"
 	"github.com/slackmgr/types"
@@ -84,6 +85,22 @@ type channelManager struct {
 	commandCh       chan *models.Command
 	keepAliveCh     chan struct{}
 	cmdFuncs        map[models.CommandAction]cmdFunc
+
+	// insights records insights events. A nil recorder is valid and records nothing.
+	insights *insights.Recorder
+
+	// channelStatsInterval is the minimum interval between channel stats events.
+	channelStatsInterval time.Duration
+
+	// lastChannelStats is when the last channel stats event was recorded, and lastChannelStatsOpen its open issue count.
+	lastChannelStats     time.Time
+	lastChannelStatsOpen int
+}
+
+// alertOutcome is the insights classification of a successfully processed alert.
+type alertOutcome struct {
+	eventType types.InsightsEventType
+	reason    string
 }
 
 func newChannelManager(channelID string, channelName string, slackClient SlackClient, db types.DB, locker ChannelLocker, logger types.Logger, metrics types.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
@@ -228,6 +245,7 @@ func (c *channelManager) run(ctx context.Context) {
 			if err := c.waitForGate(ctx); err != nil {
 				alert.Nack()
 				c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "gate_timeout")
+				c.recordAlert(alert, types.InsightsEventAlertRetried, types.InsightsReasonGateTimeout)
 				c.metrics.Observe(queueMessageProcessingDuration, time.Since(msgStart).Seconds(), "alert")
 				return
 			}
@@ -410,6 +428,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	if err != nil {
 		alert.Nack()
 		c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "lock_timeout")
+		c.recordAlert(alert, types.InsightsEventAlertRetried, types.InsightsReasonLockTimeout)
 		return fmt.Errorf("failed to obtain lock for channel %s after 30 seconds: %w", c.channelID, err)
 	}
 
@@ -429,6 +448,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		// Ack the alert to remove it from the queue, and log the error for debugging.
 		alert.Ack()
 		c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "discarded")
+		c.recordAlert(alert, types.InsightsEventAlertDropped, types.InsightsReasonInvalid)
 		return fmt.Errorf("alert is invalid: %w", err)
 	}
 
@@ -439,6 +459,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		c.logger.WithFields(alert.LogFields()).Error("Ignoring alert with webhook payloads: no encryption key is configured")
 		alert.Ack()
 		c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "discarded")
+		c.recordAlert(alert, types.InsightsEventAlertDropped, types.InsightsReasonMissingEncryptionKey)
 		return nil
 	}
 
@@ -448,6 +469,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		// Transient: Slack API call failed; nack so the alert is retried.
 		alert.Nack()
 		c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "slack_error")
+		c.recordAlert(alert, types.InsightsEventAlertRetried, types.InsightsReasonSlackError)
 		return fmt.Errorf("failed to clean alert escalations: %w", err)
 	}
 
@@ -457,6 +479,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	if err != nil {
 		alert.Nack()
 		c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "db_error")
+		c.recordAlert(alert, types.InsightsEventAlertRetried, types.InsightsReasonDBError)
 		return fmt.Errorf("failed to re-verify move mapping: %w", err)
 	}
 
@@ -466,12 +489,14 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		if err := json.Unmarshal(moveMappingBody, moveMapping); err != nil {
 			alert.Nack()
 			c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "db_error")
+			c.recordAlert(alert, types.InsightsEventAlertRetried, types.InsightsReasonDBError)
 			return fmt.Errorf("failed to unmarshal move mapping during re-check: %w", err)
 		}
 
 		if moveMapping.TargetChannelID != c.channelID {
 			alert.Nack()
 			c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "move_race")
+			c.recordAlert(alert, types.InsightsEventAlertRetried, types.InsightsReasonMoveRace)
 			c.logger.WithFields(alert.LogFields()).
 				WithField("correct_channel_id", moveMapping.TargetChannelID).
 				Info("Alert was misrouted due to concurrent escalation; re-queuing for correct channel")
@@ -484,8 +509,11 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		// Transient: database call failed; nack so the alert is retried.
 		alert.Nack()
 		c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "db_error")
+		c.recordAlert(alert, types.InsightsEventAlertRetried, types.InsightsReasonDBError)
 		return fmt.Errorf("failed to find open issue by correlation ID: %w", err)
 	}
+
+	var outcome alertOutcome
 
 	if issueBody != nil {
 		issue := &models.Issue{}
@@ -494,6 +522,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 			// Non-retryable: the issue record in the DB is corrupt; retrying hits the same data.
 			alert.Ack()
 			c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "discarded")
+			c.recordAlert(alert, types.InsightsEventAlertDropped, types.InsightsReasonCorruptIssue)
 			return fmt.Errorf("failed to unmarshal issue body: %w", err)
 		}
 
@@ -501,20 +530,23 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 			// Non-retryable: corrupt DB state that retrying cannot repair.
 			alert.Ack()
 			c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "discarded")
+			c.recordAlert(alert, types.InsightsEventAlertDropped, types.InsightsReasonCorruptIssue)
 			return errors.New("issue has nil LastAlert after unmarshal")
 		}
 
-		if err := c.addAlertToExistingIssue(ctx, issue, alert); err != nil {
+		if outcome, err = c.addAlertToExistingIssue(ctx, issue, alert); err != nil {
 			// Transient: database or Slack API call failed; nack so the alert is retried.
 			alert.Nack()
 			c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "db_error")
+			c.recordAlert(alert, types.InsightsEventAlertRetried, types.InsightsReasonDBError)
 			return fmt.Errorf("failed to add alert to existing issue: %w", err)
 		}
 	} else {
-		if err := c.createNewIssue(ctx, alert, logger); err != nil {
+		if outcome, err = c.createNewIssue(ctx, alert, logger); err != nil {
 			// Transient: database or Slack API call failed; nack so the alert is retried.
 			alert.Nack()
 			c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "db_error")
+			c.recordAlert(alert, types.InsightsEventAlertRetried, types.InsightsReasonDBError)
 			return fmt.Errorf("failed to create new issue: %w", err)
 		}
 	}
@@ -523,12 +555,16 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		// Transient: database call failed; nack so the alert is retried.
 		alert.Nack()
 		c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "db_error")
+		c.recordAlert(alert, types.InsightsEventAlertRetried, types.InsightsReasonDBError)
 		return fmt.Errorf("failed to save alert to database: %w", err)
 	}
 
 	// Ack the alert to remove it from the queue, since it has been successfully processed.
 	alert.Ack()
 	c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "success")
+
+	// The outcome is recorded after the ack, so that retried attempts are not counted as processed.
+	c.recordAlert(alert, outcome.eventType, outcome.reason)
 
 	return nil
 }
@@ -571,7 +607,8 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 	defer c.releaseLock(lock)
 
 	// Commands are attempted exactly once. Increment metric and ack after processing regardless of outcome.
-	cmdErr := c.execCmd(ctx, cmd)
+	issue, skipped, cmdErr := c.execCmd(ctx, cmd)
+	c.recordCommand(cmd, issue, skipped, cmdErr)
 
 	c.metrics.CounterInc(commandsProcessedTotalMetric, string(cmd.Action))
 
@@ -586,17 +623,19 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 	return cmdErr
 }
 
-func (c *channelManager) execCmd(ctx context.Context, cmd *models.Command) error {
+// execCmd executes a command. It returns the issue the command applied to (nil if none), and whether the
+// command was skipped because no issue was found.
+func (c *channelManager) execCmd(ctx context.Context, cmd *models.Command) (*models.Issue, bool, error) {
 	logger := c.logger.WithFields(cmd.LogFields())
 
 	issue, err := c.findIssueBySlackPost(ctx, cmd.SlackPostID, cmd.IncludeArchivedIssues)
 	if err != nil {
-		return fmt.Errorf("failed to find issue by Slack post ID: %w", err)
+		return nil, false, fmt.Errorf("failed to find issue by Slack post ID: %w", err)
 	}
 
 	if issue == nil && !cmd.ExecuteWhenNoIssueFound {
 		logger.Info("No issue found for Slack message command")
-		return nil
+		return nil, true, nil
 	}
 
 	if issue != nil {
@@ -605,21 +644,25 @@ func (c *channelManager) execCmd(ctx context.Context, cmd *models.Command) error
 
 	cmdFunc, ok := c.cmdFuncs[cmd.Action]
 	if !ok {
-		return fmt.Errorf("missing handler func for cmd %v", cmd.Action)
+		return issue, false, fmt.Errorf("missing handler func for cmd %v", cmd.Action)
 	}
+
+	wasResolved := issue != nil && issue.IsResolved()
 
 	dbUpdateNeeded, err := cmdFunc(ctx, issue, cmd, logger)
 	if err != nil {
-		return fmt.Errorf("failed to execute command: %w", err)
+		return issue, false, fmt.Errorf("failed to execute command: %w", err)
 	}
 
 	if issue != nil && dbUpdateNeeded {
 		if err := c.db.SaveIssue(ctx, issue); err != nil {
-			return fmt.Errorf("failed to save issue to database: %w", err)
+			return issue, false, fmt.Errorf("failed to save issue to database: %w", err)
 		}
+
+		c.recordResolveTransition(issue, wasResolved, types.InsightsReasonUser, cmd)
 	}
 
-	return nil
+	return issue, false, nil
 }
 
 // processActiveIssues processes all active issues. It handles escalations, archiving and Slack updates (where needed).
@@ -683,6 +726,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 
 	// Stop here if there are no open issues in the channel.
 	if processingState.OpenIssues == 0 {
+		c.recordChannelStats(now, nil, "")
 		return 0, nil
 	}
 
@@ -710,6 +754,9 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 	openIssues := 0
 	archivedCount := 0
 
+	// Insights events for archived and escalated issues are recorded after the issues are saved.
+	var pendingEvents []types.InsightsEvent
+
 	currentChannelName := c.slackClient.GetChannelName(ctx, c.channelID)
 
 	for _, issue := range issues {
@@ -718,6 +765,10 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 				c.logger.WithFields(issue.LogFields()).Errorf("Failed to archive issue: %s", err)
 			} else {
 				archivedCount++
+
+				if c.insights.Enabled() {
+					pendingEvents = append(pendingEvents, issue.ArchivedInsightsEvent(now))
+				}
 			}
 			continue
 		}
@@ -727,7 +778,14 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		// The channel name may have changed since the issue was created. Update it if needed.
 		issue.LastAlert.SlackChannelName = currentChannelName
 
-		escalationResults = append(escalationResults, issue.ApplyEscalationRules())
+		result := issue.ApplyEscalationRules()
+		escalationResults = append(escalationResults, result)
+
+		if result.Changed && c.insights.Enabled() {
+			e := issue.InsightsEvent(types.InsightsEventIssueEscalated, "")
+			e.PrevSeverity = result.PrevSeverity
+			pendingEvents = append(pendingEvents, e)
+		}
 	}
 
 	if archivedCount > 0 {
@@ -773,6 +831,12 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 	if err := c.saveIssuesToDB(ctx, issuesToUpdate); err != nil {
 		return 0, fmt.Errorf("failed to save issues to database: %w", err)
 	}
+
+	for _, e := range pendingEvents {
+		c.insights.Record(e)
+	}
+
+	c.recordChannelStats(now, issuesToUpdate, currentChannelName)
 
 	elapsed := time.Since(started)
 	c.logger.WithField("count", len(issuesToUpdate)).WithField("moved_count", len(movedIssues)).WithField("elapsed", elapsed).Debug("Issue processing completed")
@@ -831,13 +895,16 @@ func (c *channelManager) moveEscalatedIssue(ctx context.Context, escalationResul
 }
 
 // addAlertToExistingIssue adds a new alert to an existing issue, updates the corresponding Slack post, and finally updates the issue in the database.
-func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *models.Issue, alert *models.Alert) error {
-	updated := issue.AddAlert(alert, c.logger)
+func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *models.Issue, alert *models.Alert) (alertOutcome, error) {
+	prevSeverity := issue.LastAlert.Severity
+	wasResolved := issue.IsResolved()
+
+	updated, ignoreReason := issue.AddAlertWithReason(alert, c.logger)
 
 	// No point in updating db or Slack if the alert was ignored by the existing issue
 	if !updated {
 		c.metrics.CounterInc(alertsIgnoredTotalMetric, c.channelName)
-		return nil
+		return alertOutcome{eventType: types.InsightsEventAlertIgnored, reason: ignoreReason}, nil
 	}
 
 	openIssues := 0
@@ -856,22 +923,29 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 	}
 
 	if err := c.db.SaveIssue(ctx, issue); err != nil {
-		return fmt.Errorf("failed to save issue to database: %w", err)
+		return alertOutcome{}, fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
 	c.metrics.CounterInc(alertsGroupedTotalMetric, c.channelName)
 
-	return nil
+	if c.insights.Enabled() {
+		e := issue.InsightsEvent(types.InsightsEventIssueUpdated, "")
+		e.PrevSeverity = prevSeverity
+		c.insights.Record(e)
+		c.recordResolveTransition(issue, wasResolved, types.InsightsReasonAlert, nil)
+	}
+
+	return alertOutcome{eventType: types.InsightsEventAlertGrouped}, nil
 }
 
 // createNewIssue creates a new issue with the specified alert, creates a new Slack post, and finally stores the issue in the database.
 // Some alerts may be ignored, for various reasons.
-func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert, logger types.Logger) error {
+func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert, logger types.Logger) (alertOutcome, error) {
 	// Do not create a new issue for an alert that is already resolved
 	if alert.IssueFollowUpEnabled && alert.Severity == types.AlertResolved {
 		logger.Info("Resolved alert ignored for new issue")
 		c.metrics.CounterInc(alertsResolvedWithoutIssueTotalMetric, c.channelName)
-		return nil
+		return alertOutcome{eventType: types.InsightsEventAlertIgnored, reason: types.InsightsReasonResolvedWithoutIssue}, nil
 	}
 
 	issue := models.NewIssue(alert, c.logger)
@@ -886,13 +960,24 @@ func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert
 	// Save the issue to the database, regardless of any Slack errors.
 	// This ensures that the issue is available in the database, even if the Slack update fails.
 	if err := c.db.SaveIssue(ctx, issue); err != nil {
-		return fmt.Errorf("failed to save issue to database: %w", err)
+		return alertOutcome{}, fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
 	logger.Info("Issue created")
 	c.metrics.CounterInc(issuesCreatedTotalMetric, c.channelName)
 
-	return nil
+	if c.insights.Enabled() {
+		e := issue.InsightsEvent(types.InsightsEventIssueCreated, "")
+		e.Time = issue.Created
+
+		if alert.IssueFollowUpEnabled && alert.NotificationDelaySeconds > 0 {
+			e.Values = map[string]float64{types.InsightsValueNotificationDelaySeconds: float64(alert.NotificationDelaySeconds)}
+		}
+
+		c.insights.Record(e)
+	}
+
+	return alertOutcome{eventType: types.InsightsEventAlertNewIssue}, nil
 }
 
 func (c *channelManager) saveIssuesToDB(ctx context.Context, issues []*models.Issue) error {
@@ -1087,6 +1172,20 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 
 	logger.Info("Issue moved to target channel")
 
+	if c.insights.Enabled() {
+		e := issue.InsightsEvent(types.InsightsEventIssueMoved, types.InsightsReasonUser)
+		e.ChannelID = sourceChannel
+		e.RelatedChannelID = targetChannel
+
+		if reason == models.MoveIssueReasonEscalation {
+			e.Reason = types.InsightsReasonEscalation
+		} else {
+			e.ActorName = username
+		}
+
+		c.insights.Record(e)
+	}
+
 	return nil
 }
 
@@ -1141,7 +1240,17 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 
 	// We do this in a separate goroutine to avoid blocking the command processing.
 	// The webhook may fail, in which case we log the error and continue.
-	go postWebhook(ctx, handler, webhook.URL, data, logger)
+	var event *types.InsightsEvent
+
+	if c.insights.Enabled() {
+		e := issue.InsightsEvent(types.InsightsEventWebhookSucceeded, "")
+		e.Detail = webhook.ID
+		e.ActorID = cmd.UserID
+		e.ActorName = cmd.UserRealName
+		event = &e
+	}
+
+	go postWebhook(ctx, handler, webhook.URL, data, logger, c.insights, event)
 
 	// We return false, indicating that the issue does not need to be saved to the database (since we did not modify it).
 	return false, nil
@@ -1191,8 +1300,19 @@ func (c *channelManager) releaseLock(lock ChannelLock) {
 	}
 }
 
-func postWebhook(ctx context.Context, handler WebhookHandler, target string, data *types.WebhookCallback, logger types.Logger) {
-	if err := handler.HandleWebhook(ctx, target, data, logger); err != nil {
+// postWebhook calls the webhook handler. If event is non-nil, it is recorded as a webhook succeeded or failed event.
+func postWebhook(ctx context.Context, handler WebhookHandler, target string, data *types.WebhookCallback, logger types.Logger, recorder *insights.Recorder, event *types.InsightsEvent) {
+	err := handler.HandleWebhook(ctx, target, data, logger)
+	if err != nil {
 		logger.Errorf("Failed to handle webhook: %s", err)
+	}
+
+	if event != nil {
+		e := *event
+		if err != nil {
+			e.Type = types.InsightsEventWebhookFailed
+		}
+
+		recorder.Record(e)
 	}
 }
