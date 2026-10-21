@@ -3,6 +3,8 @@ package restapi
 import (
 	"errors"
 	"fmt"
+
+	"github.com/slackmgr/types"
 )
 
 const (
@@ -83,16 +85,55 @@ func (s *Server) registerAlertIntakeMetrics() {
 	s.metrics.CounterAdd(alertsFilteredTotalMetric, 0, filterReasonIgnoreTerm)
 }
 
-// countRejected records that count alerts were rejected for the given reason.
-func (s *Server) countRejected(reason string, count int) {
-	if count <= 0 {
+// rejectAlerts records that the given alerts were rejected for the given reason, as metrics and insights events.
+// With no alerts (e.g. an unparseable request body), one rejection without alert details is recorded.
+func (s *Server) rejectAlerts(reason string, alerts ...*types.Alert) {
+	if len(alerts) == 0 {
+		s.metrics.CounterInc(alertsRejectedTotalMetric, reason)
+
+		if s.insights.Enabled() {
+			s.insights.Record(types.InsightsEvent{Type: types.InsightsEventAlertRejected, Reason: reason})
+		}
+
 		return
 	}
 
-	s.metrics.CounterAdd(alertsRejectedTotalMetric, float64(count), reason)
+	s.metrics.CounterAdd(alertsRejectedTotalMetric, float64(len(alerts)), reason)
+
+	if s.insights.Enabled() {
+		for _, alert := range alerts {
+			s.insights.Record(alertInsightsEvent(types.InsightsEventAlertRejected, reason, alert))
+		}
+	}
 }
 
-// countFiltered records that an alert was filtered for the given reason.
-func (s *Server) countFiltered(reason string) {
+// filterAlert records that an alert was filtered for the given reason, as a metric and an insights event.
+func (s *Server) filterAlert(reason string, alert *types.Alert) {
 	s.metrics.CounterInc(alertsFilteredTotalMetric, reason)
+
+	if s.insights.Enabled() {
+		s.insights.Record(alertInsightsEvent(types.InsightsEventAlertFiltered, reason, alert))
+	}
+}
+
+// recordQueued records an insights event for an alert that was put on the alert queue.
+func (s *Server) recordQueued(alert *types.Alert) {
+	if s.insights.Enabled() {
+		s.insights.Record(alertInsightsEvent(types.InsightsEventAlertQueued, "", alert))
+	}
+}
+
+// alertInsightsEvent returns an insights event of the given type and reason describing the alert.
+func alertInsightsEvent(eventType types.InsightsEventType, reason string, alert *types.Alert) types.InsightsEvent {
+	return types.InsightsEvent{
+		Type:          eventType,
+		Reason:        reason,
+		ChannelID:     alert.SlackChannelID,
+		CorrelationID: alert.CorrelationID,
+		Severity:      alert.Severity,
+		RouteKey:      alert.RouteKey,
+		AlertType:     alert.Type,
+		Host:          alert.Host,
+		Author:        alert.Author,
+	}
 }

@@ -34,7 +34,7 @@ func (s *Server) handleAlerts(c *gin.Context) {
 	// ContentLength == -1 means chunked encoding (unknown length), which is valid.
 	if c.Request.ContentLength == 0 {
 		err := errors.New("missing POST body")
-		s.countRejected(rejectReasonInvalidBody, 1)
+		s.rejectAlerts(rejectReasonInvalidBody)
 		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
@@ -42,7 +42,7 @@ func (s *Server) handleAlerts(c *gin.Context) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		err = fmt.Errorf("failed to read POST body: %w", err)
-		s.countRejected(rejectReasonInvalidBody, 1)
+		s.rejectAlerts(rejectReasonInvalidBody)
 		s.writeErrorResponse(c, err, http.StatusInternalServerError, nil)
 		return
 	}
@@ -52,7 +52,7 @@ func (s *Server) handleAlerts(c *gin.Context) {
 	alerts, err := parseAlertInput(body)
 	if err != nil {
 		err = fmt.Errorf("failed to parse POST body: %w", err)
-		s.countRejected(rejectReasonInvalidBody, 1)
+		s.rejectAlerts(rejectReasonInvalidBody)
 		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
@@ -68,16 +68,28 @@ func (s *Server) handleAlerts(c *gin.Context) {
 func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started time.Time) {
 	if len(alerts) == 0 {
 		err := errors.New("request contains no alerts")
-		s.countRejected(rejectReasonEmptyRequest, 1)
+		s.rejectAlerts(rejectReasonEmptyRequest)
 		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
 
-	// pending is the number of alerts in the request that are neither filtered nor queued yet.
-	pending := len(alerts)
+	// done holds the alerts in the request that have been filtered or queued.
+	done := make(map[*types.Alert]struct{}, len(alerts))
 
+	// reject rejects all alerts in the request that are not done yet, and writes the error response.
 	reject := func(reason string, err error, statusCode int, alert *types.Alert) {
-		s.countRejected(reason, pending)
+		pending := make([]*types.Alert, 0, len(alerts)-len(done))
+
+		for _, a := range alerts {
+			if _, ok := done[a]; !ok {
+				pending = append(pending, a)
+			}
+		}
+
+		if len(pending) > 0 {
+			s.rejectAlerts(reason, pending...)
+		}
+
 		s.writeErrorResponse(c, err, statusCode, alert)
 	}
 
@@ -102,8 +114,8 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 
 		if ignore {
 			s.logAlerts("Alert ignored", ignoreReason, started, alert)
-			s.countFiltered(filterReasonIgnoreTerm)
-			pending--
+			s.filterAlert(filterReasonIgnoreTerm, alert)
+			done[alert] = struct{}{}
 			continue
 		}
 
@@ -196,7 +208,8 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 				return
 			}
 
-			pending--
+			done[alert] = struct{}{}
+			s.recordQueued(alert)
 
 			s.logAlerts("Alert accepted", "", started, alert)
 		}
@@ -232,7 +245,7 @@ func (s *Server) processQueuedAlert(ctx context.Context, alert *types.Alert) err
 
 	if ignore {
 		s.logAlerts("Alert ignored", ignoreReason, started, alert)
-		s.countFiltered(filterReasonIgnoreTerm)
+		s.filterAlert(filterReasonIgnoreTerm, alert)
 		return nil
 	}
 
@@ -267,6 +280,7 @@ func (s *Server) processQueuedAlert(ctx context.Context, alert *types.Alert) err
 		return newRetryableProcessingError("failed to queue alert: %w", err)
 	}
 
+	s.recordQueued(alert)
 	s.logAlerts("Alert accepted", "", started, alert)
 
 	return nil

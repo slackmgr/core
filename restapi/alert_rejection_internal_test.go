@@ -10,8 +10,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/slackmgr/core/insights"
 	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -259,4 +261,87 @@ func TestServer_RunRawAlertConsumer_RejectionMetrics(t *testing.T) {
 
 	assert.InDelta(t, 1.0, metrics.counter(alertsRejectedTotalMetric, rejectReasonInvalidBody), 0)
 	assert.InDelta(t, 1.0, metrics.counter(alertsRejectedTotalMetric, rejectReasonChannelArchived), 0)
+}
+
+// memorySink is a types.InsightsSink that stores events in memory.
+type memorySink struct {
+	mu     sync.Mutex
+	events []types.InsightsEvent
+}
+
+func (s *memorySink) WriteInsightsEvents(_ context.Context, events []types.InsightsEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.events = append(s.events, events...)
+
+	return nil
+}
+
+func (s *memorySink) byType() map[types.InsightsEventType][]types.InsightsEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result := map[types.InsightsEventType][]types.InsightsEvent{}
+	for _, e := range s.events {
+		result[e.Type] = append(result[e.Type], e)
+	}
+
+	return result
+}
+
+func TestServer_HandleAlerts_InsightsEvents(t *testing.T) {
+	t.Parallel()
+
+	server, queue, channelInfo := newTestServer(t)
+	sink := &memorySink{}
+	server.insights = insights.NewRecorder(sink, nil, nil)
+	server.insights.Start()
+
+	channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+	channelInfo.On("MapChannelNameToIDIfNeeded", "C456").Return("C456")
+	channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{ChannelExists: true, ManagerIsInChannel: true}, nil)
+	channelInfo.On("GetChannelInfo", mock.Anything, "C456").Return(&ChannelInfo{ChannelExists: false}, nil)
+	queue.On("Send", mock.Anything, "C123", mock.Anything, mock.Anything).Return(nil)
+
+	// Accepted request: one queued, one filtered.
+	body, err := json.Marshal(map[string]any{"alerts": []types.Alert{
+		{SlackChannelID: "C123", Header: "a", Text: "noise", IgnoreIfTextContains: []string{"noise"}, RouteKey: "rk"},
+		{SlackChannelID: "C123", Header: "b", CorrelationID: "corr-b", RouteKey: "rk"},
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusAccepted, postAlerts(t, server, body))
+
+	// Rejected request (unknown channel): both alerts are rejected.
+	body, err = json.Marshal(map[string]any{"alerts": []types.Alert{
+		{SlackChannelID: "C456", Header: "c"},
+		{SlackChannelID: "C456", Header: "d"},
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, postAlerts(t, server, body))
+
+	// Unparseable body: one rejection without alert details.
+	assert.Equal(t, http.StatusBadRequest, postAlerts(t, server, []byte("{")))
+
+	server.insights.Shutdown(time.Second)
+
+	events := sink.byType()
+
+	require.Len(t, events[types.InsightsEventAlertQueued], 1)
+	assert.Equal(t, "corr-b", events[types.InsightsEventAlertQueued][0].CorrelationID)
+	assert.Equal(t, "C123", events[types.InsightsEventAlertQueued][0].ChannelID)
+	assert.Equal(t, "rk", events[types.InsightsEventAlertQueued][0].RouteKey)
+
+	require.Len(t, events[types.InsightsEventAlertFiltered], 1)
+	assert.Equal(t, filterReasonIgnoreTerm, events[types.InsightsEventAlertFiltered][0].Reason)
+
+	rejected := events[types.InsightsEventAlertRejected]
+	require.Len(t, rejected, 3)
+
+	reasons := map[string]int{}
+	for _, e := range rejected {
+		reasons[e.Reason]++
+	}
+
+	assert.Equal(t, map[string]int{rejectReasonChannelNotFound: 2, rejectReasonInvalidBody: 1}, reasons)
 }

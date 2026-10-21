@@ -23,6 +23,7 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/slack-go/slack"
 	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/insights"
 	"github.com/slackmgr/core/internal"
 	"github.com/slackmgr/types"
 	"golang.org/x/sync/errgroup"
@@ -85,6 +86,8 @@ type Server struct {
 	cfg                 *config.APIConfig
 	defaultPretty       bool
 	hooks               Hooks
+	insightsSink        types.InsightsSink
+	insights            *insights.Recorder
 }
 
 // New creates a [Server] with the three required dependencies.
@@ -154,6 +157,19 @@ func (s *Server) WithSettings(settings *config.APISettings) *Server {
 	return s
 }
 
+// WithInsightsSink sets a sink for alert intake insights events (queued, filtered and rejected alerts).
+// If not called, the server records no insights events. Recording can be disabled with APIConfig.Insights.Disabled.
+// Passing nil is a no-op.
+//
+// Insights recording never blocks or slows down request handling; see the insights package for details.
+func (s *Server) WithInsightsSink(sink types.InsightsSink) *Server {
+	if sink == nil {
+		return s
+	}
+	s.insightsSink = sink
+	return s
+}
+
 // WithHooks registers optional lifecycle callbacks for startup, readiness, and
 // shutdown probe support. See [Hooks] for the available hooks and when
 // they fire.
@@ -198,6 +214,25 @@ func (s *Server) Run(ctx context.Context) error {
 	// Wrap the metrics implementation with the configured prefix so all internal metric
 	// names are automatically namespaced (e.g. "slackmgr_http_server_request_duration_seconds").
 	s.metrics = internal.NewPrefixedMetrics(s.metrics, s.cfg.MetricsPrefix)
+
+	// The insights recorder has its own lifecycle, so it can never fail or block the server.
+	insightsCfg := s.cfg.Insights
+	if insightsCfg == nil {
+		insightsCfg = config.NewDefaultInsightsConfig()
+	}
+
+	if !insightsCfg.Disabled {
+		s.insights = insights.NewRecorder(s.insightsSink, s.logger, s.metrics,
+			insights.WithBufferSize(insightsCfg.BufferSize),
+			insights.WithBatchSize(insightsCfg.BatchSize),
+			insights.WithFlushInterval(time.Duration(insightsCfg.FlushIntervalMs)*time.Millisecond),
+			insights.WithWriteTimeout(time.Duration(insightsCfg.WriteTimeoutMs)*time.Millisecond),
+		)
+	}
+
+	s.insights.Start() //nolint:contextcheck // The recorder has its own lifecycle, independent of the Run context.
+
+	defer s.insights.Shutdown(time.Duration(insightsCfg.ShutdownFlushTimeoutMs) * time.Millisecond) //nolint:contextcheck // Flushes with its own hard deadline.
 
 	// Initialize Slack API client if not already set
 	if s.slackClient == nil {
@@ -470,7 +505,7 @@ func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueCons
 				// If the alert is invalid, we *ack* the message to avoid re-processing it.
 				if err := json.Unmarshal([]byte(item.Body), &alert); err != nil {
 					logger.Errorf("Failed to json unmarshal queued alert: %s", err)
-					s.countRejected(rejectReasonInvalidBody, 1)
+					s.rejectAlerts(rejectReasonInvalidBody)
 
 					if item.Ack != nil {
 						item.Ack()
@@ -496,7 +531,7 @@ func (s *Server) runRawAlertConsumer(ctx context.Context, consumer FifoQueueCons
 						continue
 					}
 
-					s.countRejected(rejectReasonOf(err, rejectReasonValidation), 1)
+					s.rejectAlerts(rejectReasonOf(err, rejectReasonValidation), alert)
 				}
 
 				// At this point, the alert has been processed successfully OR it failed with a non-retryable error.

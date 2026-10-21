@@ -24,7 +24,7 @@ func (s *Server) handlePrometheusWebhook(c *gin.Context) {
 	// ContentLength == -1 means chunked encoding (unknown length), which is valid.
 	if c.Request.ContentLength == 0 {
 		err := errors.New("missing POST body")
-		s.countRejected(rejectReasonInvalidBody, 1)
+		s.rejectAlerts(rejectReasonInvalidBody)
 		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
@@ -32,7 +32,7 @@ func (s *Server) handlePrometheusWebhook(c *gin.Context) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		err = fmt.Errorf("failed to read POST body: %w", err)
-		s.countRejected(rejectReasonInvalidBody, 1)
+		s.rejectAlerts(rejectReasonInvalidBody)
 		s.writeErrorResponse(c, err, http.StatusInternalServerError, nil)
 		return
 	}
@@ -43,14 +43,14 @@ func (s *Server) handlePrometheusWebhook(c *gin.Context) {
 
 	if err := json.Unmarshal(body, &webhook); err != nil {
 		err = fmt.Errorf("failed to decode POST body: %w", err)
-		s.countRejected(rejectReasonInvalidBody, 1)
+		s.rejectAlerts(rejectReasonInvalidBody)
 		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
 
 	if len(webhook.Alerts) == 0 {
 		err = errors.New("prometheus alert list is empty")
-		s.countRejected(rejectReasonEmptyRequest, 1)
+		s.rejectAlerts(rejectReasonEmptyRequest)
 		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
 		return
 	}
