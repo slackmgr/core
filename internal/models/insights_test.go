@@ -80,7 +80,14 @@ func TestIssue_UnresolveAndInvestigateTracking(t *testing.T) {
 	issue.RegisterUnresolveRequest()
 	assert.Equal(t, 0, issue.ReopenCount, "unresolving an unresolved issue is not a reopen")
 
+	now := time.Now()
+	restore := setTestTime(now)
+	defer restore()
+
 	issue.RegisterResolveRequest("Jane")
+
+	// Resolution takes effect after the resolve time.
+	setTestTime(now.Add(time.Second))
 	issue.RegisterUnresolveRequest()
 	assert.Equal(t, 1, issue.ReopenCount)
 
@@ -186,4 +193,15 @@ func TestIssue_ArchivedInsightsEvent(t *testing.T) {
 	assert.NotContains(t, e.Values, types.InsightsValueTimeToResolveSeconds)
 	assert.NotContains(t, e.Values, types.InsightsValueTimeToFirstInvestigationSeconds)
 	assert.InDelta(t, 0, e.Values[types.InsightsValueNotified], 0)
+}
+
+func TestIssue_ResolveTakesEffectImmediately(t *testing.T) {
+	restore := setTestTime(time.Now())
+	defer restore()
+
+	issue := NewIssue(createTestAlert(), &mockLogger{})
+	require.False(t, issue.IsResolved())
+
+	issue.RegisterResolveRequest("Jane")
+	assert.True(t, issue.IsResolved(), "resolved at the resolve time, without waiting for the clock to advance")
 }

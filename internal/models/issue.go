@@ -511,9 +511,10 @@ func (issue *Issue) IsResolved() bool {
 	return issue.IsResolvedAt(nowFunc())
 }
 
-// IsResolvedAt returns true if the issue is resolved at the given time.
+// IsResolvedAt returns true if the issue is resolved at the given time. An issue with follow-up is resolved
+// from its resolve time (inclusive), so an explicit resolve takes effect immediately.
 func (issue *Issue) IsResolvedAt(t time.Time) bool {
-	return issue.LastAlert.Severity == types.AlertResolved || (issue.LastAlert.IssueFollowUpEnabled && t.After(issue.ResolveTime))
+	return issue.LastAlert.Severity == types.AlertResolved || (issue.LastAlert.IssueFollowUpEnabled && !t.Before(issue.ResolveTime))
 }
 
 func (issue *Issue) IsInfoOrResolved() bool {

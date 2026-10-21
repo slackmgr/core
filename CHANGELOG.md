@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal: the `models` package moved from `manager/internal/models` to `internal/models` (no public API change)
 
 ### Fixed
+- An issue is now considered resolved from its resolve time (inclusive). Previously `IsResolved` was false until the clock advanced past the resolve time, so an issue could briefly appear unresolved right after an explicit resolve
 - The manager now acks queue messages that cannot be unmarshalled, and counts them as `queue_messages_processed_total{result="unreadable"}`. Previously they were neither acked nor nacked. With Redis Streams this held the channel's stream lock until it expired, and because pending messages are reclaimed before new ones, a single unreadable message could stall all later alerts for that channel indefinitely
 
 ## [0.15.0] - 2026-10-21
