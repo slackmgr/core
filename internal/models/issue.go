@@ -508,7 +508,12 @@ func (issue *Issue) IsResolvedAsInconclusive() bool {
 }
 
 func (issue *Issue) IsResolved() bool {
-	return issue.LastAlert.Severity == types.AlertResolved || (issue.LastAlert.IssueFollowUpEnabled && nowFunc().After(issue.ResolveTime))
+	return issue.IsResolvedAt(nowFunc())
+}
+
+// IsResolvedAt returns true if the issue is resolved at the given time.
+func (issue *Issue) IsResolvedAt(t time.Time) bool {
+	return issue.LastAlert.Severity == types.AlertResolved || (issue.LastAlert.IssueFollowUpEnabled && t.After(issue.ResolveTime))
 }
 
 func (issue *Issue) IsInfoOrResolved() bool {

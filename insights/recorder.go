@@ -410,7 +410,12 @@ func (r *Recorder) write(parent context.Context, batch []types.InsightsEvent) bo
 	events := batch
 	if r.lost > 0 {
 		events = append(make([]types.InsightsEvent, 0, len(batch)+1), batch...)
-		events = append(events, types.InsightsEvent{Time: now, Type: types.InsightsEventGap, Count: int(r.lost)})
+		events = append(events, types.InsightsEvent{
+			Time:   now,
+			Type:   types.InsightsEventGap,
+			Count:  int(r.lost),
+			Values: map[string]float64{types.InsightsValueLostEvents: float64(r.lost)},
+		})
 	}
 
 	ctx, cancel := context.WithTimeout(parent, r.opts.writeTimeout)
