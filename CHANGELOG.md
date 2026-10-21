@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-21
+
 ### Added
 - Insights: an optional, queryable history of what the Slack Manager does, for dashboards. Requires `github.com/slackmgr/types` v0.8.0
   - The manager records insights events (alert outcomes, issue lifecycle, commands, webhooks, Slack posts, and channel snapshots, one per channel and interval across all instances) when an insights sink is available, discovered from the database (`types.InsightsSinkProvider`) or set with `Manager.WithInsightsSink`. Recording is asynchronous and isolated: non-blocking enqueue into a bounded buffer, batched writes on a background goroutine, contained errors and panics, backoff, and a hard shutdown flush deadline
@@ -415,7 +417,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/slackmgr/core/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/slackmgr/core/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/slackmgr/core/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/slackmgr/core/compare/v0.12.7...v0.13.0
