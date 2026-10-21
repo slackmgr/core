@@ -243,11 +243,11 @@ func (m *Manager) Run(ctx context.Context) error {
 	errg, ctx := errgroup.WithContext(ctx)
 
 	errg.Go(func() error {
-		return queueConsumer(ctx, m.commandQueue, commandCh, models.NewCommandFromQueueItem, m.logger)
+		return queueConsumer(ctx, m.commandQueue, queueTypeCommand, commandCh, models.NewCommandFromQueueItem, m.logger, m.metrics)
 	})
 
 	errg.Go(func() error {
-		return queueConsumer(ctx, m.alertQueue, alertCh, models.NewAlertFromQueueItem, m.logger)
+		return queueConsumer(ctx, m.alertQueue, queueTypeAlert, alertCh, models.NewAlertFromQueueItem, m.logger, m.metrics)
 	})
 
 	errg.Go(func() error {

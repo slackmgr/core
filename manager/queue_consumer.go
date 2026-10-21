@@ -9,11 +9,17 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.InFlightMessage, msgConstructor models.InFlightMsgConstructor, logger types.Logger) error {
+// queueConsumer reads items from the queue, converts them to in-flight messages and forwards them to sinkCh.
+// Items that cannot be converted (e.g. malformed JSON) are acked and discarded, since retrying cannot succeed.
+// Leaving them unacknowledged would make the queue redeliver them indefinitely, and for queues with strict
+// per-channel ordering (Redis Streams) block all later messages in the same channel.
+func queueConsumer(ctx context.Context, queue FifoQueue, queueType string, sinkCh chan<- models.InFlightMessage, msgConstructor models.InFlightMsgConstructor, logger types.Logger, metrics types.Metrics) error {
 	logger.WithField("queue_name", queue.Name()).Info("Queue consumer started")
 	defer logger.WithField("queue_name", queue.Name()).Info("Queue consumer exited")
 
 	defer close(sinkCh)
+
+	registerQueueMetrics(metrics)
 
 	queueCh := make(chan *types.FifoQueueItem, 50)
 
@@ -29,7 +35,9 @@ func queueConsumer(ctx context.Context, queue FifoQueue, sinkCh chan<- models.In
 
 			message, err := msgConstructor(item)
 			if err != nil {
-				logger.WithField("message_id", item.MessageID).WithField("channel_id", item.SlackChannelID).Errorf("Failed to unmarshal message: %s", err)
+				logger.WithField("message_id", item.MessageID).WithField("channel_id", item.SlackChannelID).Errorf("Discarding unreadable message: %s", err)
+				item.Ack()
+				metrics.CounterInc(queueMessagesProcessedTotalMetric, queueType, queueResultUnreadable)
 				continue
 			}
 

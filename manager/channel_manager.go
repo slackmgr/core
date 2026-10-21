@@ -44,7 +44,24 @@ const (
 
 	// commandsProcessedTotalMetric counts commands processed, labelled by action type.
 	commandsProcessedTotalMetric = "commands_processed_total"
+
+	// Queue types and results used as label values for queueMessagesProcessedTotalMetric.
+	queueTypeAlert        = "alert"
+	queueTypeCommand      = "command"
+	queueResultUnreadable = "unreadable"
 )
+
+// registerQueueMetrics registers the queue processing metrics and pre-warms all label combinations.
+// It is safe to call multiple times.
+func registerQueueMetrics(metrics types.Metrics) {
+	metrics.RegisterCounter(queueMessagesProcessedTotalMetric, "Total number of queue messages processed, labelled by result (acked or nack reason)", "queue_type", "result")
+
+	for _, qType := range []string{queueTypeAlert, queueTypeCommand} {
+		for _, result := range []string{"success", "discarded", queueResultUnreadable, "gate_timeout", "lock_timeout", "slack_error", "db_error", "move_race"} {
+			metrics.CounterAdd(queueMessagesProcessedTotalMetric, 0, qType, result)
+		}
+	}
+}
 
 type cmdFunc func(ctx context.Context, issue *models.Issue, cmd *models.Command, logger types.Logger) (bool, error)
 
@@ -112,7 +129,7 @@ func newChannelManager(channelID string, channelName string, slackClient SlackCl
 	metrics.RegisterCounter(alertsTotal, "Total number of handled alerts", "channel")
 
 	// Queue processing
-	metrics.RegisterCounter(queueMessagesProcessedTotalMetric, "Total number of queue messages processed, labelled by result (acked or nack reason)", "queue_type", "result")
+	registerQueueMetrics(metrics)
 	metrics.RegisterHistogram(queueMessageProcessingDuration, "Time from message received to ack or nack in seconds", durationBuckets, "queue_type")
 
 	// processActiveIssues
@@ -154,12 +171,6 @@ func newChannelManager(channelID string, channelName string, slackClient SlackCl
 	// Pre-warm fixed-enum label combinations.
 	for _, event := range []string{"terminated", "resolved", "unresolved", "investigated", "uninvestigated", "muted", "unmuted"} {
 		metrics.CounterAdd(issueEventsTotalMetric, 0, event)
-	}
-
-	for _, qType := range []string{"alert", "command"} {
-		for _, result := range []string{"success", "discarded", "gate_timeout", "lock_timeout", "slack_error", "db_error", "move_race"} {
-			metrics.CounterAdd(queueMessagesProcessedTotalMetric, 0, qType, result)
-		}
 	}
 
 	for _, action := range []models.CommandAction{
