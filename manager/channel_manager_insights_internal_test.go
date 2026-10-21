@@ -24,6 +24,15 @@ type insightsStubDB struct {
 	postIssue   json.RawMessage
 	openIssues  map[string]json.RawMessage
 	saveIssueFn func() error
+	saveAlertFn func() error
+}
+
+func (d *insightsStubDB) SaveAlert(_ context.Context, _ *types.Alert) error {
+	if d.saveAlertFn != nil {
+		return d.saveAlertFn()
+	}
+
+	return nil
 }
 
 func (d *insightsStubDB) FindOpenIssueByCorrelationID(_ context.Context, _, _ string) (string, json.RawMessage, error) {
@@ -174,6 +183,13 @@ func TestChannelManager_Insights_AlertOutcomes(t *testing.T) {
 			alert:       validInsightsAlert(types.AlertError, now),
 			wantOutcome: types.InsightsEventAlertRetried,
 			wantReason:  types.InsightsReasonDBError,
+		},
+		{
+			name:        "alert record save error keeps the outcome",
+			db:          &insightsStubDB{saveAlertFn: func() error { return errors.New("db down") }},
+			alert:       validInsightsAlert(types.AlertError, now),
+			wantOutcome: types.InsightsEventAlertNewIssue,
+			wantIssue:   []types.InsightsEventType{types.InsightsEventIssueCreated},
 		},
 	}
 
@@ -340,25 +356,85 @@ func TestChannelManager_Insights_ProcessActiveIssues(t *testing.T) {
 func TestChannelManager_RecordChannelStats_Interval(t *testing.T) {
 	t.Parallel()
 
-	recorder, sink := newTestRecorder(t)
-	cm := newInsightsChannelManager(t, &insightsStubDB{}, &NoopChannelLocker{}, recorder)
-	cm.channelStatsInterval = time.Hour
-
 	alert := &models.Alert{Alert: validInsightsAlert(types.AlertError, time.Now())}
 	issue := models.NewIssue(alert, &types.NoopLogger{})
 
-	now := time.Now()
-	cm.recordChannelStats(now, []*models.Issue{issue}, "name")
-	cm.recordChannelStats(now.Add(time.Minute), []*models.Issue{issue}, "name") // within interval: skipped
-	cm.recordChannelStats(now.Add(2*time.Minute), nil, "name")                  // became empty: recorded
-	cm.recordChannelStats(now.Add(3*time.Minute), nil, "name")                  // still empty: skipped
+	hour := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	issues := []*models.Issue{issue}
+
+	tests := []struct {
+		name    string
+		now     time.Time
+		prev    channelStatsPrevRun
+		issues  []*models.Issue
+		wantRec bool
+	}{
+		{"first run ever", hour.Add(30 * time.Minute), channelStatsPrevRun{}, issues, true},
+		{"previous run in the same window", hour.Add(30 * time.Minute), channelStatsPrevRun{processed: hour.Add(29 * time.Minute), openIssues: 1}, issues, false},
+		{"first run in a new window", hour.Add(time.Hour), channelStatsPrevRun{processed: hour.Add(59 * time.Minute), openIssues: 1}, issues, true},
+		{"new window after an idle period", hour.Add(5 * time.Hour), channelStatsPrevRun{processed: hour, openIssues: 0}, issues, true},
+		{"became empty", hour.Add(10 * time.Minute), channelStatsPrevRun{processed: hour.Add(9 * time.Minute), openIssues: 2}, nil, true},
+		{"still empty", hour.Add(2 * time.Hour), channelStatsPrevRun{processed: hour, openIssues: 0}, nil, false},
+		{"all issues archived by this run", hour.Add(2 * time.Hour), channelStatsPrevRun{processed: hour, openIssues: 1}, []*models.Issue{archivedIssue(issue)}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			recorder, sink := newTestRecorder(t)
+			cm := newInsightsChannelManager(t, &insightsStubDB{}, &NoopChannelLocker{}, recorder)
+			cm.channelStatsInterval = time.Hour
+
+			cm.recordChannelStats(tt.now, tt.prev, tt.issues, "name")
+			flush(recorder)
+
+			stats := sink.ofType(types.InsightsEventChannelStats)
+			if !tt.wantRec {
+				assert.Empty(t, stats)
+				return
+			}
+
+			require.Len(t, stats, 1)
+			assert.Equal(t, len(tt.issues), stats[0].Count)
+		})
+	}
+}
+
+func archivedIssue(issue *models.Issue) *models.Issue {
+	archived := *issue
+	archived.Archived = true
+
+	return &archived
+}
+
+// TestChannelManager_RecordChannelStats_MultipleInstances simulates processing runs alternating between two
+// manager instances, sharing the persisted processing state, and verifies one snapshot per window.
+func TestChannelManager_RecordChannelStats_MultipleInstances(t *testing.T) {
+	t.Parallel()
+
+	recorder, sink := newTestRecorder(t)
+	instances := []*channelManager{
+		newInsightsChannelManager(t, &insightsStubDB{}, &NoopChannelLocker{}, recorder),
+		newInsightsChannelManager(t, &insightsStubDB{}, &NoopChannelLocker{}, recorder),
+	}
+
+	alert := &models.Alert{Alert: validInsightsAlert(types.AlertError, time.Now())}
+	issues := []*models.Issue{models.NewIssue(alert, &types.NoopLogger{})}
+
+	// Runs every 10 seconds for 20 minutes, alternating between the instances, with the default 5 minute interval.
+	start := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	prev := channelStatsPrevRun{}
+
+	for i := range 120 {
+		now := start.Add(time.Duration(i) * 10 * time.Second)
+		instances[i%2].recordChannelStats(now, prev, issues, "name")
+		prev = channelStatsPrevRun{processed: now, openIssues: len(issues)}
+	}
 
 	flush(recorder)
 
-	stats := sink.ofType(types.InsightsEventChannelStats)
-	require.Len(t, stats, 2)
-	assert.Equal(t, 1, stats[0].Count)
-	assert.Equal(t, 0, stats[1].Count)
+	assert.Len(t, sink.ofType(types.InsightsEventChannelStats), 4, "one snapshot per 5 minute window")
 }
 
 // TestChannelManager_Insights_Isolation proves that a misbehaving insights sink or a full buffer never affects

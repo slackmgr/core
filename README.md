@@ -157,13 +157,13 @@ Tune or disable recording with `ManagerConfig.Insights` (`config.InsightsConfig`
 | `FlushIntervalMs` | `1000` | Maximum wait before a partial batch is written |
 | `WriteTimeoutMs` | `5000` | Deadline of a single write |
 | `ShutdownFlushTimeoutMs` | `2000` | Maximum time spent flushing at shutdown |
-| `ChannelStatsIntervalSeconds` | `300` | Minimum interval between channel snapshots per channel |
+| `ChannelStatsIntervalSeconds` | `300` | Interval between channel snapshots: at most one per channel with open issues per interval window, across all manager instances, plus a final zero snapshot when the channel becomes empty |
 
 The API server can also record alert intake events (queued, filtered and rejected alerts) with `Server.WithInsightsSink` and `APIConfig.Insights`. This is optional; without it, rejections are still counted in the `alerts_rejected_total{reason}` and `alerts_filtered_total{reason}` metrics.
 
 ### Events
 
-Every event has a type and an optional reason. Events carry identifiers and classifications only, never alert content. All types, reasons and value keys are documented constants in `github.com/slackmgr/types` (`InsightsEvent*`, `InsightsReason*`, `InsightsValue*`). Key definitions:
+Every event has a type and an optional reason. Events carry identifiers and classifications only, never alert content. They do include some personal data: the alert host and author, and the Slack user ID and real name of users who run commands. These are kept for the storage retention (30 days by default in the Postgres plugin). All types, reasons and value keys are documented constants in `github.com/slackmgr/types` (`InsightsEvent*`, `InsightsReason*`, `InsightsValue*`). Key definitions:
 
 | Concept | Definition |
 |---|---|
@@ -209,7 +209,7 @@ state, _ := svc.CurrentState(ctx, insights.CurrentStateQuery{ChannelIDs: channel
 | `MoveFlows` | Issue moves between channels, by reason |
 | `IssueTimeline` / `Events` | Paginated event listings, e.g. all events of one issue |
 
-Activity methods return `types.ErrInsightsNotSupported` when no reader is available. `CurrentState` also works with any `types.DB` (`insights.NewFromDB` or `insights.WithDB`), including plugins without insights support.
+Activity methods return `types.ErrInsightsNotSupported` when no reader is available. A query matching more than `types.MaxInsightsRows` (10,000) groups fails with `types.ErrInsightsTooManyRows` rather than returning truncated results. This mainly affects `Series` with `ByChannel` and `OpenIssuesSeries` (one row per bucket and channel, and for `Series` also per event type, and per reason if a metric has one); use a shorter range, a larger bucket or fewer channels. `CurrentState` also works with any `types.DB` (`insights.NewFromDB` or `insights.WithDB`), including plugins without insights support.
 
 ## Installation
 

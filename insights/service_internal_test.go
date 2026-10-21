@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -235,11 +236,27 @@ func TestService_Series(t *testing.T) {
 
 	q := reader.countQueries[len(reader.countQueries)-1]
 	assert.ElementsMatch(t, []types.InsightsEventType{types.InsightsEventAlertIgnored, types.InsightsEventIssueCreated, types.InsightsEventIssueArchived}, q.Types)
+	assert.Equal(t, []types.InsightsDimension{types.InsightsDimensionBucket, types.InsightsDimensionType, types.InsightsDimensionReason}, q.GroupBy)
 
+	// Without reason metrics, the query is not grouped by reason.
 	series, err = s.Series(ctx, SeriesQuery{Filter: testFilter(), Bucket: time.Hour, ByChannel: true, Metrics: []Metric{{Type: types.InsightsEventIssueCreated}}})
 	require.NoError(t, err)
 	assert.InDelta(t, 5, series.Values["issue.created@C2"][2], 0)
-	assert.Contains(t, reader.countQueries[len(reader.countQueries)-1].GroupBy, types.InsightsDimensionChannel)
+	assert.Equal(t, []types.InsightsDimension{types.InsightsDimensionBucket, types.InsightsDimensionType, types.InsightsDimensionChannel},
+		reader.countQueries[len(reader.countQueries)-1].GroupBy)
+}
+
+func TestService_TooManyRows(t *testing.T) {
+	t.Parallel()
+
+	s := New(&fakeReader{err: fmt.Errorf("%w: more than 10000 groups", types.ErrInsightsTooManyRows)})
+	ctx := context.Background()
+
+	_, err := s.Series(ctx, SeriesQuery{Filter: testFilter(), Bucket: time.Minute, ByChannel: true, Metrics: []Metric{{Type: types.InsightsEventIssueCreated}}})
+	require.ErrorIs(t, err, types.ErrInsightsTooManyRows)
+
+	_, err = s.OpenIssuesSeries(ctx, testFilter(), time.Minute)
+	require.ErrorIs(t, err, types.ErrInsightsTooManyRows)
 }
 
 func TestAlignBucket(t *testing.T) {

@@ -9,10 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Insights: an optional, queryable history of what the Slack Manager does, for dashboards. Requires `github.com/slackmgr/types` v0.8.0
-  - The manager records insights events (alert outcomes, issue lifecycle, commands, webhooks, Slack posts, channel snapshots) when an insights sink is available, discovered from the database (`types.InsightsSinkProvider`) or set with `Manager.WithInsightsSink`. Recording is asynchronous and isolated: non-blocking enqueue into a bounded buffer, batched writes on a background goroutine, contained errors and panics, backoff, and a hard shutdown flush deadline
+  - The manager records insights events (alert outcomes, issue lifecycle, commands, webhooks, Slack posts, and channel snapshots, one per channel and interval across all instances) when an insights sink is available, discovered from the database (`types.InsightsSinkProvider`) or set with `Manager.WithInsightsSink`. Recording is asynchronous and isolated: non-blocking enqueue into a bounded buffer, batched writes on a background goroutine, contained errors and panics, backoff, and a hard shutdown flush deadline
   - `ManagerConfig.Insights` and `APIConfig.Insights` (`config.InsightsConfig`) to tune or disable recording
   - `Server.WithInsightsSink`: optional recording of alert intake events (queued, filtered, rejected) in the API server
-  - New `insights` package: `Recorder`, and `Service` with `Summary`, `Series`, `OpenIssuesSeries`, `Breakdown`, `CurrentState`, `Lifecycle`, `Flapping`, `MoveFlows`, `IssueTimeline` and `Events`
+  - New `insights` package: `Recorder`, and `Service` with `Summary`, `Series`, `OpenIssuesSeries`, `Breakdown`, `CurrentState`, `Lifecycle`, `Flapping`, `MoveFlows`, `IssueTimeline` and `Events`. Queries that would exceed `types.MaxInsightsRows` groups (e.g. a long, fine-grained per-channel `Series`) fail with `types.ErrInsightsTooManyRows` instead of returning truncated series
   - Metrics `insights_events_written_total`, `insights_events_dropped_total{reason}`, `insights_write_duration_seconds` and `insights_buffer_size`
 - `slack_posts_total{result}` metric: Slack post operations for issues (`created`, `updated`, `deleted`, `throttled`, `failed`)
 - Issues track `firstInvestigatedAt` and `reopenCount` (new fields in the stored issue JSON)
@@ -26,7 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - An issue is now considered resolved from its resolve time (inclusive). Previously `IsResolved` was false until the clock advanced past the resolve time, so an issue could briefly appear unresolved right after an explicit resolve
-- The manager now acks queue messages that cannot be unmarshalled, and counts them as `queue_messages_processed_total{result="unreadable"}`. Previously they were neither acked nor nacked. With Redis Streams this held the channel's stream lock until it expired, and because pending messages are reclaimed before new ones, a single unreadable message could stall all later alerts for that channel indefinitely
+- The manager now acks queue messages that cannot be unmarshalled, and counts them as `queue_messages_processed_total{result="unreadable"}`. Previously they were neither acked nor nacked. With Redis Streams this held the channel's stream lock until it expired, and because pending messages are reclaimed before new ones, a single unreadable message could stall all later alerts for that channel indefinitely. Note for SQS: unreadable messages are no longer redelivered and therefore no longer end up in a dead-letter queue; they are logged (with the error), counted and recorded as `alert.dropped/unreadable` insights events instead
+- A failure to save the alert record after its issue has been saved no longer nacks the alert. The error is logged and the alert is acked. Previously the redelivered alert was ignored as not newer by the already updated issue
 
 ## [0.15.0] - 2026-10-21
 

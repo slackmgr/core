@@ -74,10 +74,21 @@ func (c *channelManager) recordResolveTransition(issue *models.Issue, wasResolve
 	c.insights.Record(e)
 }
 
+// channelStatsPrevRun is the persisted channel processing state of the previous processing run.
+type channelStatsPrevRun struct {
+	processed  time.Time
+	openIssues int
+}
+
 // recordChannelStats records a channel stats snapshot of the given open issues, if insights are enabled and
-// the stats interval has passed since the last snapshot. Archived issues are ignored. A final snapshot with
-// zero open issues is recorded when the channel becomes empty, so that time series drop to zero.
-func (c *channelManager) recordChannelStats(now time.Time, issues []*models.Issue, channelName string) {
+// this is the first processing run in the current stats interval window (windows are aligned to the interval).
+// Archived issues are ignored. A snapshot with zero open issues is recorded on the first run that finds the
+// channel empty, so that time series drop to zero.
+//
+// The decision is based on the persisted state of the previous run, not on in-memory state, because processing
+// runs of a channel alternate between manager instances. Each snapshot is therefore recorded once, by whichever
+// instance runs first in the window.
+func (c *channelManager) recordChannelStats(now time.Time, prev channelStatsPrevRun, issues []*models.Issue, channelName string) {
 	if !c.insights.Enabled() {
 		return
 	}
@@ -117,13 +128,14 @@ func (c *channelManager) recordChannelStats(now time.Time, issues []*models.Issu
 		interval = time.Duration(config.DefaultInsightsChannelStatsIntervalSeconds) * time.Second
 	}
 
-	becameEmpty := open == 0 && c.lastChannelStatsOpen > 0
-	if !becameEmpty && (open == 0 || now.Sub(c.lastChannelStats) < interval) {
+	// Issues archived by this run leave open at zero, but the next run (which finds the channel empty) records
+	// the zero snapshot, so it is recorded exactly once.
+	becameEmpty := len(issues) == 0 && prev.openIssues > 0
+	newWindow := prev.processed.IsZero() || !now.Truncate(interval).Equal(prev.processed.Truncate(interval))
+
+	if !becameEmpty && (open == 0 || !newWindow) {
 		return
 	}
-
-	c.lastChannelStats = now
-	c.lastChannelStatsOpen = open
 
 	if channelName == "" {
 		channelName = c.channelName

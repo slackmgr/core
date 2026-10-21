@@ -89,12 +89,8 @@ type channelManager struct {
 	// insights records insights events. A nil recorder is valid and records nothing.
 	insights *insights.Recorder
 
-	// channelStatsInterval is the minimum interval between channel stats events.
+	// channelStatsInterval is the interval between channel stats events.
 	channelStatsInterval time.Duration
-
-	// lastChannelStats is when the last channel stats event was recorded, and lastChannelStatsOpen its open issue count.
-	lastChannelStats     time.Time
-	lastChannelStatsOpen int
 }
 
 // alertOutcome is the insights classification of a successfully processed alert.
@@ -551,12 +547,10 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 		}
 	}
 
+	// The issue has already been saved, so the alert is processed even if saving the alert record fails.
+	// Retrying would re-apply the alert to the updated issue, where it is ignored as not newer.
 	if err := c.db.SaveAlert(ctx, &alert.Alert); err != nil {
-		// Transient: database call failed; nack so the alert is retried.
-		alert.Nack()
-		c.metrics.CounterInc(queueMessagesProcessedTotalMetric, "alert", "db_error")
-		c.recordAlert(alert, types.InsightsEventAlertRetried, types.InsightsReasonDBError)
-		return fmt.Errorf("failed to save alert to database: %w", err)
+		logger.Errorf("Failed to save alert to database: %s", err)
 	}
 
 	// Ack the alert to remove it from the queue, since it has been successfully processed.
@@ -708,6 +702,9 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 
 	now := time.Now().UTC()
 
+	// The previous run (by any manager instance) decides whether a channel stats snapshot is due.
+	prevRun := channelStatsPrevRun{processed: processingState.LastProcessed, openIssues: processingState.OpenIssues}
+
 	// Update the processing state with the current time. This is used to ensure that the processing is not repeated too often (by multiple managers).
 	processingState.LastProcessed = now
 
@@ -726,7 +723,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 
 	// Stop here if there are no open issues in the channel.
 	if processingState.OpenIssues == 0 {
-		c.recordChannelStats(now, nil, "")
+		c.recordChannelStats(now, prevRun, nil, "")
 		return 0, nil
 	}
 
@@ -836,7 +833,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		c.insights.Record(e)
 	}
 
-	c.recordChannelStats(now, issuesToUpdate, currentChannelName)
+	c.recordChannelStats(now, prevRun, issuesToUpdate, currentChannelName)
 
 	elapsed := time.Since(started)
 	c.logger.WithField("count", len(issuesToUpdate)).WithField("moved_count", len(movedIssues)).WithField("elapsed", elapsed).Debug("Issue processing completed")

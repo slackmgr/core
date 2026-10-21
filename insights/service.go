@@ -387,6 +387,10 @@ type Series struct {
 }
 
 // Series returns time series of event counts.
+//
+// The underlying query returns one row per bucket, event type, reason (only if a metric has a reason) and
+// channel (only with ByChannel). If that exceeds [types.MaxInsightsRows], it fails with
+// [types.ErrInsightsTooManyRows]; use a shorter time range, a larger bucket or fewer channels.
 func (s *Service) Series(ctx context.Context, q SeriesQuery) (*Series, error) {
 	if err := s.requireReader(); err != nil {
 		return nil, err
@@ -396,7 +400,13 @@ func (s *Service) Series(ctx context.Context, q SeriesQuery) (*Series, error) {
 		return nil, errors.New("at least one metric is required")
 	}
 
-	groupBy := []types.InsightsDimension{types.InsightsDimensionBucket, types.InsightsDimensionType, types.InsightsDimensionReason}
+	groupBy := []types.InsightsDimension{types.InsightsDimensionBucket, types.InsightsDimensionType}
+
+	// Grouping by reason multiplies the number of rows, so only do it if a metric needs it.
+	if slices.ContainsFunc(q.Metrics, func(m Metric) bool { return m.Reason != "" }) {
+		groupBy = append(groupBy, types.InsightsDimensionReason)
+	}
+
 	if q.ByChannel {
 		groupBy = append(groupBy, types.InsightsDimensionChannel)
 	}
@@ -445,6 +455,8 @@ func (s *Service) Series(ctx context.Context, q SeriesQuery) (*Series, error) {
 // OpenIssuesSeries returns the number of open issues over time, per channel, from channel snapshots.
 // Series keys are channel IDs. The value of a bucket is the highest snapshot in it; buckets without a
 // snapshot are zero, so choose a bucket at least as large as the channel stats interval (default 5 minutes).
+// If the number of buckets times the number of channels exceeds [types.MaxInsightsRows], it fails with
+// [types.ErrInsightsTooManyRows]; use a shorter time range, a larger bucket or fewer channels.
 func (s *Service) OpenIssuesSeries(ctx context.Context, f Filter, bucket time.Duration) (*Series, error) {
 	if err := s.requireReader(); err != nil {
 		return nil, err

@@ -43,7 +43,7 @@ const (
 	// MaxInsightsShutdownFlushTimeoutMs is the maximum allowed insights shutdown flush timeout.
 	MaxInsightsShutdownFlushTimeoutMs = 30000
 
-	// DefaultInsightsChannelStatsIntervalSeconds is the default minimum interval between channel snapshots.
+	// DefaultInsightsChannelStatsIntervalSeconds is the default interval between channel snapshots.
 	DefaultInsightsChannelStatsIntervalSeconds = 300
 
 	// MinInsightsChannelStatsIntervalSeconds is the minimum allowed channel snapshot interval.
@@ -93,8 +93,9 @@ type InsightsConfig struct {
 	// Default: 2000. Must be between 1 and 30000.
 	ShutdownFlushTimeoutMs int `json:"shutdownFlushTimeoutMs" mapstructure:"shutdownFlushTimeoutMs" yaml:"shutdownFlushTimeoutMs"`
 
-	// ChannelStatsIntervalSeconds is the minimum interval between channel snapshot events (open issue counts)
-	// per channel and manager instance. Only used by the manager.
+	// ChannelStatsIntervalSeconds is the interval between channel snapshot events (open issue counts). Each
+	// channel with open issues gets at most one snapshot per interval window (aligned to the interval, in UTC),
+	// regardless of the number of manager instances. Only used by the manager.
 	//
 	// Default: 300 (5m). Must be between 60 and 86400.
 	ChannelStatsIntervalSeconds int `json:"channelStatsIntervalSeconds" mapstructure:"channelStatsIntervalSeconds" yaml:"channelStatsIntervalSeconds"`

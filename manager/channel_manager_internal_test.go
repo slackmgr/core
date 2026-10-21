@@ -258,7 +258,8 @@ func TestChannelManager_ProcessAlert_AckNack(t *testing.T) {
 			expectedNack: true,
 		},
 		{
-			name: "save_alert_error",
+			// The issue is already saved, so a failure to save the alert record is logged and the alert is acked.
+			name: "save_alert_error_acks_alert",
 			db: &customStubDB{
 				saveAlertFn: func(_ context.Context, _ *types.Alert) error {
 					return errors.New("save alert error")
@@ -267,8 +268,8 @@ func TestChannelManager_ProcessAlert_AckNack(t *testing.T) {
 			slackClient:  &stubSlackClient{},
 			locker:       &NoopChannelLocker{},
 			alertData:    validAlert,
-			expectedAck:  false,
-			expectedNack: true,
+			expectedAck:  true,
+			expectedNack: false,
 		},
 		{
 			name: "find_move_mapping_error_nacks_alert",
