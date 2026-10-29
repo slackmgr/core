@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +27,15 @@ const (
 	// mentionMutingThreshold is the minimum time that must pass before the same Slack mentions
 	// are allowed to trigger notifications again. This prevents mention spam.
 	mentionMutingThreshold = time.Hour
+
+	// SlackPostPendingGracePeriod is how long a pending Slack post (see [Issue.SlackPostPendingSince]) is waited for,
+	// before it is assumed that the post was never created. This allows for the post to become visible in the
+	// channel history.
+	SlackPostPendingGracePeriod = 30 * time.Second
+
+	// SlackPostPendingMaxAge is how long a pending Slack post is kept when the channel history cannot be read.
+	// After this, the post is assumed to not exist, and the issue can be posted (and archived) again.
+	SlackPostPendingMaxAge = 10 * time.Minute
 )
 
 // Issue represents one or more alerts with the same correlation ID (in the same Slack channel).
@@ -62,6 +72,11 @@ type Issue struct {
 	SlackPostNeedsDelete      bool          `json:"slackPostNeedsDelete"`
 	SlackAlertSentAtLeastOnce bool          `json:"slackAlertSentAtLeastOnce"`
 	SlackPostDelayedUntil     time.Time     `json:"slackPostDelayedUntil"`
+
+	// SlackPostPendingSince is set when creating the Slack post failed in a way where the post may still exist,
+	// e.g. after a timeout. The post is then looked up in the channel history before a new one is created.
+	// A zero value means that no post is pending.
+	SlackPostPendingSince time.Time `json:"slackPostPendingSince"`
 
 	// The following IsEmoji* fields use "slackPostEmoji*" JSON tags for backward compatibility
 	// with existing serialized data and external API consumers.
@@ -300,6 +315,60 @@ func (issue *Issue) RegisterSlackPostCreatedOrUpdated(slackPostID string, action
 	}
 }
 
+// RegisterSlackPostPending registers that creating the Slack post failed with an unknown outcome,
+// i.e. that the post may still exist. See [Issue.SlackPostPendingSince].
+func (issue *Issue) RegisterSlackPostPending() {
+	issue.SlackPostPendingSince = nowFunc().UTC()
+}
+
+// ClearSlackPostPending clears the pending Slack post state, without changing anything else.
+func (issue *Issue) ClearSlackPostPending() {
+	issue.SlackPostPendingSince = time.Time{}
+}
+
+// HasPendingSlackPost returns true if the issue has a pending Slack post. See [Issue.SlackPostPendingSince].
+func (issue *Issue) HasPendingSlackPost() bool {
+	return !issue.SlackPostPendingSince.IsZero()
+}
+
+// SlackPostPendingGraceElapsed returns true if the issue has had a pending Slack post for longer than [SlackPostPendingGracePeriod].
+func (issue *Issue) SlackPostPendingGraceElapsed() bool {
+	return issue.HasPendingSlackPost() && nowFunc().Sub(issue.SlackPostPendingSince) > SlackPostPendingGracePeriod
+}
+
+// SlackPostPendingExpired returns true if the issue has had a pending Slack post for longer than [SlackPostPendingMaxAge].
+func (issue *Issue) SlackPostPendingExpired() bool {
+	return issue.HasPendingSlackPost() && nowFunc().Sub(issue.SlackPostPendingSince) > SlackPostPendingMaxAge
+}
+
+// RegisterSlackPostAdopted registers that a pending Slack post was found in the channel, with the given message timestamp.
+// The post content may be outdated, so the post is flagged for update.
+func (issue *Issue) RegisterSlackPostAdopted(slackPostID string) {
+	issue.SlackPostID = slackPostID
+	issue.SlackPostCreated = slackTimestampToTime(slackPostID)
+	issue.SlackPostUpdated = issue.SlackPostCreated
+	issue.SlackPostHeader = ""
+	issue.SlackPostText = ""
+	issue.SlackPostNeedsUpdate = true
+	issue.SlackAlertSentAtLeastOnce = true
+	issue.ClearSlackPostPending()
+}
+
+// slackTimestampToTime converts a Slack message timestamp (e.g. "1700000000.123456") to a time.
+// The current time is returned if the timestamp cannot be parsed.
+func slackTimestampToTime(ts string) time.Time {
+	secs, frac, _ := strings.Cut(ts, ".")
+
+	sec, err := strconv.ParseInt(secs, 10, 64)
+	if err != nil {
+		return nowFunc().UTC()
+	}
+
+	usec, _ := strconv.ParseInt((frac + "000000")[:6], 10, 64)
+
+	return time.Unix(sec, usec*1000).UTC()
+}
+
 // RegisterSlackPostDeleted registers that the Slack post connected to this issue has been deleted
 func (issue *Issue) RegisterSlackPostDeleted() {
 	issue.SlackPostNeedsUpdate = true
@@ -441,6 +510,11 @@ func (issue *Issue) RegisterMoveRequest(reason MoveIssueReason, user, newChannel
 
 // IsReadyForArchiving returns true if the issue is ready to be archived
 func (issue *Issue) IsReadyForArchiving() bool {
+	// We can't archive an issue whose Slack post may exist but is not yet known, since the post would be left behind
+	if issue.HasPendingSlackPost() && !issue.SlackPostPendingExpired() {
+		return false
+	}
+
 	if !issue.LastAlert.IssueFollowUpEnabled {
 		return nowFunc().After(issue.ArchiveTime)
 	}

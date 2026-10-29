@@ -42,6 +42,14 @@ const (
 // ErrNotConnected is returned when an API method is called before Connect().
 var ErrNotConnected = errors.New("client not connected: Connect() must be called first")
 
+// ErrPostOutcomeUnknown is returned (wrapping the underlying error) by [SlackAPIClient.ChatPostMessage]
+// when the call failed in a way where the message may still have been posted, e.g. a timeout or a
+// Slack fatal_error. Such errors are not retried, since a retry could create a duplicate message.
+var ErrPostOutcomeUnknown = errors.New("outcome of Slack post is unknown")
+
+// maxBotMessagesPages is the maximum number of conversations.history pages read by [SlackAPIClient.ListBotMessages].
+const maxBotMessagesPages = 5
+
 // rateLimitSignaler is satisfied by any type that can record a rate-limit
 // deadline so that all callers can back off until it expires.
 type rateLimitSignaler interface {
@@ -175,9 +183,60 @@ func (c *SlackAPIClient) ChatPostMessage(ctx context.Context, channelID string, 
 		return ts, nil, err
 	}
 
-	ts, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f)
+	ts, _, err := callAPIWithPolicy(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, isPostOutcomeUnknown, f)
 
 	return ts, err
+}
+
+// ListBotMessages returns the top-level messages in a channel that were posted by this bot after oldest, and have
+// message metadata with the given event type. Metadata is included in the returned messages.
+// An error is returned if the channel has too many messages since oldest to read within a bounded number of pages.
+func (c *SlackAPIClient) ListBotMessages(ctx context.Context, channelID string, oldest time.Time, eventType string) ([]slack.Message, error) {
+	if err := c.checkConnected(); err != nil {
+		return nil, err
+	}
+
+	if channelID == "" {
+		return nil, errors.New("channelID cannot be empty")
+	}
+
+	action := "conversations.history"
+	logger := c.logger.WithField("channel_id", channelID)
+
+	params := &slack.GetConversationHistoryParameters{
+		ChannelID:          channelID,
+		Oldest:             fmt.Sprintf("%d.%06d", oldest.Unix(), oldest.Nanosecond()/1000),
+		Limit:              200,
+		IncludeAllMetadata: true,
+	}
+
+	var result []slack.Message
+
+	for range maxBotMessagesPages {
+		f := func(ctx context.Context) (*slack.GetConversationHistoryResponse, any, error) {
+			resp, err := c.api.GetConversationHistoryContext(ctx, params)
+			return resp, nil, err
+		}
+
+		resp, _, err := callAPI(ctx, logger, c.metrics, c.cfg, c.gate, c.sem, action, f)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, msg := range resp.Messages {
+			if msg.User == c.botUserID && msg.Metadata.EventType == eventType {
+				result = append(result, msg)
+			}
+		}
+
+		if !resp.HasMore || resp.ResponseMetaData.NextCursor == "" {
+			return result, nil
+		}
+
+		params.Cursor = resp.ResponseMetaData.NextCursor
+	}
+
+	return nil, fmt.Errorf("too many messages in channel %s since %s to list bot messages", channelID, oldest.Format(time.RFC3339))
 }
 
 func (c *SlackAPIClient) ChatUpdateMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {
@@ -676,6 +735,15 @@ func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics typ
 	cfg *config.SlackClientConfig, gate rateLimitSignaler, sem *semaphore.Weighted,
 	action string, f func(ctx context.Context) (V, W, error), expectedErrors ...string,
 ) (V, W, error) {
+	return callAPIWithPolicy(ctx, logger, metrics, cfg, gate, sem, action, nil, f, expectedErrors...)
+}
+
+// callAPIWithPolicy is [callAPI] with an optional outcomeUnknown function. Errors for which it returns true
+// are not retried, and are returned wrapped in [ErrPostOutcomeUnknown].
+func callAPIWithPolicy[V any, W any](ctx context.Context, logger types.Logger, metrics types.Metrics,
+	cfg *config.SlackClientConfig, gate rateLimitSignaler, sem *semaphore.Weighted,
+	action string, outcomeUnknown func(error) bool, f func(ctx context.Context) (V, W, error), expectedErrors ...string,
+) (V, W, error) {
 	attempt := 1
 	started := time.Now()
 
@@ -710,6 +778,12 @@ func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics typ
 
 		var result1 V
 		var result2 W
+
+		// Checked before the context, since a request cancelled in flight may still have been processed.
+		if outcomeUnknown != nil && outcomeUnknown(err) {
+			metrics.CounterInc(slackAPIErrorsTotalMetric, action, getSlackErrorMetricLabel(err))
+			return result1, result2, fmt.Errorf("%w: %w", ErrPostOutcomeUnknown, err)
+		}
 
 		if ctx.Err() != nil {
 			return result1, result2, err

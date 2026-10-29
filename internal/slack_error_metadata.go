@@ -303,3 +303,31 @@ func IsTransientError(err error) bool {
 
 	return class == SlackErrorClassTransient || class == SlackErrorClassRateLimited
 }
+
+// isPostOutcomeUnknown reports whether a failed chat.postMessage call may still have posted the message.
+// Only errors that prove the message was not posted return false: Slack error responses (except fatal_error
+// and internal_error, where Slack says part of the operation may have succeeded), rate limits, and HTTP 4xx.
+// Everything else, including HTTP 5xx, timeouts and other transport errors, is treated as unknown.
+func isPostOutcomeUnknown(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if _, ok := errors.AsType[*slack.RateLimitedError](err); ok {
+		return false
+	}
+
+	if statusErr, ok := errors.AsType[slack.StatusCodeError](err); ok {
+		return statusErr.Code >= 500
+	}
+
+	code := err.Error()
+
+	if slackErr, ok := errors.AsType[slack.SlackErrorResponse](err); ok {
+		code = slackErr.Err
+	} else if _, known := slackErrorClasses[code]; !known {
+		return true
+	}
+
+	return code == SlackErrFatalError || code == SlackErrInternalError
+}

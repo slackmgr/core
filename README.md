@@ -89,6 +89,14 @@ Alerts can specify a notification delay: the Slack post will not be created unti
 
 Beyond grouping alerts by correlation ID, individual alerts can carry a list of text patterns to filter out. If an incoming alert's text matches any of those patterns, the alert is silently discarded without updating or reopening the issue. This is useful for suppressing known-noisy variants of an alert — log noise at the tail end of a deployment, repeated low-signal warnings from a chatty dependency — while still allowing the main alert to flow through normally.
 
+### Duplicate Post Prevention
+
+Creating a Slack post can fail in a way where the post may still have been created, for example after a timeout, an HTTP 5xx response, or a Slack `fatal_error`/`internal_error`. Such posts are not retried. Instead, the issue is marked as having a pending post, and the post is looked up in the channel history (`conversations.history`) before a new one is created. If found, the post is adopted by the issue, and any duplicates are deleted. If not found within 30 seconds, a new post is created. If the channel history cannot be read, a new post is created after 10 minutes. Issues with a pending post are not archived until the post is resolved.
+
+To make posts identifiable, every issue post carries [message metadata](https://docs.slack.dev/messaging/message-metadata) with event type `slackmgr_issue` (or `slackmgr_issue_deleted` for posts that were updated to look deleted) and the issue ID as payload. Message metadata is visible to all users and apps in the workspace, so it contains nothing but the opaque issue ID.
+
+The `slack_pending_posts_total{result}` metric counts posts with an unknown outcome (`pending`) and how they were resolved (`adopted`, `not_found`, `expired`, `lookup_failed`, `duplicate_deleted`).
+
 ### Admin Controls
 
 Actions that change an issue's state — resolving, muting, terminating — require admin rights, preventing accidental or unauthorised changes in busy shared channels. Admins can be defined globally (effective across every channel Slack Manager manages) or scoped to a specific channel, and membership can be specified by individual Slack user ID or by Slack user group. Non-admins can still react with `:eyes:` to signal they are investigating, keeping everyone able to participate without granting broad permissions.

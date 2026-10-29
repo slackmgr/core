@@ -1494,3 +1494,85 @@ func TestSlackMentionHandling(t *testing.T) {
 		assert.Equal(t, "abc <!here> hei <@bar>", issue.LastAlert.Text)
 	})
 }
+
+func TestIssue_SlackPostPending(t *testing.T) {
+	t.Parallel()
+
+	t.Run("not pending by default", func(t *testing.T) {
+		t.Parallel()
+
+		issue := NewIssue(createTestAlert(), &mockLogger{})
+
+		assert.False(t, issue.HasPendingSlackPost())
+		assert.False(t, issue.SlackPostPendingGraceElapsed())
+		assert.False(t, issue.SlackPostPendingExpired())
+	})
+
+	t.Run("register and clear", func(t *testing.T) {
+		t.Parallel()
+
+		issue := NewIssue(createTestAlert(), &mockLogger{})
+
+		issue.RegisterSlackPostPending()
+		assert.True(t, issue.HasPendingSlackPost())
+		assert.False(t, issue.SlackPostPendingGraceElapsed())
+		assert.False(t, issue.SlackPostPendingExpired())
+
+		issue.ClearSlackPostPending()
+		assert.False(t, issue.HasPendingSlackPost())
+	})
+
+	t.Run("grace elapsed and expired", func(t *testing.T) {
+		t.Parallel()
+
+		issue := NewIssue(createTestAlert(), &mockLogger{})
+
+		issue.SlackPostPendingSince = time.Now().Add(-SlackPostPendingGracePeriod - time.Second)
+		assert.True(t, issue.SlackPostPendingGraceElapsed())
+		assert.False(t, issue.SlackPostPendingExpired())
+
+		issue.SlackPostPendingSince = time.Now().Add(-SlackPostPendingMaxAge - time.Second)
+		assert.True(t, issue.SlackPostPendingGraceElapsed())
+		assert.True(t, issue.SlackPostPendingExpired())
+	})
+
+	t.Run("adopt", func(t *testing.T) {
+		t.Parallel()
+
+		issue := NewIssue(createTestAlert(), &mockLogger{})
+		issue.SlackPostNeedsUpdate = false
+		issue.RegisterSlackPostPending()
+
+		issue.RegisterSlackPostAdopted("1700000000.123456")
+
+		assert.False(t, issue.HasPendingSlackPost())
+		assert.Equal(t, "1700000000.123456", issue.SlackPostID)
+		assert.Equal(t, time.Unix(1700000000, 123456000).UTC(), issue.SlackPostCreated)
+		assert.True(t, issue.SlackPostNeedsUpdate)
+		assert.True(t, issue.SlackAlertSentAtLeastOnce)
+		assert.Empty(t, issue.SlackPostHeader)
+	})
+
+	t.Run("pending blocks archiving until expired", func(t *testing.T) {
+		t.Parallel()
+
+		issue := NewIssue(createTestAlert(), &mockLogger{})
+		issue.ArchiveTime = time.Now().Add(-time.Minute)
+		require.True(t, issue.IsReadyForArchiving())
+
+		issue.RegisterSlackPostPending()
+		assert.False(t, issue.IsReadyForArchiving())
+
+		issue.SlackPostPendingSince = time.Now().Add(-SlackPostPendingMaxAge - time.Second)
+		assert.True(t, issue.IsReadyForArchiving())
+	})
+}
+
+func TestSlackTimestampToTime(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, time.Unix(1700000000, 123456000).UTC(), slackTimestampToTime("1700000000.123456"))
+	assert.Equal(t, time.Unix(1700000000, 100000000).UTC(), slackTimestampToTime("1700000000.1"))
+	assert.Equal(t, time.Unix(1700000000, 0).UTC(), slackTimestampToTime("1700000000"))
+	assert.WithinDuration(t, time.Now(), slackTimestampToTime("invalid"), time.Minute)
+}

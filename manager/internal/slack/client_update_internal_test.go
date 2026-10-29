@@ -29,10 +29,19 @@ type fakeSlackAPI struct {
 	updateErr func(ts string) error
 	deleteErr func(ts string) error
 
-	mu      sync.Mutex
-	posts   []string
-	updates []string
-	deletes []string
+	// history is returned by ListBotMessages, unless historyErr is set.
+	history    []slackapi.Message
+	historyErr error
+
+	// hasReplies is returned by MessageHasReplies.
+	hasReplies bool
+
+	mu           sync.Mutex
+	posts        []string
+	updates      []string
+	deletes      []string
+	metadata     []string // Message metadata JSON of all posts and updates, in call order
+	historyCalls int
 }
 
 func (f *fakeSlackAPI) ChatPostMessage(_ context.Context, channelID string, options ...slackapi.MsgOption) (string, error) {
@@ -45,6 +54,7 @@ func (f *fakeSlackAPI) ChatPostMessage(_ context.Context, channelID string, opti
 
 	f.mu.Lock()
 	f.posts = append(f.posts, name)
+	f.metadata = append(f.metadata, values.Get("metadata"))
 	f.mu.Unlock()
 
 	if f.postErr != nil {
@@ -66,6 +76,7 @@ func (f *fakeSlackAPI) ChatUpdateMessage(_ context.Context, channelID string, op
 
 	f.mu.Lock()
 	f.updates = append(f.updates, ts)
+	f.metadata = append(f.metadata, values.Get("metadata"))
 	f.mu.Unlock()
 
 	if f.updateErr != nil {
@@ -90,7 +101,15 @@ func (f *fakeSlackAPI) ChatDeleteMessage(ctx context.Context, _ string, ts strin
 }
 
 func (f *fakeSlackAPI) MessageHasReplies(_ context.Context, _, _ string) (bool, error) {
-	return false, nil
+	return f.hasReplies, nil
+}
+
+func (f *fakeSlackAPI) ListBotMessages(_ context.Context, _ string, _ time.Time, _ string) ([]slackapi.Message, error) {
+	f.mu.Lock()
+	f.historyCalls++
+	f.mu.Unlock()
+
+	return f.history, f.historyErr
 }
 
 func newUpdateTestClient(t *testing.T, api *fakeSlackAPI) *Client {

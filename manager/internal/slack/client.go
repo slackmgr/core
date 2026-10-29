@@ -62,6 +62,7 @@ type slackAPI interface {
 	ChatUpdateMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error)
 	ChatDeleteMessage(ctx context.Context, channelID string, ts string) error
 	SendResponse(ctx context.Context, channelID, responseURL, responseType, text string) error
+	ListBotMessages(ctx context.Context, channelID string, oldest time.Time, eventType string) ([]slack.Message, error)
 	PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error)
 	OpenModal(ctx context.Context, triggerID string, request slack.ModalViewRequest) error
 	MessageHasReplies(ctx context.Context, channelID, ts string) (bool, error)
@@ -93,6 +94,12 @@ func New(commandHandler FifoQueueProducer, cacheStore store.StoreInterface, logg
 
 	for _, result := range []string{slackPostResultCreated, slackPostResultUpdated, slackPostResultDeleted, slackPostResultThrottled, slackPostResultFailed} {
 		metrics.CounterAdd(slackPostsTotalMetric, 0, result)
+	}
+
+	metrics.RegisterCounter(slackPendingPostsTotalMetric, "Total Slack posts with unknown outcome (pending), and how they were resolved", "result")
+
+	for _, result := range allPendingPostResults {
+		metrics.CounterAdd(slackPendingPostsTotalMetric, 0, result)
 	}
 
 	return &Client{
@@ -301,6 +308,17 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 
 	// Go through all the issues and create/update Slack post where needed
 	for _, issue := range issues {
+		// Look up pending posts before deciding the action, since a found post changes it
+		if err := c.resolvePendingPost(ctx, issue, false); err != nil {
+			errs = append(errs, err)
+
+			if abortsChannelUpdate(ctx, err) {
+				break
+			}
+
+			continue
+		}
+
 		action := issue.GetSlackAction()
 
 		if action == models.ActionNone {
@@ -347,6 +365,10 @@ func abortsChannelUpdate(ctx context.Context, err error) bool {
 }
 
 func (c *Client) UpdateSingleIssue(ctx context.Context, issue *models.Issue, reason string) error {
+	if err := c.resolvePendingPost(ctx, issue, false); err != nil {
+		return err
+	}
+
 	action := issue.GetSlackAction()
 
 	if action == models.ActionNone {
@@ -357,6 +379,10 @@ func (c *Client) UpdateSingleIssue(ctx context.Context, issue *models.Issue, rea
 }
 
 func (c *Client) UpdateSingleIssueWithThrottling(ctx context.Context, issue *models.Issue, reason string, issuesInChannel int) error {
+	if err := c.resolvePendingPost(ctx, issue, false); err != nil {
+		return err
+	}
+
 	action := issue.GetSlackAction()
 
 	if action == models.ActionNone {
@@ -374,6 +400,11 @@ func (c *Client) UpdateSingleIssueWithThrottling(ctx context.Context, issue *mod
 }
 
 func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string, updateIfMessageHasReplies bool) error {
+	// A pending post must be found before it can be deleted. If it is not found, it is assumed to not exist.
+	if err := c.resolvePendingPost(ctx, issue, true); err != nil {
+		return err
+	}
+
 	if !issue.HasSlackPost() || issue.SlackPostID == PostIDInvalidChannel {
 		issue.RegisterSlackPostDeleted()
 		return nil
@@ -517,6 +548,11 @@ func (c *Client) createOrUpdate(ctx context.Context, issue *models.Issue, reason
 		return nil
 	}
 
+	// A pending post that was not found yet (see resolvePendingPost) must not be created again until the grace period has elapsed.
+	if issue.HasPendingSlackPost() {
+		return nil
+	}
+
 	if !issue.HasSlackPost() {
 		reason += ": issue has no Slack post"
 		return c.create(ctx, issue, reason, action)
@@ -535,6 +571,15 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 	postID, err := c.api.ChatPostMessage(ctx, issue.LastAlert.SlackChannelID, options...)
 	if err != nil {
 		c.recordPostFailure(issue, err)
+
+		// The post may still have been created, e.g. after a timeout. Register it as pending, so that it is
+		// looked up in the channel history before a new post is created (see resolvePendingPost).
+		if errors.Is(err, internal.ErrPostOutcomeUnknown) {
+			logger.Infof("Outcome of Slack post is unknown, the post will be looked up before creating a new one: %s", err)
+			issue.RegisterSlackPostPending()
+			c.metrics.CounterInc(slackPendingPostsTotalMetric, pendingPostResultPending)
+			return nil
+		}
 
 		switch internal.ClassifySlackError(err) { //nolint:exhaustive // Remaining classes are returned as errors
 		case internal.SlackErrorClassChannelUnavailable:
@@ -735,7 +780,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 		params.IconEmoji = issue.LastAlert.IconEmoji
 	}
 
-	options = append(options, slack.MsgOptionPostMessageParameters(params))
+	options = append(options, slack.MsgOptionPostMessageParameters(params), slack.MsgOptionMetadata(postMetadata(issue, method)))
 
 	if method == postUpdateMethodUpdate || method == postUpdateMethodUpdateDeleted {
 		options = append(options, slack.MsgOptionUpdate(issue.SlackPostID))
