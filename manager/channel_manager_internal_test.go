@@ -472,3 +472,60 @@ func TestChannelManager_ProcessAlert_ResolvedWithoutIssue(t *testing.T) {
 	assert.InDelta(t, 1.0, metrics.counter(alertsResolvedWithoutIssueTotalMetric, channelID), 0)
 	assert.InDelta(t, 0.0, metrics.counter(issuesCreatedTotalMetric, channelID), 0)
 }
+
+// moveRecordingDB records the DB calls made when moving an issue.
+type moveRecordingDB struct {
+	stubDB
+
+	calls *[]string
+}
+
+func (m *moveRecordingDB) MoveIssue(_ context.Context, _ types.Issue, _, _ string) error {
+	*m.calls = append(*m.calls, "db.MoveIssue")
+	return nil
+}
+
+func (m *moveRecordingDB) SaveIssue(_ context.Context, _ types.Issue) error {
+	*m.calls = append(*m.calls, "db.SaveIssue")
+	return nil
+}
+
+// moveRecordingSlackClient records the Slack client calls made when moving an issue.
+type moveRecordingSlackClient struct {
+	stubSlackClient
+
+	calls *[]string
+}
+
+func (m *moveRecordingSlackClient) Delete(_ context.Context, _ *models.Issue, _ string, _ bool) error {
+	*m.calls = append(*m.calls, "slack.Delete")
+	return nil
+}
+
+func (m *moveRecordingSlackClient) UpdateSingleIssue(_ context.Context, issue *models.Issue, _ string) error {
+	*m.calls = append(*m.calls, "slack.UpdateSingleIssue:"+issue.LastAlert.SlackChannelID)
+	return nil
+}
+
+func TestChannelManager_MoveIssue_MovesInDatabaseBeforePosting(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+
+	cm := newTestChannelManager(t, "C-SOURCE", &moveRecordingDB{calls: &calls}, &moveRecordingSlackClient{calls: &calls}, &NoopChannelLocker{})
+
+	alert, _, _ := newTestAlertFromData(t, types.Alert{
+		SlackChannelID: "C-SOURCE",
+		CorrelationID:  "corr-123",
+		Header:         "header",
+		Severity:       types.AlertError,
+		Timestamp:      time.Now(),
+	})
+	alert.OriginalSlackChannelID = "C-SOURCE"
+	issue := models.NewIssue(alert, &mockLogger{})
+
+	err := cm.moveIssue(context.Background(), issue, "C-TARGET", models.MoveIssueReasonUserCommand, "user", &mockLogger{})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"slack.Delete", "db.MoveIssue", "slack.UpdateSingleIssue:C-TARGET", "db.SaveIssue"}, calls)
+}

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Duplicate Slack post prevention: when creating a post fails with an unknown outcome (timeout, HTTP 5xx, `fatal_error`, `internal_error`), the post is no longer retried. The issue is marked as pending (new `slackPostPendingSince` field in the stored issue JSON), and the post is looked up in the channel history before a new one is created. Found posts are adopted, and duplicates deleted. Issues with a pending post are not archived until it is resolved
+- Write-ahead save of issues before their Slack post is created, so that a post created right before a crash is adopted rather than posted again. Moved issues are now moved in the database before the post in the target channel is created
 - Issue posts carry message metadata (event type `slackmgr_issue`, or `slackmgr_issue_deleted` for soft-deleted posts, with the issue ID as payload). Metadata is visible to all users and apps in the workspace
 - `slack_pending_posts_total{result}` metric: Slack posts with unknown outcome, and how they were resolved (`pending`, `adopted`, `not_found`, `expired`, `lookup_failed`, `duplicate_deleted`)
 - API rejects alerts to read-only channels with `400` and reason `channel_read_only` (`alerts_rejected_total`). New `ChannelInfo.ChannelIsReadOnly` field

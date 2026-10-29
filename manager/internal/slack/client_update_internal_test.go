@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	gocache_store "github.com/eko/gocache/store/go_cache/v4"
+	gocache "github.com/patrickmn/go-cache"
 	slackapi "github.com/slack-go/slack"
 	"github.com/slackmgr/core/config"
 	"github.com/slackmgr/core/internal"
@@ -430,4 +432,20 @@ func TestAbortsChannelUpdate(t *testing.T) {
 			assert.Equal(t, tc.want, abortsChannelUpdate(tc.ctx, tc.err))
 		})
 	}
+}
+
+type noopQueueProducer struct{}
+
+func (noopQueueProducer) Send(_ context.Context, _, _, _ string) error { return nil }
+
+func TestConnect_RequiresIssueSaver(t *testing.T) {
+	t.Parallel()
+
+	c := newUpdateTestClient(t, &fakeSlackAPI{})
+	c.commandQueue = noopQueueProducer{}
+	c.cacheStore = gocache_store.NewGoCache(gocache.New(time.Minute, time.Minute))
+
+	err := c.Connect(context.Background())
+
+	require.EqualError(t, err, "issue saver must be set before connecting")
 }

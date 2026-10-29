@@ -51,6 +51,11 @@ type IssueFinder interface {
 	FindIssueBySlackPost(ctx context.Context, channelID string, slackPostID string, includeArchived bool) *models.Issue
 }
 
+// IssueSaver saves an issue to the database. See [Client.SetIssueSaver].
+type IssueSaver interface {
+	SaveIssue(ctx context.Context, issue types.Issue) error
+}
+
 type FifoQueueProducer interface {
 	Send(ctx context.Context, slackChannelID, dedupID, body string) error
 }
@@ -76,6 +81,7 @@ type Client struct {
 	api                slackAPI
 	commandQueue       FifoQueueProducer
 	issueFinder        IssueFinder
+	issueSaver         IssueSaver
 	cacheStore         store.StoreInterface
 	logger             types.Logger
 	metrics            types.Metrics
@@ -117,6 +123,13 @@ func (c *Client) SetIssueFinder(issueFinder IssueFinder) {
 	c.issueFinder = issueFinder
 }
 
+// SetIssueSaver sets the saver used to save an issue as pending before its Slack post is created (write-ahead).
+// If the process crashes after the post is created, but before the issue is saved with the post ID, the post is
+// then found in the channel history and adopted, rather than posted again. It must be called before [Client.Connect].
+func (c *Client) SetIssueSaver(issueSaver IssueSaver) {
+	c.issueSaver = issueSaver
+}
+
 // SetInsightsRecorder sets the recorder for Slack post insights events. A nil recorder disables recording.
 // It must be called before the client is used.
 func (c *Client) SetInsightsRecorder(recorder *insights.Recorder) {
@@ -146,6 +159,10 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	if c.managerSettings == nil {
 		return errors.New("channel settings must be set before connecting")
+	}
+
+	if c.issueSaver == nil {
+		return errors.New("issue saver must be set before connecting")
 	}
 
 	api := internal.NewSlackAPIClient(c.cacheStore, c.cfg.CacheKeyPrefix, c.logger, c.metrics, c.cfg.SlackClient, c.slackAPIClientOpts...)
@@ -568,6 +585,10 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 
 	logger := c.logger.WithFields(issue.LogFields()).WithField("post_update_reason", reason)
 
+	if err := c.savePendingPost(ctx, issue); err != nil {
+		return err
+	}
+
 	postID, err := c.api.ChatPostMessage(ctx, issue.LastAlert.SlackChannelID, options...)
 	if err != nil {
 		c.recordPostFailure(issue, err)
@@ -580,6 +601,9 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 			c.metrics.CounterInc(slackPendingPostsTotalMetric, pendingPostResultPending)
 			return nil
 		}
+
+		// The post was not created
+		issue.ClearSlackPostPending()
 
 		switch internal.ClassifySlackError(err) { //nolint:exhaustive // Remaining classes are returned as errors
 		case internal.SlackErrorClassChannelUnavailable:
@@ -605,6 +629,8 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 		return fmt.Errorf("failed to create Slack post for issue %s in channel %s: %w", issue.CorrelationID, issue.LastAlert.SlackChannelID, err)
 	}
 
+	issue.ClearSlackPostPending()
+
 	if postID == "" {
 		return fmt.Errorf("failed to create Slack post for issue %s in channel %s: Slack returned empty timestamp", issue.CorrelationID, issue.LastAlert.SlackChannelID)
 	}
@@ -613,6 +639,23 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 
 	logger.Info("Create Slack post")
 	c.recordPost(slackPostResultCreated, types.InsightsEventSlackPostCreated, string(action), issue)
+
+	return nil
+}
+
+// savePendingPost registers the issue post as pending, and saves the issue, before the post is created (see [Client.SetIssueSaver]).
+// The pending state is cleared again if the save fails. Without an issue saver, the issue is not saved.
+func (c *Client) savePendingPost(ctx context.Context, issue *models.Issue) error {
+	issue.RegisterSlackPostPending()
+
+	if c.issueSaver == nil {
+		return nil
+	}
+
+	if err := c.issueSaver.SaveIssue(ctx, issue); err != nil {
+		issue.ClearSlackPostPending()
+		return fmt.Errorf("failed to save issue %s in channel %s before creating Slack post: %w", issue.CorrelationID, issue.LastAlert.SlackChannelID, err)
+	}
 
 	return nil
 }

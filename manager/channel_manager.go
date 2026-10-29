@@ -1154,6 +1154,12 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 	// Register the move request on the issue. This will override the Slack channel ID on the last alert.
 	issue.RegisterMoveRequest(reason, username, targetChannel, channelName)
 
+	// Move the issue in the database before creating the new Slack post, since the Slack client saves the issue
+	// before posting (write-ahead), and the issue must then already be stored in the target channel.
+	if err := c.db.MoveIssue(ctx, issue, sourceChannel, targetChannel); err != nil {
+		return fmt.Errorf("failed to move issue in the database: %w", err)
+	}
+
 	// Create a new Slack post for the issue in the target channel.
 	// Errors from the Slack client are logged, but not returned.
 	// If the Slack post is not created from some reason, it will be created on the next issue processing cycle.
@@ -1161,10 +1167,9 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 		logger.Errorf("Failed to update moved issue in Slack: %s", err)
 	}
 
-	// Save the issue to the database, regardless of any Slack errors above.
-	// This ensures that the issue is available in the database, even if the Slack update have failed.
-	if err := c.db.MoveIssue(ctx, issue, sourceChannel, targetChannel); err != nil {
-		return fmt.Errorf("failed to move issue in the database: %w", err)
+	// Save the Slack post state to the database, regardless of any Slack errors above.
+	if err := c.db.SaveIssue(ctx, issue); err != nil {
+		return fmt.Errorf("failed to save moved issue to database: %w", err)
 	}
 
 	logger.Info("Issue moved to target channel")

@@ -245,6 +245,7 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	m.slackClient = slack.New(m.commandQueue, m.cacheStore, m.logger, m.metrics, m.cfg, m.managerSettings, coreinternal.WithRateLimitGate(m.gate))
 	m.slackClient.SetInsightsRecorder(recorder)
+	m.slackClient.SetIssueSaver(m.db)
 
 	if err := m.slackClient.Connect(ctx); err != nil {
 		return fmt.Errorf("failed to connect Slack client: %w", err)

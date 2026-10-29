@@ -93,6 +93,8 @@ Beyond grouping alerts by correlation ID, individual alerts can carry a list of 
 
 Creating a Slack post can fail in a way where the post may still have been created, for example after a timeout, an HTTP 5xx response, or a Slack `fatal_error`/`internal_error`. Such posts are not retried. Instead, the issue is marked as having a pending post, and the post is looked up in the channel history (`conversations.history`) before a new one is created. If found, the post is adopted by the issue, and any duplicates are deleted. If not found within 30 seconds, a new post is created. If the channel history cannot be read, a new post is created after 10 minutes. Issues with a pending post are not archived until the post is resolved.
 
+The same mechanism covers crashes: before a post is created, the issue is saved to the database as pending (write-ahead). If the process crashes after the post is created, but before the issue is saved with the post ID, the post is found and adopted when the issue is next processed. If the crash happened before the post was created, a new post is created after the 30 second grace period. This costs one extra database write per created post.
+
 To make posts identifiable, every issue post carries [message metadata](https://docs.slack.dev/messaging/message-metadata) with event type `slackmgr_issue` (or `slackmgr_issue_deleted` for posts that were updated to look deleted) and the issue ID as payload. Message metadata is visible to all users and apps in the workspace, so it contains nothing but the opaque issue ID.
 
 The `slack_pending_posts_total{result}` metric counts posts with an unknown outcome (`pending`) and how they were resolved (`adopted`, `not_found`, `expired`, `lookup_failed`, `duplicate_deleted`).
