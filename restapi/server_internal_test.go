@@ -1899,6 +1899,29 @@ func TestChannelInfoSyncer_GetChannelInfo(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, info.ChannelIsArchived)
 	})
+
+	t.Run("detects read-only channel", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("ListBotChannels", mock.Anything).Return([]*internal.ChannelSummary{}, nil)
+		slackClient.On("GetChannelInfo", mock.Anything, "C123").Return(&slack.Channel{
+			GroupConversation: slack.GroupConversation{
+				Conversation: slack.Conversation{IsReadOnly: true},
+			},
+		}, nil)
+		slackClient.On("GetUserIDsInChannel", mock.Anything, "C123").Return(map[string]struct{}{}, nil)
+		slackClient.On("BotIsInChannel", mock.Anything, "C123").Return(true, nil)
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		_ = syncer.Init(context.Background())
+
+		info, err := syncer.GetChannelInfo(context.Background(), "C123")
+
+		require.NoError(t, err)
+		assert.True(t, info.ChannelIsReadOnly)
+		assert.False(t, info.ChannelIsArchived)
+	})
 }
 
 func TestChannelInfoSyncer_ManagedChannels(t *testing.T) {

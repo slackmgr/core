@@ -92,6 +92,7 @@ func TestIsTransientError(t *testing.T) {
 		{name: SlackErrRequestTimeout, err: errors.New(SlackErrRequestTimeout)},
 		{name: SlackErrRateLimited, err: errors.New(SlackErrRateLimited)},
 		{name: SlackErrRateLimitedV2, err: errors.New(SlackErrRateLimitedV2)},
+		{name: SlackErrUpdateFailed, err: errors.New(SlackErrUpdateFailed)},
 	}
 
 	nonTransient := []struct {
@@ -105,6 +106,9 @@ func TestIsTransientError(t *testing.T) {
 		{name: SlackErrMessageNotFound, err: errors.New(SlackErrMessageNotFound)},
 		{name: SlackErrNotInChannel, err: errors.New(SlackErrNotInChannel)},
 		{name: SlackErrIsArchived, err: errors.New(SlackErrIsArchived)},
+		{name: SlackErrIsInactive, err: errors.New(SlackErrIsInactive)},
+		{name: SlackErrEditWindowClosed, err: errors.New(SlackErrEditWindowClosed)},
+		{name: SlackErrMsgBlocksTooLong, err: errors.New(SlackErrMsgBlocksTooLong)},
 		{name: "unknown error string", err: errors.New("foo")},
 	}
 
@@ -134,4 +138,55 @@ func (t testError) Error() string {
 
 func (t testError) Retryable() bool {
 	return t.Code >= 500
+}
+
+// TestClassifySlackError verifies the class of every known Slack error code, and the fallback for others.
+func TestClassifySlackError(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]SlackErrorClass{
+		SlackErrInternalError:      SlackErrorClassTransient,
+		SlackErrFatalError:         SlackErrorClassTransient,
+		SlackErrServiceUnavailable: SlackErrorClassTransient,
+		SlackErrRequestTimeout:     SlackErrorClassTransient,
+		SlackErrRateLimited:        SlackErrorClassTransient,
+		SlackErrRateLimitedV2:      SlackErrorClassTransient,
+		SlackErrUpdateFailed:       SlackErrorClassTransient,
+
+		SlackErrChannelNotFound:                   SlackErrorClassChannelUnavailable,
+		SlackErrInvalidChannelID:                  SlackErrorClassChannelUnavailable,
+		SlackErrIsArchived:                        SlackErrorClassChannelUnavailable,
+		SlackErrIsInactive:                        SlackErrorClassChannelUnavailable,
+		SlackErrRestrictedAction:                  SlackErrorClassChannelUnavailable,
+		SlackErrRestrictedActionReadOnlyChannel:   SlackErrorClassChannelUnavailable,
+		SlackErrRestrictedActionThreadOnlyChannel: SlackErrorClassChannelUnavailable,
+		SlackErrEKMAccessDenied:                   SlackErrorClassChannelUnavailable,
+
+		SlackErrNotInChannel: SlackErrorClassNotInChannel,
+
+		SlackErrMessageNotFound:   SlackErrorClassMessageUnavailable,
+		SlackErrCantUpdateMessage: SlackErrorClassMessageUnavailable,
+		SlackErrCantDeleteMessage: SlackErrorClassMessageUnavailable,
+		SlackErrEditWindowClosed:  SlackErrorClassMessageUnavailable,
+
+		SlackErrInvalidBlocks:                  SlackErrorClassInvalidContent,
+		SlackErrInvalidBlocksFormat:            SlackErrorClassInvalidContent,
+		SlackErrMsgBlocksTooLong:               SlackErrorClassInvalidContent,
+		SlackErrMsgTooLong:                     SlackErrorClassInvalidContent,
+		SlackErrTooManyAttachments:             SlackErrorClassInvalidContent,
+		SlackErrAttachmentPayloadLimitExceeded: SlackErrorClassInvalidContent,
+		SlackErrBlockMismatch:                  SlackErrorClassInvalidContent,
+		SlackErrNoText:                         SlackErrorClassInvalidContent,
+
+		SlackErrNoSuchSubTeam:  SlackErrorClassOther,
+		SlackErrThreadNotFound: SlackErrorClassOther,
+		"invalid_auth":         SlackErrorClassOther,
+		"unknown error":        SlackErrorClassOther,
+	}
+
+	for slackErr, want := range tests {
+		assert.Equal(t, want, ClassifySlackError(errors.New(slackErr)), slackErr)
+	}
+
+	assert.Equal(t, SlackErrorClassOther, ClassifySlackError(nil))
 }

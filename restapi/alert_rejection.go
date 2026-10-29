@@ -22,6 +22,7 @@ const (
 	rejectReasonChannelLookupFailed  = "channel_lookup_failed"
 	rejectReasonChannelNotFound      = "channel_not_found"
 	rejectReasonChannelArchived      = "channel_archived"
+	rejectReasonChannelReadOnly      = "channel_read_only"
 	rejectReasonNotInChannel         = "not_in_channel"
 	rejectReasonTooManyUsers         = "too_many_users"
 	rejectReasonRateLimited          = "rate_limited"
@@ -36,7 +37,7 @@ const (
 var allRejectReasons = []string{ //nolint:gochecknoglobals // Constant list
 	rejectReasonInvalidBody, rejectReasonEmptyRequest, rejectReasonValidation, rejectReasonNoRoute,
 	rejectReasonTooManyInRequest, rejectReasonChannelLookupFailed, rejectReasonChannelNotFound,
-	rejectReasonChannelArchived, rejectReasonNotInChannel, rejectReasonTooManyUsers, rejectReasonRateLimited,
+	rejectReasonChannelArchived, rejectReasonChannelReadOnly, rejectReasonNotInChannel, rejectReasonTooManyUsers, rejectReasonRateLimited,
 	rejectReasonMissingEncryptionKey, rejectReasonEncryptionFailed, rejectReasonQueueError,
 }
 

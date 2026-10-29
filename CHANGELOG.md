@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- API rejects alerts to read-only channels with `400` and reason `channel_read_only` (`alerts_rejected_total`). New `ChannelInfo.ChannelIsReadOnly` field
+
+### Fixed
+- More permanent Slack errors are handled per issue instead of failing on every channel update cycle:
+  - Channel unavailable (issue marked with an invalid-channel post ID): `is_inactive` (frozen or inactive channel), `invalid_channel_id`, `restricted_action`, `restricted_action_read_only_channel`, `restricted_action_thread_only_channel`, `ekm_access_denied`
+  - Message can no longer be edited (a new post is created): `edit_window_closed`
+  - Invalid message content (issue marked as invalid blocks): `invalid_blocks_format`, `msg_blocks_too_long`, `msg_too_long`, `too_many_attachments`, `attachment_payload_limit_exceeded`, `block_mismatch`, `no_text`
+- Slack `update_failed` errors are retried as transient
+
 ## [0.16.0] - 2026-10-21
 
 ### Added

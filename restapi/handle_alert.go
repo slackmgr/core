@@ -335,6 +335,10 @@ func (s *Server) validateChannelInfo(channel string, channelInfo *ChannelInfo) e
 		return newAlertRejection(rejectReasonChannelArchived, "channel %s is archived", channel)
 	}
 
+	if channelInfo.ChannelIsReadOnly {
+		return newAlertRejection(rejectReasonChannelReadOnly, "channel %s is read-only", channel)
+	}
+
 	if !channelInfo.ManagerIsInChannel {
 		return newAlertRejection(rejectReasonNotInChannel, "the Slack Manager integration is not in channel %s", channel)
 	}

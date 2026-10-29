@@ -349,7 +349,7 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string,
 	if deleteOrUpdateErr != nil {
 		c.recordPostFailure(issue, deleteOrUpdateErr)
 
-		if deleteOrUpdateErr.Error() != internal.SlackErrChannelNotFound && deleteOrUpdateErr.Error() != internal.SlackErrIsArchived && deleteOrUpdateErr.Error() != internal.SlackErrMessageNotFound && deleteOrUpdateErr.Error() != internal.SlackErrCantDeleteMessage {
+		if !isIgnorableDeleteError(deleteOrUpdateErr) {
 			return fmt.Errorf("failed to delete Slack post for issue %s and message %s in channel %s: %w", issue.CorrelationID, issue.SlackPostID, issue.LastAlert.SlackChannelID, deleteOrUpdateErr)
 		}
 
@@ -378,7 +378,7 @@ func (c *Client) DeletePost(ctx context.Context, channelID, ts string) error {
 
 	err := c.api.ChatDeleteMessage(ctx, channelID, ts)
 	if err != nil {
-		if err.Error() != internal.SlackErrChannelNotFound && err.Error() != internal.SlackErrIsArchived && err.Error() != internal.SlackErrMessageNotFound && err.Error() != internal.SlackErrCantDeleteMessage {
+		if !isIgnorableDeleteError(err) {
 			return fmt.Errorf("failed to delete Slack post %s in channel %s: %w", ts, channelID, err)
 		}
 
@@ -472,25 +472,22 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 	if err != nil {
 		c.recordPostFailure(issue, err)
 
-		// Channel not found or channel is archived.
-		// Log error and use dummy post ID to avoid further updates on this issue.
-		if err.Error() == internal.SlackErrChannelNotFound || err.Error() == internal.SlackErrIsArchived {
+		switch internal.ClassifySlackError(err) { //nolint:exhaustive // Remaining classes are returned as errors
+		case internal.SlackErrorClassChannelUnavailable:
+			// Channel not found, archived, inactive or otherwise not accepting posts.
+			// Log error and use dummy post ID to avoid further updates on this issue.
 			logger.Errorf("Failed to create Slack post for issue %s in channel %s: %s", issue.CorrelationID, issue.LastAlert.SlackChannelID, err.Error())
 			issue.RegisterSlackPostCreatedOrUpdated(PostIDInvalidChannel, action)
 			return nil
-		}
-
-		// Invalid blocks means something is wrong with the message formatting. It may be a bug in this application, or some unexpected data from the alert API.
-		// Log error and register the issue as invalid.
-		if err.Error() == internal.SlackErrInvalidBlocks {
+		case internal.SlackErrorClassInvalidContent:
+			// Invalid content means something is wrong with the message formatting. It may be a bug in this application, or some unexpected data from the alert API.
+			// Log error and register the issue as invalid.
 			logger.Errorf("Failed to create Slack post for issue %s in channel %s: %s", issue.CorrelationID, issue.LastAlert.SlackChannelID, err.Error())
 			issue.RegisterSlackPostInvalidBlocks()
 			return nil
-		}
-
-		// Slack App is not added as integration in channel. Should only happen in race conditions, since the alert API checks this.
-		// Log error and reset post ID.
-		if err.Error() == internal.SlackErrNotInChannel {
+		case internal.SlackErrorClassNotInChannel:
+			// Slack App is not added as integration in channel. Should only happen in race conditions, since the alert API checks this.
+			// Log error and reset post ID.
 			logger.Errorf("Failed to create Slack post for issue %s in channel %s: %s", issue.CorrelationID, issue.LastAlert.SlackChannelID, err.Error())
 			issue.RegisterSlackPostDeleted()
 			return nil
@@ -522,33 +519,28 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, reason string,
 
 		logger = logger.WithField("reason", err.Error())
 
-		// Channel not found or channel is archived.
-		// Log error and use dummy post ID to avoid further updates on this issue.
-		if err.Error() == internal.SlackErrChannelNotFound || err.Error() == internal.SlackErrIsArchived {
-			logger.Errorf("Failed to update Slack post (channel not found or archived): %s", err)
+		switch internal.ClassifySlackError(err) { //nolint:exhaustive // Remaining classes are returned as errors
+		case internal.SlackErrorClassChannelUnavailable:
+			// Channel not found, archived, inactive or otherwise not accepting posts.
+			// Log error and use dummy post ID to avoid further updates on this issue.
+			logger.Errorf("Failed to update Slack post (channel unavailable): %s", err)
 			issue.RegisterSlackPostCreatedOrUpdated(PostIDInvalidChannel, action)
 			return nil
-		}
-
-		// Message not found or some other possibly transient message error.
-		// Log info and reset post ID.
-		if err.Error() == internal.SlackErrMessageNotFound || err.Error() == internal.SlackErrCantUpdateMessage {
-			logger.Infof("Failed to update Slack post (transient): %s", err)
+		case internal.SlackErrorClassMessageUnavailable:
+			// Message not found or can no longer be edited.
+			// Log info and reset post ID, so that a new post is created.
+			logger.Infof("Failed to update Slack post (message unavailable): %s", err)
 			issue.RegisterSlackPostDeleted()
 			return nil
-		}
-
-		// Invalid blocks means something is wrong with the message formatting, i.e. a bug in this application.
-		// Log error and register the issue as invalid.
-		if err.Error() == internal.SlackErrInvalidBlocks {
-			logger.Errorf("Failed to update Slack post (invalid blocks): %s", err)
+		case internal.SlackErrorClassInvalidContent:
+			// Invalid content means something is wrong with the message formatting, i.e. a bug in this application.
+			// Log error and register the issue as invalid.
+			logger.Errorf("Failed to update Slack post (invalid content): %s", err)
 			issue.RegisterSlackPostInvalidBlocks()
 			return nil
-		}
-
-		// Slack App integration is not in channel. Should only happen in race conditions, since the alert API checks this.
-		// Log error and reset post ID.
-		if err.Error() == internal.SlackErrNotInChannel {
+		case internal.SlackErrorClassNotInChannel:
+			// Slack App integration is not in channel. Should only happen in race conditions, since the alert API checks this.
+			// Log error and reset post ID.
 			logger.Errorf("Failed to update Slack post (not in channel): %s", err)
 			issue.RegisterSlackPostDeleted()
 			return nil
@@ -993,16 +985,23 @@ func (c *Client) recordPostFailure(issue *models.Issue, err error) {
 
 // postFailureReason classifies a Slack API error as one of the types.InsightsReason* values for failed posts.
 func postFailureReason(err error) string {
-	switch err.Error() {
-	case internal.SlackErrChannelNotFound, internal.SlackErrIsArchived:
+	switch internal.ClassifySlackError(err) { //nolint:exhaustive // Remaining classes map to the default reason
+	case internal.SlackErrorClassChannelUnavailable:
 		return types.InsightsReasonChannelUnavailable
-	case internal.SlackErrInvalidBlocks:
+	case internal.SlackErrorClassInvalidContent:
 		return types.InsightsReasonInvalidBlocks
-	case internal.SlackErrNotInChannel:
+	case internal.SlackErrorClassNotInChannel:
 		return types.InsightsReasonNotInChannel
-	case internal.SlackErrMessageNotFound, internal.SlackErrCantUpdateMessage, internal.SlackErrCantDeleteMessage:
+	case internal.SlackErrorClassMessageUnavailable:
 		return types.InsightsReasonMessageNotFound
 	default:
 		return types.InsightsReasonAPIError
 	}
+}
+
+// isIgnorableDeleteError reports whether a failed post deletion can be ignored, because the
+// channel or the message is no longer available.
+func isIgnorableDeleteError(err error) bool {
+	class := internal.ClassifySlackError(err)
+	return class == internal.SlackErrorClassChannelUnavailable || class == internal.SlackErrorClassMessageUnavailable
 }

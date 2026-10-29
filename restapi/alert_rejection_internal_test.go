@@ -132,6 +132,14 @@ func TestServer_HandleAlerts_RejectionMetrics(t *testing.T) {
 			wantCount:   2,
 		},
 		{
+			name:        "channel read-only",
+			body:        twoAlerts,
+			channelInfo: &ChannelInfo{ChannelExists: true, ChannelIsReadOnly: true, ManagerIsInChannel: true},
+			wantStatus:  http.StatusBadRequest,
+			wantReason:  rejectReasonChannelReadOnly,
+			wantCount:   2,
+		},
+		{
 			name:        "not in channel",
 			body:        twoAlerts,
 			channelInfo: &ChannelInfo{ChannelExists: true},
