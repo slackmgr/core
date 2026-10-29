@@ -38,12 +38,16 @@ type fakeSlackAPI struct {
 	// hasReplies is returned by MessageHasReplies.
 	hasReplies bool
 
-	mu           sync.Mutex
-	posts        []string
-	updates      []string
-	deletes      []string
-	metadata     []string // Message metadata JSON of all posts and updates, in call order
-	historyCalls int
+	// blockingDeletes are message timestamps where ChatDeleteMessage blocks until the context is cancelled.
+	blockingDeletes map[string]bool
+
+	mu            sync.Mutex
+	posts         []string
+	updates       []string
+	deletes       []string
+	metadata      []string // Message metadata JSON of all posts and updates, in call order
+	historyCalls  int
+	historyOldest []time.Time // The oldest parameter of all ListBotMessages calls, in call order
 }
 
 func (f *fakeSlackAPI) ChatPostMessage(_ context.Context, channelID string, options ...slackapi.MsgOption) (string, error) {
@@ -95,6 +99,11 @@ func (f *fakeSlackAPI) ChatDeleteMessage(ctx context.Context, _ string, ts strin
 	f.deletes = append(f.deletes, ts)
 	f.mu.Unlock()
 
+	if f.blockingDeletes[ts] {
+		<-ctx.Done()
+		return &url.Error{Op: "Post", URL: "https://slack.com/api/chat.delete", Err: ctx.Err()}
+	}
+
 	if f.deleteErr != nil {
 		return f.deleteErr(ts)
 	}
@@ -106,9 +115,10 @@ func (f *fakeSlackAPI) MessageHasReplies(_ context.Context, _, _ string) (bool, 
 	return f.hasReplies, nil
 }
 
-func (f *fakeSlackAPI) ListBotMessages(_ context.Context, _ string, _ time.Time, _ string) ([]slackapi.Message, error) {
+func (f *fakeSlackAPI) ListBotMessages(_ context.Context, _ string, oldest time.Time, _ string) ([]slackapi.Message, error) {
 	f.mu.Lock()
 	f.historyCalls++
+	f.historyOldest = append(f.historyOldest, oldest)
 	f.mu.Unlock()
 
 	return f.history, f.historyErr
@@ -128,6 +138,7 @@ func newUpdateTestClient(t *testing.T, api *fakeSlackAPI) *Client {
 
 	c := New(nil, nil, &types.NoopLogger{}, &types.NoopMetrics{}, cfg, models.NewManagerSettingsWrapper(settings))
 	c.api = api
+	c.SetIssueSaver(&fakeIssueSaver{api: api})
 
 	return c
 }
@@ -218,6 +229,50 @@ func TestUpdate_AbortingDeleteErrorSkipsCreateAndUpdate(t *testing.T) {
 	assert.Empty(t, api.posts)
 	assert.Empty(t, api.updates)
 	assert.Equal(t, "ts-a", toDelete.SlackPostID)
+}
+
+func TestUpdate_CancelledDeletesAreNotReturnedAsErrors(t *testing.T) {
+	t.Parallel()
+
+	api := &fakeSlackAPI{
+		deleteErr: func(ts string) error {
+			if ts == "ts-a" {
+				return slackapi.SlackErrorResponse{Err: internal.SlackErrInvalidAuth}
+			}
+			return nil
+		},
+		blockingDeletes: map[string]bool{"ts-b": true, "ts-c": true},
+	}
+	c := newUpdateTestClient(t, api)
+
+	issues := []*models.Issue{newUpdateTestIssue("a", "ts-a"), newUpdateTestIssue("b", "ts-b"), newUpdateTestIssue("c", "ts-c")}
+	for _, issue := range issues {
+		issue.SlackPostNeedsDelete = true
+	}
+
+	err := c.Update(context.Background(), updateTestChannel, issues)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), internal.SlackErrInvalidAuth)
+	require.NotErrorIs(t, err, context.Canceled, "deletes cancelled by the aborting error are not returned")
+	assert.ElementsMatch(t, []string{"ts-a", "ts-b", "ts-c"}, api.deletes)
+}
+
+func TestUpdate_CancelledParentContextIsReturned(t *testing.T) {
+	t.Parallel()
+
+	api := &fakeSlackAPI{blockingDeletes: map[string]bool{"ts-a": true}}
+	c := newUpdateTestClient(t, api)
+
+	issue := newUpdateTestIssue("a", "ts-a")
+	issue.SlackPostNeedsDelete = true
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := c.Update(ctx, updateTestChannel, []*models.Issue{issue})
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
 func TestUpdate_FailedCreateDoesNotBlockOtherIssues(t *testing.T) {
@@ -442,6 +497,7 @@ func TestConnect_RequiresIssueSaver(t *testing.T) {
 	t.Parallel()
 
 	c := newUpdateTestClient(t, &fakeSlackAPI{})
+	c.issueSaver = nil
 	c.commandQueue = noopQueueProducer{}
 	c.cacheStore = gocache_store.NewGoCache(gocache.New(time.Minute, time.Minute))
 

@@ -1504,7 +1504,7 @@ func TestIssue_SlackPostPending(t *testing.T) {
 		issue := NewIssue(createTestAlert(), &mockLogger{})
 
 		assert.False(t, issue.HasPendingSlackPost())
-		assert.False(t, issue.SlackPostPendingGraceElapsed())
+		assert.False(t, issue.SlackPostPendingGraceElapsedAt(time.Now()))
 		assert.False(t, issue.SlackPostPendingExpired())
 	})
 
@@ -1515,7 +1515,7 @@ func TestIssue_SlackPostPending(t *testing.T) {
 
 		issue.RegisterSlackPostPending()
 		assert.True(t, issue.HasPendingSlackPost())
-		assert.False(t, issue.SlackPostPendingGraceElapsed())
+		assert.False(t, issue.SlackPostPendingGraceElapsedAt(time.Now()))
 		assert.False(t, issue.SlackPostPendingExpired())
 
 		issue.ClearSlackPostPending()
@@ -1528,11 +1528,13 @@ func TestIssue_SlackPostPending(t *testing.T) {
 		issue := NewIssue(createTestAlert(), &mockLogger{})
 
 		issue.SlackPostPendingSince = time.Now().Add(-SlackPostPendingGracePeriod - time.Second)
-		assert.True(t, issue.SlackPostPendingGraceElapsed())
+		assert.True(t, issue.SlackPostPendingGraceElapsedAt(time.Now()))
 		assert.False(t, issue.SlackPostPendingExpired())
 
+		assert.False(t, issue.SlackPostPendingGraceElapsedAt(time.Now().Add(-2*time.Second)), "grace is evaluated at the given time")
+
 		issue.SlackPostPendingSince = time.Now().Add(-SlackPostPendingMaxAge - time.Second)
-		assert.True(t, issue.SlackPostPendingGraceElapsed())
+		assert.True(t, issue.SlackPostPendingGraceElapsedAt(time.Now()))
 		assert.True(t, issue.SlackPostPendingExpired())
 	})
 

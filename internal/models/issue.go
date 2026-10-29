@@ -331,9 +331,10 @@ func (issue *Issue) HasPendingSlackPost() bool {
 	return !issue.SlackPostPendingSince.IsZero()
 }
 
-// SlackPostPendingGraceElapsed returns true if the issue has had a pending Slack post for longer than [SlackPostPendingGracePeriod].
-func (issue *Issue) SlackPostPendingGraceElapsed() bool {
-	return issue.HasPendingSlackPost() && nowFunc().Sub(issue.SlackPostPendingSince) > SlackPostPendingGracePeriod
+// SlackPostPendingGraceElapsedAt returns true if, at time t (e.g. when the channel history was read), the issue
+// had a pending Slack post for longer than [SlackPostPendingGracePeriod].
+func (issue *Issue) SlackPostPendingGraceElapsedAt(t time.Time) bool {
+	return issue.HasPendingSlackPost() && t.Sub(issue.SlackPostPendingSince) > SlackPostPendingGracePeriod
 }
 
 // SlackPostPendingExpired returns true if the issue has had a pending Slack post for longer than [SlackPostPendingMaxAge].

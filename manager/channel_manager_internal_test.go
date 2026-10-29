@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/slackmgr/core/config"
 	"github.com/slackmgr/core/internal/models"
+	slack "github.com/slackmgr/core/manager/internal/slack"
 	"github.com/slackmgr/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -477,11 +479,22 @@ func TestChannelManager_ProcessAlert_ResolvedWithoutIssue(t *testing.T) {
 type moveRecordingDB struct {
 	stubDB
 
-	calls *[]string
+	calls   *[]string
+	moveErr error
 }
 
-func (m *moveRecordingDB) MoveIssue(_ context.Context, _ types.Issue, _, _ string) error {
-	*m.calls = append(*m.calls, "db.MoveIssue")
+func (m *moveRecordingDB) MoveIssue(_ context.Context, issue types.Issue, _, _ string) error {
+	issueModel, ok := issue.(*models.Issue)
+	if !ok {
+		return fmt.Errorf("unexpected issue type %T", issue)
+	}
+
+	*m.calls = append(*m.calls, fmt.Sprintf("db.MoveIssue:pending=%t", issueModel.HasPendingSlackPost()))
+	return m.moveErr
+}
+
+func (m *moveRecordingDB) SaveMoveMapping(_ context.Context, _ types.MoveMapping) error {
+	*m.calls = append(*m.calls, "db.SaveMoveMapping")
 	return nil
 }
 
@@ -494,16 +507,17 @@ func (m *moveRecordingDB) SaveIssue(_ context.Context, _ types.Issue) error {
 type moveRecordingSlackClient struct {
 	stubSlackClient
 
-	calls *[]string
+	calls     *[]string
+	deleteErr error
 }
 
 func (m *moveRecordingSlackClient) Delete(_ context.Context, _ *models.Issue, _ string, _ bool) error {
 	*m.calls = append(*m.calls, "slack.Delete")
-	return nil
+	return m.deleteErr
 }
 
 func (m *moveRecordingSlackClient) UpdateSingleIssue(_ context.Context, issue *models.Issue, _ string) error {
-	*m.calls = append(*m.calls, "slack.UpdateSingleIssue:"+issue.LastAlert.SlackChannelID)
+	*m.calls = append(*m.calls, fmt.Sprintf("slack.UpdateSingleIssue:%s:pending=%t", issue.LastAlert.SlackChannelID, issue.HasPendingSlackPost()))
 	return nil
 }
 
@@ -527,5 +541,97 @@ func TestChannelManager_MoveIssue_MovesInDatabaseBeforePosting(t *testing.T) {
 	err := cm.moveIssue(context.Background(), issue, "C-TARGET", models.MoveIssueReasonUserCommand, "user", &mockLogger{})
 
 	require.NoError(t, err)
-	assert.Equal(t, []string{"slack.Delete", "db.MoveIssue", "slack.UpdateSingleIssue:C-TARGET", "db.SaveIssue"}, calls)
+
+	// The issue is moved as pending, so that the target channel waits for the post rather than creating its own,
+	// but the pending state is cleared before the post is created here.
+	assert.Equal(t, []string{"slack.Delete", "db.SaveMoveMapping", "db.MoveIssue:pending=true", "slack.UpdateSingleIssue:C-TARGET:pending=false", "db.SaveIssue"}, calls)
+}
+
+func TestChannelManager_MoveIssue_DatabaseErrorClearsPending(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+
+	cm := newTestChannelManager(t, "C-SOURCE", &moveRecordingDB{calls: &calls, moveErr: errors.New("db down")}, &moveRecordingSlackClient{calls: &calls}, &NoopChannelLocker{})
+
+	alert, _, _ := newTestAlertFromData(t, types.Alert{
+		SlackChannelID: "C-SOURCE",
+		CorrelationID:  "corr-123",
+		Header:         "header",
+		Severity:       types.AlertError,
+		Timestamp:      time.Now(),
+	})
+	alert.OriginalSlackChannelID = "C-SOURCE"
+	issue := models.NewIssue(alert, &mockLogger{})
+
+	err := cm.moveIssue(context.Background(), issue, "C-TARGET", models.MoveIssueReasonUserCommand, "user", &mockLogger{})
+
+	require.ErrorContains(t, err, "db down")
+	assert.False(t, issue.HasPendingSlackPost())
+	assert.Equal(t, []string{"slack.Delete", "db.SaveMoveMapping", "db.MoveIssue:pending=true"}, calls)
+}
+
+func TestChannelManager_MoveIssue_PostponedForUnresolvedPendingPost(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+
+	slackClient := &moveRecordingSlackClient{calls: &calls, deleteErr: slack.ErrPendingPostUnresolved}
+	cm := newTestChannelManager(t, "C-SOURCE", &moveRecordingDB{calls: &calls}, slackClient, &NoopChannelLocker{})
+
+	alert, _, _ := newTestAlertFromData(t, types.Alert{
+		SlackChannelID: "C-SOURCE",
+		CorrelationID:  "corr-123",
+		Header:         "header",
+		Severity:       types.AlertError,
+		Timestamp:      time.Now(),
+	})
+	alert.OriginalSlackChannelID = "C-SOURCE"
+	issue := models.NewIssue(alert, &mockLogger{})
+
+	err := cm.moveIssue(context.Background(), issue, "C-TARGET", models.MoveIssueReasonEscalation, "N/A", &mockLogger{})
+
+	require.ErrorIs(t, err, slack.ErrPendingPostUnresolved)
+	assert.Equal(t, []string{"slack.Delete"}, calls, "nothing is changed before the post is deleted, e.g. the move mapping")
+	assert.Equal(t, "C-SOURCE", issue.LastAlert.SlackChannelID)
+}
+
+// postponingSlackClient is a Slack client where every delete is postponed for an unresolved pending post,
+// and that records the issues passed to Update.
+type postponingSlackClient struct {
+	stubSlackClient
+
+	updated []*models.Issue
+}
+
+func (p *postponingSlackClient) Delete(_ context.Context, _ *models.Issue, _ string, _ bool) error {
+	return slack.ErrPendingPostUnresolved
+}
+
+func (p *postponingSlackClient) Update(_ context.Context, _ string, issues []*models.Issue) error {
+	p.updated = append(p.updated, issues...)
+	return nil
+}
+
+func TestChannelManager_ProcessActiveIssues_EscalationMovePostponed(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+
+	body := existingIssueJSON(t, types.AlertError, now, func(issue *models.Issue) {
+		issue.SlackPostID = ""
+		issue.SlackPostPendingSince = now
+		issue.Created = now.Add(-time.Minute)
+		issue.LastAlert.Escalation = []*types.Escalation{{DelaySeconds: 0, Severity: types.AlertPanic, MoveToChannel: "C-TARGET"}}
+	})
+
+	slackClient := &postponingSlackClient{}
+	cm := newTestChannelManager(t, insightsTestChannel, &insightsStubDB{openIssues: map[string]json.RawMessage{"i1": body}}, slackClient, &NoopChannelLocker{})
+
+	openIssues, err := cm.processActiveIssues(context.Background(), time.Second)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, openIssues, "the issue is still open in this channel")
+	require.Len(t, slackClient.updated, 1, "the issue is updated in this channel, since it was not moved")
+	assert.Equal(t, insightsTestChannel, slackClient.updated[0].LastAlert.SlackChannelID)
 }

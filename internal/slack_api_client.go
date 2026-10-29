@@ -66,6 +66,7 @@ type SlackAPIClient struct {
 	sem       *semaphore.Weighted // limits concurrent Slack API calls
 	connected bool
 	botUserID string
+	botID     string
 }
 
 // WithRateLimitGate is a functional option that wires a RateLimitSignaler into
@@ -150,6 +151,7 @@ func (c *SlackAPIClient) Connect(ctx context.Context) (*slack.AuthTestResponse, 
 	}
 
 	c.botUserID = response.UserID
+	c.botID = response.BotID
 
 	c.logger.Infof("Slack authorization tested OK with bot user %s (%s)", response.User, response.UserID)
 
@@ -190,6 +192,8 @@ func (c *SlackAPIClient) ChatPostMessage(ctx context.Context, channelID string, 
 
 // ListBotMessages returns the top-level messages in a channel that were posted by this bot after oldest, and have
 // message metadata with the given event type. Metadata is included in the returned messages.
+// Messages are matched on the bot ID, since messages posted with as_user=false (e.g. with a custom username) are
+// returned as bot_message without a user ID.
 // An error is returned if the channel has too many messages since oldest to read within a bounded number of pages.
 func (c *SlackAPIClient) ListBotMessages(ctx context.Context, channelID string, oldest time.Time, eventType string) ([]slack.Message, error) {
 	if err := c.checkConnected(); err != nil {
@@ -198,6 +202,10 @@ func (c *SlackAPIClient) ListBotMessages(ctx context.Context, channelID string, 
 
 	if channelID == "" {
 		return nil, errors.New("channelID cannot be empty")
+	}
+
+	if c.botID == "" {
+		return nil, errors.New("bot ID is unknown: the token is not a bot token")
 	}
 
 	action := "conversations.history"
@@ -224,7 +232,7 @@ func (c *SlackAPIClient) ListBotMessages(ctx context.Context, channelID string, 
 		}
 
 		for _, msg := range resp.Messages {
-			if msg.User == c.botUserID && msg.Metadata.EventType == eventType {
+			if msg.BotID == c.botID && msg.Metadata.EventType == eventType {
 				result = append(result, msg)
 			}
 		}

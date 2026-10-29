@@ -89,6 +89,7 @@ type Client struct {
 	managerSettings    *models.ManagerSettingsWrapper
 	slackAPIClientOpts []func(*internal.SlackAPIClient)
 	insights           *insights.Recorder
+	historyCache       *postHistoryCache
 
 	// socketHandler is set atomically when RunSocketMode starts.
 	// Uses atomic.Pointer for safe cross-goroutine access.
@@ -116,6 +117,7 @@ func New(commandHandler FifoQueueProducer, cacheStore store.StoreInterface, logg
 		cfg:                cfg,
 		managerSettings:    managerSettings,
 		slackAPIClientOpts: slackAPIClientOpts,
+		historyCache:       newPostHistoryCache(),
 	}
 }
 
@@ -125,7 +127,7 @@ func (c *Client) SetIssueFinder(issueFinder IssueFinder) {
 
 // SetIssueSaver sets the saver used to save an issue as pending before its Slack post is created (write-ahead).
 // If the process crashes after the post is created, but before the issue is saved with the post ID, the post is
-// then found in the channel history and adopted, rather than posted again. It must be called before [Client.Connect].
+// then found in the channel history and adopted, rather than posted again. It is required, and must be called before [Client.Connect].
 func (c *Client) SetIssueSaver(issueSaver IssueSaver) {
 	c.issueSaver = issueSaver
 }
@@ -254,6 +256,9 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 		return issues[i].IsLowerPriorityThan(issues[j])
 	})
 
+	// Look up all pending posts in the channel with one history read, rather than one per issue
+	c.prefetchPendingPosts(ctx, issues)
+
 	// Reordering is allowed when the channel config allows it AND the number of active issues in the channel is small enough
 	allowIssueReordering := c.managerSettings.GetSettings().OrderIssuesBySeverity(channelID, openIssueCount)
 
@@ -293,6 +298,18 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 	for _, d := range deletes {
 		wg.Go(func() {
 			if err := c.Delete(deleteCtx, d.issue, d.reason, true); err != nil {
+				// Skip errors caused by cancelling the remaining deletes below. The error that caused it is already collected.
+				if errors.Is(err, context.Canceled) && deleteCtx.Err() != nil && ctx.Err() == nil {
+					return
+				}
+
+				// The issue keeps its delete flag, and is skipped by the create/update phase below while pending.
+				// The delete is retried in the next cycle.
+				if errors.Is(err, ErrPendingPostUnresolved) {
+					c.logger.WithFields(d.issue.LogFields()).Debug("Slack post delete postponed until the pending post is resolved")
+					return
+				}
+
 				mu.Lock()
 				errs = append(errs, err)
 				mu.Unlock()
@@ -326,10 +343,10 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 	// Go through all the issues and create/update Slack post where needed
 	for _, issue := range issues {
 		// Look up pending posts before deciding the action, since a found post changes it
-		if err := c.resolvePendingPost(ctx, issue, false); err != nil {
+		if err := c.resolvePendingPost(ctx, issue); err != nil {
 			errs = append(errs, err)
 
-			if abortsChannelUpdate(ctx, err) {
+			if lookupAbortsChannelUpdate(ctx, err) {
 				break
 			}
 
@@ -381,8 +398,19 @@ func abortsChannelUpdate(ctx context.Context, err error) bool {
 	return internal.ClassifySlackError(err) == internal.SlackErrorClassAuth
 }
 
+// lookupAbortsChannelUpdate is [abortsChannelUpdate] for failed pending post lookups. Rate limit and transient errors
+// do not abort the channel update, since they are specific to the history method, and the failed lookup is cached
+// (see [postHistoryCache]), so the remaining pending issues fail fast rather than retrying.
+func lookupAbortsChannelUpdate(ctx context.Context, err error) bool {
+	if ctx.Err() != nil || errors.Is(err, internal.ErrNotConnected) {
+		return true
+	}
+
+	return internal.ClassifySlackError(err) == internal.SlackErrorClassAuth
+}
+
 func (c *Client) UpdateSingleIssue(ctx context.Context, issue *models.Issue, reason string) error {
-	if err := c.resolvePendingPost(ctx, issue, false); err != nil {
+	if err := c.resolvePendingPost(ctx, issue); err != nil {
 		return err
 	}
 
@@ -396,7 +424,7 @@ func (c *Client) UpdateSingleIssue(ctx context.Context, issue *models.Issue, rea
 }
 
 func (c *Client) UpdateSingleIssueWithThrottling(ctx context.Context, issue *models.Issue, reason string, issuesInChannel int) error {
-	if err := c.resolvePendingPost(ctx, issue, false); err != nil {
+	if err := c.resolvePendingPost(ctx, issue); err != nil {
 		return err
 	}
 
@@ -417,9 +445,14 @@ func (c *Client) UpdateSingleIssueWithThrottling(ctx context.Context, issue *mod
 }
 
 func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string, updateIfMessageHasReplies bool) error {
-	// A pending post must be found before it can be deleted. If it is not found, it is assumed to not exist.
-	if err := c.resolvePendingPost(ctx, issue, true); err != nil {
+	// A pending post must be found before it can be deleted. If it is not found, it is assumed to not exist
+	// once the grace period has elapsed. Until then, the delete is postponed, since the post may still appear.
+	if err := c.resolvePendingPost(ctx, issue); err != nil {
 		return err
+	}
+
+	if issue.HasPendingSlackPost() {
+		return ErrPendingPostUnresolved
 	}
 
 	if !issue.HasSlackPost() || issue.SlackPostID == PostIDInvalidChannel {
@@ -471,6 +504,9 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string,
 		c.recordPost(slackPostResultDeleted, types.InsightsEventSlackPostDeleted, "", issue)
 	}
 
+	// The post is gone (or soft-deleted), and must not be adopted from a cached history lookup
+	c.historyCache.removeMessage(issue.LastAlert.SlackChannelID, issue.SlackPostID)
+
 	issue.RegisterSlackPostDeleted()
 
 	return nil
@@ -498,6 +534,8 @@ func (c *Client) DeletePost(ctx context.Context, channelID, ts string) error {
 	} else {
 		logger.Info("Delete Slack post")
 	}
+
+	c.historyCache.removeMessage(channelID, ts)
 
 	return nil
 }
@@ -595,6 +633,8 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 
 		// The post may still have been created, e.g. after a timeout. Register it as pending, so that it is
 		// looked up in the channel history before a new post is created (see resolvePendingPost).
+		// The pending time is reset to now (after the call), so that the grace period starts when the post may
+		// have been created at the latest. The lookup window covers the full HTTP timeout before it.
 		if errors.Is(err, internal.ErrPostOutcomeUnknown) {
 			logger.Infof("Outcome of Slack post is unknown, the post will be looked up before creating a new one: %s", err)
 			issue.RegisterSlackPostPending()
@@ -605,24 +645,7 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 		// The post was not created
 		issue.ClearSlackPostPending()
 
-		switch internal.ClassifySlackError(err) { //nolint:exhaustive // Remaining classes are returned as errors
-		case internal.SlackErrorClassChannelUnavailable:
-			// Channel not found, archived, inactive or otherwise not accepting posts.
-			// Log error and use dummy post ID to avoid further updates on this issue.
-			logger.Errorf("Failed to create Slack post for issue %s in channel %s: %s", issue.CorrelationID, issue.LastAlert.SlackChannelID, err.Error())
-			issue.RegisterSlackPostCreatedOrUpdated(PostIDInvalidChannel, action)
-			return nil
-		case internal.SlackErrorClassInvalidContent:
-			// Invalid content means something is wrong with the message formatting. It may be a bug in this application, or some unexpected data from the alert API.
-			// Log error and register the issue as invalid.
-			logger.Errorf("Failed to create Slack post for issue %s in channel %s: %s", issue.CorrelationID, issue.LastAlert.SlackChannelID, err.Error())
-			issue.RegisterSlackPostInvalidBlocks()
-			return nil
-		case internal.SlackErrorClassNotInChannel:
-			// Slack App is not added as integration in channel. Should only happen in race conditions, since the alert API checks this.
-			// Log error and reset post ID.
-			logger.Errorf("Failed to create Slack post for issue %s in channel %s: %s", issue.CorrelationID, issue.LastAlert.SlackChannelID, err.Error())
-			issue.RegisterSlackPostDeleted()
+		if handlePermanentPostError(logger.WithField("reason", err.Error()), issue, action, err, "create") {
 			return nil
 		}
 
@@ -644,13 +667,9 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 }
 
 // savePendingPost registers the issue post as pending, and saves the issue, before the post is created (see [Client.SetIssueSaver]).
-// The pending state is cleared again if the save fails. Without an issue saver, the issue is not saved.
+// The pending state is cleared again if the save fails.
 func (c *Client) savePendingPost(ctx context.Context, issue *models.Issue) error {
 	issue.RegisterSlackPostPending()
-
-	if c.issueSaver == nil {
-		return nil
-	}
 
 	if err := c.issueSaver.SaveIssue(ctx, issue); err != nil {
 		issue.ClearSlackPostPending()
@@ -669,32 +688,7 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, reason string,
 	if err != nil {
 		c.recordPostFailure(issue, err)
 
-		logger = logger.WithField("reason", err.Error())
-
-		switch internal.ClassifySlackError(err) { //nolint:exhaustive // Remaining classes are returned as errors
-		case internal.SlackErrorClassChannelUnavailable:
-			// Channel not found, archived, inactive or otherwise not accepting posts.
-			// Log error and use dummy post ID to avoid further updates on this issue.
-			logger.Errorf("Failed to update Slack post (channel unavailable): %s", err)
-			issue.RegisterSlackPostCreatedOrUpdated(PostIDInvalidChannel, action)
-			return nil
-		case internal.SlackErrorClassMessageUnavailable:
-			// Message not found or can no longer be edited.
-			// Log info and reset post ID, so that a new post is created.
-			logger.Infof("Failed to update Slack post (message unavailable): %s", err)
-			issue.RegisterSlackPostDeleted()
-			return nil
-		case internal.SlackErrorClassInvalidContent:
-			// Invalid content means something is wrong with the message formatting, i.e. a bug in this application.
-			// Log error and register the issue as invalid.
-			logger.Errorf("Failed to update Slack post (invalid content): %s", err)
-			issue.RegisterSlackPostInvalidBlocks()
-			return nil
-		case internal.SlackErrorClassNotInChannel:
-			// Slack App integration is not in channel. Should only happen in race conditions, since the alert API checks this.
-			// Log error and reset post ID.
-			logger.Errorf("Failed to update Slack post (not in channel): %s", err)
-			issue.RegisterSlackPostDeleted()
+		if handlePermanentPostError(logger.WithField("reason", err.Error()), issue, action, err, "update") {
 			return nil
 		}
 
@@ -711,6 +705,39 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, reason string,
 	c.recordPost(slackPostResultUpdated, types.InsightsEventSlackPostUpdated, string(action), issue)
 
 	return nil
+}
+
+// handlePermanentPostError handles a failed post create or update, where the error is permanent for the issue
+// (rather than for the Slack API as a whole), by updating the issue state so that the call is not repeated as is.
+// It returns false if the error is not permanent for the issue, and must be returned to the caller.
+// The op is the failed operation ("create" or "update"), used in log messages.
+func handlePermanentPostError(logger types.Logger, issue *models.Issue, action models.SlackAction, err error, op string) bool {
+	switch internal.ClassifySlackError(err) { //nolint:exhaustive // Remaining classes are returned as errors
+	case internal.SlackErrorClassChannelUnavailable:
+		// Channel not found, archived, inactive or otherwise not accepting posts.
+		// Log error and use dummy post ID to avoid further updates on this issue.
+		logger.Errorf("Failed to %s Slack post (channel unavailable): %s", op, err)
+		issue.RegisterSlackPostCreatedOrUpdated(PostIDInvalidChannel, action)
+	case internal.SlackErrorClassMessageUnavailable:
+		// Message not found or can no longer be edited (update only).
+		// Log info and reset post ID, so that a new post is created.
+		logger.Infof("Failed to %s Slack post (message unavailable): %s", op, err)
+		issue.RegisterSlackPostDeleted()
+	case internal.SlackErrorClassInvalidContent:
+		// Invalid content means something is wrong with the message formatting. It may be a bug in this application,
+		// or some unexpected data from the alert API. Log error and register the issue as invalid.
+		logger.Errorf("Failed to %s Slack post (invalid content): %s", op, err)
+		issue.RegisterSlackPostInvalidBlocks()
+	case internal.SlackErrorClassNotInChannel:
+		// Slack App is not added as integration in channel. Should only happen in race conditions, since the alert API checks this.
+		// Log error and reset post ID.
+		logger.Errorf("Failed to %s Slack post (not in channel): %s", op, err)
+		issue.RegisterSlackPostDeleted()
+	default:
+		return false
+	}
+
+	return true
 }
 
 func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.SlackAction, method postUpdateMethod) []slack.MsgOption {

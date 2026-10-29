@@ -11,6 +11,7 @@ import (
 	"github.com/slackmgr/core/insights"
 	"github.com/slackmgr/core/internal"
 	"github.com/slackmgr/core/internal/models"
+	slack "github.com/slackmgr/core/manager/internal/slack"
 	"github.com/slackmgr/types"
 )
 
@@ -797,6 +798,12 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		}
 
 		if err := c.moveEscalatedIssue(ctx, result); err != nil {
+			// The escalation is evaluated again in the next cycle, so the move is retried then
+			if errors.Is(err, slack.ErrPendingPostUnresolved) {
+				c.logger.WithFields(result.Issue.LogFields()).Debug("Escalation move postponed until the pending Slack post is resolved")
+				continue
+			}
+
 			c.logger.WithFields(result.Issue.LogFields()).Errorf("Failed to move issue on escalation: %s", err)
 			continue
 		}
@@ -1115,6 +1122,13 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 	}
 
 	defer c.releaseLock(targetChannelLock)
+
+	// Remove the current Slack post (if any), before anything else is changed. If the issue has a pending post that
+	// is not resolved yet (slack.ErrPendingPostUnresolved), the move is postponed, and nothing has changed yet.
+	if err := c.slackClient.Delete(ctx, issue, "Issue moved between channels", false); err != nil {
+		return err
+	}
+
 	// The original channel is the channel where the issue was created. If this is the same as the target channel, we need to delete the move mapping.
 	originalChannel := issue.LastAlert.OriginalSlackChannelID
 
@@ -1143,11 +1157,6 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 		logger.WithField("correlation_id", issue.CorrelationID).Info("Move mapping deleted")
 	}
 
-	// Remove the current Slack post (if any).
-	if err := c.slackClient.Delete(ctx, issue, "Issue moved between channels", false); err != nil {
-		return err
-	}
-
 	// Find the Slack channel name for the new channel.
 	channelName := c.slackClient.GetChannelName(ctx, targetChannel)
 
@@ -1156,9 +1165,19 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 
 	// Move the issue in the database before creating the new Slack post, since the Slack client saves the issue
 	// before posting (write-ahead), and the issue must then already be stored in the target channel.
+	//
+	// The issue is moved with a pending Slack post. The target channel lock is held during the move, but it may expire
+	// if the Slack calls are slow (e.g. rate limit waits). The target channel manager may then process the issue before
+	// the post below is created (the move mapping is already saved), and must wait for the post (and adopt it), rather
+	// than create a post of its own. The pending state is cleared again before posting, since the post is created right away.
+	issue.RegisterSlackPostPending()
+
 	if err := c.db.MoveIssue(ctx, issue, sourceChannel, targetChannel); err != nil {
+		issue.ClearSlackPostPending()
 		return fmt.Errorf("failed to move issue in the database: %w", err)
 	}
+
+	issue.ClearSlackPostPending()
 
 	// Create a new Slack post for the issue in the target channel.
 	// Errors from the Slack client are logged, but not returned.

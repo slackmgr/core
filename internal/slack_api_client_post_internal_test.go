@@ -20,7 +20,10 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-const testBotUserID = "UBOT"
+const (
+	testBotUserID = "UBOT"
+	testBotID     = "BBOT"
+)
 
 // newTestSlackAPIClient returns a connected client that sends requests to the given handler.
 func newTestSlackAPIClient(t *testing.T, handler http.HandlerFunc) *SlackAPIClient {
@@ -39,6 +42,7 @@ func newTestSlackAPIClient(t *testing.T, handler http.HandlerFunc) *SlackAPIClie
 		sem:       semaphore.NewWeighted(int64(cfg.Concurrency)),
 		connected: true,
 		botUserID: testBotUserID,
+		botID:     testBotID,
 	}
 }
 
@@ -145,10 +149,12 @@ func TestListBotMessages(t *testing.T) {
 			writeJSON(w, map[string]any{
 				"ok": true,
 				"messages": []map[string]any{
-					{"ts": "1700000002.000000", "user": testBotUserID, "metadata": meta},
-					{"ts": "1700000002.000001", "user": "UOTHER", "metadata": meta},
-					{"ts": "1700000002.000002", "user": testBotUserID},
-					{"ts": "1700000002.000003", "user": testBotUserID, "metadata": map[string]any{"event_type": "other"}},
+					// Real shape of a message posted with as_user=false: bot_message with bot ID, but no user ID
+					{"ts": "1700000002.000000", "subtype": "bot_message", "bot_id": testBotID, "username": "Custom", "metadata": meta},
+					{"ts": "1700000002.000001", "subtype": "bot_message", "bot_id": "BOTHER", "metadata": meta},
+					{"ts": "1700000002.000002", "subtype": "bot_message", "bot_id": testBotID},
+					{"ts": "1700000002.000003", "subtype": "bot_message", "bot_id": testBotID, "metadata": map[string]any{"event_type": "other"}},
+					{"ts": "1700000002.000004", "user": testBotUserID, "metadata": meta},
 				},
 				"has_more":          true,
 				"response_metadata": map[string]any{"next_cursor": "page2"},
@@ -160,7 +166,7 @@ func TestListBotMessages(t *testing.T) {
 		assert.Equal(t, "page2", r.Form.Get("cursor"))
 		writeJSON(w, map[string]any{
 			"ok":       true,
-			"messages": []map[string]any{{"ts": "1700000001.000000", "user": testBotUserID, "metadata": meta}},
+			"messages": []map[string]any{{"ts": "1700000001.000000", "bot_id": testBotID, "metadata": meta}},
 			"has_more": false,
 		})
 	})
@@ -203,6 +209,9 @@ func TestListBotMessages_Validation(t *testing.T) {
 
 	_, err = (&SlackAPIClient{connected: true}).ListBotMessages(context.Background(), "", time.Now(), "x")
 	require.Error(t, err)
+
+	_, err = (&SlackAPIClient{connected: true}).ListBotMessages(context.Background(), "C1", time.Now(), "x")
+	require.ErrorContains(t, err, "bot ID is unknown")
 }
 
 func TestIsPostOutcomeUnknown(t *testing.T) {
