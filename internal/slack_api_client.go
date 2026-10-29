@@ -759,7 +759,7 @@ func waitForAPIError(ctx context.Context, started time.Time, logger types.Logger
 		return waitForRateLimit(ctx, logger, rateLimitError, attempt, action, remainingWaitTime)
 	}
 
-	if isTransientError(err) {
+	if IsTransientError(err) {
 		remainingWaitTime := time.Until(started.Add(time.Duration(cfg.MaxTransientErrorWaitTimeSeconds) * time.Second))
 
 		if attempt >= cfg.MaxAttemptsForTransientError || remainingWaitTime < time.Second {

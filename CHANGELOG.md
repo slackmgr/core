@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Message can no longer be edited (a new post is created): `edit_window_closed`
   - Invalid message content (issue marked as invalid blocks): `invalid_blocks_format`, `msg_blocks_too_long`, `msg_too_long`, `too_many_attachments`, `attachment_payload_limit_exceeded`, `block_mismatch`, `no_text`
 - Slack `update_failed` errors are retried as transient
+- A failed Slack post create, update or delete for one issue no longer blocks the remaining issues in the channel update cycle. The cycle is only cut short for errors that affect all Slack calls: cancelled context, exhausted rate limit or transient error retries, and authentication errors (`not_authed`, `invalid_auth`, `account_inactive`, `token_revoked`, `token_expired`, `missing_scope`). All errors from the cycle are returned together
+- Data race in the channel update cycle, where concurrent Slack post deletes changed issue state read by the re-ordering check
 
 ## [0.16.0] - 2026-10-21
 

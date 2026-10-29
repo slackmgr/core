@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"testing"
 
@@ -72,7 +73,7 @@ func TestGetSlackErrorMetricLabel(t *testing.T) {
 //
 // Transient errors are retried with linear backoff. Note that *slack.RateLimitedError
 // is also classified as transient (via the Retryable() interface), but waitForAPIError
-// handles rate limit errors before ever calling isTransientError.
+// handles rate limit errors before ever calling IsTransientError.
 func TestIsTransientError(t *testing.T) {
 	t.Parallel()
 
@@ -115,14 +116,14 @@ func TestIsTransientError(t *testing.T) {
 	for _, tc := range transient {
 		t.Run("transient/"+tc.name, func(t *testing.T) {
 			t.Parallel()
-			assert.True(t, isTransientError(tc.err))
+			assert.True(t, IsTransientError(tc.err))
 		})
 	}
 
 	for _, tc := range nonTransient {
 		t.Run("non_transient/"+tc.name, func(t *testing.T) {
 			t.Parallel()
-			assert.False(t, isTransientError(tc.err))
+			assert.False(t, IsTransientError(tc.err))
 		})
 	}
 }
@@ -149,9 +150,17 @@ func TestClassifySlackError(t *testing.T) {
 		SlackErrFatalError:         SlackErrorClassTransient,
 		SlackErrServiceUnavailable: SlackErrorClassTransient,
 		SlackErrRequestTimeout:     SlackErrorClassTransient,
-		SlackErrRateLimited:        SlackErrorClassTransient,
-		SlackErrRateLimitedV2:      SlackErrorClassTransient,
 		SlackErrUpdateFailed:       SlackErrorClassTransient,
+
+		SlackErrRateLimited:   SlackErrorClassRateLimited,
+		SlackErrRateLimitedV2: SlackErrorClassRateLimited,
+
+		SlackErrNotAuthed:       SlackErrorClassAuth,
+		SlackErrInvalidAuth:     SlackErrorClassAuth,
+		SlackErrAccountInactive: SlackErrorClassAuth,
+		SlackErrTokenRevoked:    SlackErrorClassAuth,
+		SlackErrTokenExpired:    SlackErrorClassAuth,
+		SlackErrMissingScope:    SlackErrorClassAuth,
 
 		SlackErrChannelNotFound:                   SlackErrorClassChannelUnavailable,
 		SlackErrInvalidChannelID:                  SlackErrorClassChannelUnavailable,
@@ -180,7 +189,6 @@ func TestClassifySlackError(t *testing.T) {
 
 		SlackErrNoSuchSubTeam:  SlackErrorClassOther,
 		SlackErrThreadNotFound: SlackErrorClassOther,
-		"invalid_auth":         SlackErrorClassOther,
 		"unknown error":        SlackErrorClassOther,
 	}
 
@@ -189,4 +197,38 @@ func TestClassifySlackError(t *testing.T) {
 	}
 
 	assert.Equal(t, SlackErrorClassOther, ClassifySlackError(nil))
+}
+
+// TestClassifySlackError_Wrapped verifies that wrapped Slack errors are classified by their underlying code.
+func TestClassifySlackError_Wrapped(t *testing.T) {
+	t.Parallel()
+
+	wrappedResponse := fmt.Errorf("failed to call Slack API: transient error: %w", slackapi.SlackErrorResponse{Err: SlackErrInternalError})
+	assert.Equal(t, SlackErrorClassTransient, ClassifySlackError(wrappedResponse))
+
+	wrappedAuth := fmt.Errorf("failed: %w", slackapi.SlackErrorResponse{Err: SlackErrInvalidAuth})
+	assert.Equal(t, SlackErrorClassAuth, ClassifySlackError(wrappedAuth))
+
+	wrappedUnknown := fmt.Errorf("failed: %w", slackapi.SlackErrorResponse{Err: "something_else"})
+	assert.Equal(t, SlackErrorClassOther, ClassifySlackError(wrappedUnknown))
+
+	wrappedRateLimit := fmt.Errorf("failed: rate limit error: %w", &slackapi.RateLimitedError{})
+	assert.Equal(t, SlackErrorClassRateLimited, ClassifySlackError(wrappedRateLimit))
+
+	// A bare code created with errors.New cannot be unwrapped to a Slack error, and is not classified.
+	assert.Equal(t, SlackErrorClassOther, ClassifySlackError(fmt.Errorf("failed: %w", errors.New(SlackErrInternalError))))
+}
+
+// TestIsTransientError_Wrapped verifies that transient errors are still detected after wrapping.
+func TestIsTransientError_Wrapped(t *testing.T) {
+	t.Parallel()
+
+	timeoutURLErr := &url.Error{Op: "Post", URL: "https://slack.com/api/test", Err: context.DeadlineExceeded}
+
+	assert.True(t, IsTransientError(fmt.Errorf("wrapped: %w", timeoutURLErr)))
+	assert.True(t, IsTransientError(fmt.Errorf("wrapped: %w", &testError{Code: 503})))
+	assert.True(t, IsTransientError(fmt.Errorf("wrapped: %w", &slackapi.RateLimitedError{})))
+	assert.True(t, IsTransientError(fmt.Errorf("wrapped: %w", slackapi.SlackErrorResponse{Err: SlackErrServiceUnavailable})))
+	assert.False(t, IsTransientError(fmt.Errorf("wrapped: %w", slackapi.SlackErrorResponse{Err: SlackErrIsArchived})))
+	assert.False(t, IsTransientError(fmt.Errorf("wrapped: %w", &testError{Code: 499})))
 }

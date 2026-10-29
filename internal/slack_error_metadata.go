@@ -102,6 +102,28 @@ const (
 	// Safe to retry.
 	SlackErrUpdateFailed = "update_failed"
 
+	// SlackErrNotAuthed is returned when no authentication token was provided. Non-retryable.
+	SlackErrNotAuthed = "not_authed"
+
+	// SlackErrInvalidAuth is returned when the token is invalid or the request comes
+	// from a disallowed IP. Non-retryable.
+	SlackErrInvalidAuth = "invalid_auth"
+
+	// SlackErrAccountInactive is returned when the token belongs to a deleted user or
+	// workspace. Non-retryable.
+	SlackErrAccountInactive = "account_inactive"
+
+	// SlackErrTokenRevoked is returned when the token has been revoked, or the app has
+	// been removed. Non-retryable.
+	SlackErrTokenRevoked = "token_revoked"
+
+	// SlackErrTokenExpired is returned when the token has expired. Non-retryable.
+	SlackErrTokenExpired = "token_expired"
+
+	// SlackErrMissingScope is returned when the token lacks a scope required by the
+	// method. Non-retryable.
+	SlackErrMissingScope = "missing_scope"
+
 	// SlackErrInternalError is a transient server-side error returned by Slack when
 	// something went wrong on their end. Safe to retry.
 	SlackErrInternalError = "internal_error"
@@ -145,6 +167,13 @@ const (
 	// SlackErrorClassTransient covers server-side errors that are safe to retry.
 	SlackErrorClassTransient
 
+	// SlackErrorClassRateLimited covers rate limit errors. Safe to retry after a delay.
+	SlackErrorClassRateLimited
+
+	// SlackErrorClassAuth covers authentication and authorization errors that affect
+	// every API call made with the token, not just the current request.
+	SlackErrorClassAuth
+
 	// SlackErrorClassChannelUnavailable covers errors where the channel does not exist
 	// or no longer accepts posts from the bot (archived, inactive, read-only, restricted).
 	SlackErrorClassChannelUnavailable
@@ -170,9 +199,17 @@ var slackErrorClasses = map[string]SlackErrorClass{
 	SlackErrFatalError:         SlackErrorClassTransient,
 	SlackErrServiceUnavailable: SlackErrorClassTransient,
 	SlackErrRequestTimeout:     SlackErrorClassTransient,
-	SlackErrRateLimited:        SlackErrorClassTransient,
-	SlackErrRateLimitedV2:      SlackErrorClassTransient,
 	SlackErrUpdateFailed:       SlackErrorClassTransient,
+
+	SlackErrRateLimited:   SlackErrorClassRateLimited,
+	SlackErrRateLimitedV2: SlackErrorClassRateLimited,
+
+	SlackErrNotAuthed:       SlackErrorClassAuth,
+	SlackErrInvalidAuth:     SlackErrorClassAuth,
+	SlackErrAccountInactive: SlackErrorClassAuth,
+	SlackErrTokenRevoked:    SlackErrorClassAuth,
+	SlackErrTokenExpired:    SlackErrorClassAuth,
+	SlackErrMissingScope:    SlackErrorClassAuth,
 
 	SlackErrChannelNotFound:                   SlackErrorClassChannelUnavailable,
 	SlackErrInvalidChannelID:                  SlackErrorClassChannelUnavailable,
@@ -200,14 +237,27 @@ var slackErrorClasses = map[string]SlackErrorClass{
 	SlackErrNoText:                         SlackErrorClassInvalidContent,
 }
 
-// ClassifySlackError returns the [SlackErrorClass] of a Slack API error code.
-// A nil error, or an error that is not a known Slack error code, returns [SlackErrorClassOther].
+// ClassifySlackError returns the [SlackErrorClass] of a Slack API error.
+// The error may be a bare Slack error code, or wrap a [slack.SlackErrorResponse] or [slack.RateLimitedError]
+// (e.g. after exhausted retries). A nil error, or an error that is not a known Slack error, returns [SlackErrorClassOther].
 func ClassifySlackError(err error) SlackErrorClass {
 	if err == nil {
 		return SlackErrorClassOther
 	}
 
-	return slackErrorClasses[err.Error()]
+	if class, ok := slackErrorClasses[err.Error()]; ok {
+		return class
+	}
+
+	if slackErr, ok := errors.AsType[slack.SlackErrorResponse](err); ok {
+		return slackErrorClasses[slackErr.Err]
+	}
+
+	if _, ok := errors.AsType[*slack.RateLimitedError](err); ok {
+		return SlackErrorClassRateLimited
+	}
+
+	return SlackErrorClassOther
 }
 
 // getSlackErrorMetricLabel returns a metric label for a Slack API error.
@@ -231,22 +281,25 @@ func getSlackErrorMetricLabel(err error) string {
 	return "unknown"
 }
 
-// isTransientError reports whether err should be considered transient and safe to retry.
+// IsTransientError reports whether err should be considered transient and safe to retry.
 // This includes both errors that Slack explicitly classifies as retryable, as well as
 // certain client-side errors like timeouts that may indicate a temporary issue.
-func isTransientError(err error) bool {
+// Wrapped errors are unwrapped, so errors returned after exhausted retries are still reported as transient.
+func IsTransientError(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	var urlErr *url.Error
-	if errors.As(err, &urlErr) && urlErr.Timeout() {
+	if urlErr, ok := errors.AsType[*url.Error](err); ok && urlErr.Timeout() {
 		return true
 	}
 
-	if v, ok := any(err).(retryable); ok && v.Retryable() {
+	var r retryable
+	if errors.As(err, &r) && r.Retryable() {
 		return true
 	}
 
-	return ClassifySlackError(err) == SlackErrorClassTransient
+	class := ClassifySlackError(err)
+
+	return class == SlackErrorClassTransient || class == SlackErrorClassRateLimited
 }

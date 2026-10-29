@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
@@ -19,7 +20,6 @@ import (
 	"github.com/slackmgr/core/internal/models"
 	"github.com/slackmgr/core/manager/internal/slack/controllers"
 	"github.com/slackmgr/types"
-	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -55,8 +55,24 @@ type FifoQueueProducer interface {
 	Send(ctx context.Context, slackChannelID, dedupID, body string) error
 }
 
+// slackAPI is the subset of [internal.SlackAPIClient] used by [Client]. It allows the API to be replaced in tests.
+type slackAPI interface {
+	NewSocketModeClient() *internal.SocketModeClientWrapper
+	ChatPostMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error)
+	ChatUpdateMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error)
+	ChatDeleteMessage(ctx context.Context, channelID string, ts string) error
+	SendResponse(ctx context.Context, channelID, responseURL, responseType, text string) error
+	PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error)
+	OpenModal(ctx context.Context, triggerID string, request slack.ModalViewRequest) error
+	MessageHasReplies(ctx context.Context, channelID, ts string) (bool, error)
+	GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error)
+	GetUserInfo(ctx context.Context, userID string) (*slack.User, error)
+	ListUserGroupMembers(ctx context.Context, groupID string) (map[string]struct{}, error)
+	BotIsInChannel(ctx context.Context, channelID string) (bool, error)
+}
+
 type Client struct {
-	api                *internal.SlackAPIClient
+	api                slackAPI
 	commandQueue       FifoQueueProducer
 	issueFinder        IssueFinder
 	cacheStore         store.StoreInterface
@@ -125,9 +141,10 @@ func (c *Client) Connect(ctx context.Context) error {
 		return errors.New("channel settings must be set before connecting")
 	}
 
-	c.api = internal.NewSlackAPIClient(c.cacheStore, c.cfg.CacheKeyPrefix, c.logger, c.metrics, c.cfg.SlackClient, c.slackAPIClientOpts...)
+	api := internal.NewSlackAPIClient(c.cacheStore, c.cfg.CacheKeyPrefix, c.logger, c.metrics, c.cfg.SlackClient, c.slackAPIClientOpts...)
+	c.api = api
 
-	if _, err := c.api.Connect(ctx); err != nil {
+	if _, err := api.Connect(ctx); err != nil {
 		return err
 	}
 
@@ -215,38 +232,68 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 
 	// Reordering is allowed when the channel config allows it AND the number of active issues in the channel is small enough
 	allowIssueReordering := c.managerSettings.GetSettings().OrderIssuesBySeverity(channelID, openIssueCount)
-	atLeastOnePostDeleted := false
 
-	errg, gctx := errgroup.WithContext(ctx)
+	// Decide which posts to delete before starting any deletes, since a delete changes the Slack post state
+	// that the re-ordering check reads for the other issues.
+	type pendingDelete struct {
+		issue  *models.Issue
+		reason string
+	}
 
-	for _, _issue := range issues {
-		issue := _issue
+	var deletes []pendingDelete
 
+	for _, issue := range issues {
 		// Delete Slack post when requested by the issue (for whatever reason)
 		if issue.SlackPostNeedsDelete {
-			errg.Go(func() error {
-				return c.Delete(gctx, issue, "Issue flagged with SlackPostNeedsDelete", true)
-			})
-			atLeastOnePostDeleted = true
+			deletes = append(deletes, pendingDelete{issue: issue, reason: "Issue flagged with SlackPostNeedsDelete"})
 			continue
 		}
 
 		// Delete Slack post when reordering is allowed AND issue follow up is enabled AND at least one Slack post exists where the connected issue has lower priority
 		if allowIssueReordering && issue.FollowUpEnabled() && newerSlackPostWithLowerPriorityExists(issue, issues) {
-			errg.Go(func() error {
-				return c.Delete(gctx, issue, "Issue re-ordering", true)
-			})
-			atLeastOnePostDeleted = true
+			deletes = append(deletes, pendingDelete{issue: issue, reason: "Issue re-ordering"})
 		}
 	}
 
-	if err := errg.Wait(); err != nil {
-		return err
+	// Deletes run concurrently. A failed delete does not affect the other issues, unless the error
+	// affects all Slack calls (see abortsChannelUpdate), in which case the remaining deletes are cancelled.
+	deleteCtx, cancelDeletes := context.WithCancel(ctx)
+	defer cancelDeletes()
+
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+	)
+
+	for _, d := range deletes {
+		wg.Go(func() {
+			if err := c.Delete(deleteCtx, d.issue, d.reason, true); err != nil {
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+
+				if abortsChannelUpdate(ctx, err) {
+					cancelDeletes()
+				}
+			}
+		})
+	}
+
+	wg.Wait()
+
+	// Skip the create/update phase if a delete failed with an error that affects all Slack calls.
+	// Other failed deletes are retried in the next cycle. Until then, the issue keeps its Slack post ID,
+	// so the create/update phase below updates the existing post rather than creating a duplicate.
+	for _, err := range errs {
+		if abortsChannelUpdate(ctx, err) {
+			return errors.Join(errs...)
+		}
 	}
 
 	// Sort the issues again IFF at least one Slack post was deleted in the previous step.
 	// This is required since deleted issues are sorted based on both priority and timestamp.
-	if atLeastOnePostDeleted {
+	if len(deletes) > 0 {
 		sort.SliceStable(issues, func(i, j int) bool {
 			return issues[i].IsLowerPriorityThan(issues[j])
 		})
@@ -274,12 +321,29 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 
 		reason := fmt.Sprintf("channel update: issue requests action '%s'", action)
 
+		// A failed issue does not block the remaining issues, unless the error affects all Slack calls.
 		if err := c.createOrUpdate(ctx, issue, reason, action); err != nil {
-			return err
+			errs = append(errs, err)
+
+			if abortsChannelUpdate(ctx, err) {
+				break
+			}
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
+}
+
+// abortsChannelUpdate reports whether err affects all Slack calls in a channel update, rather than a single issue:
+// a cancelled context, a client that is not connected, exhausted retries for rate limits or transient errors,
+// or an authentication error. The remaining issues are then skipped, since they would fail the same way,
+// add to rate limit pressure, or (for transient errors) hold the channel lock for a long time while retrying.
+func abortsChannelUpdate(ctx context.Context, err error) bool {
+	if ctx.Err() != nil || errors.Is(err, internal.ErrNotConnected) || internal.IsTransientError(err) {
+		return true
+	}
+
+	return internal.ClassifySlackError(err) == internal.SlackErrorClassAuth
 }
 
 func (c *Client) UpdateSingleIssue(ctx context.Context, issue *models.Issue, reason string) error {
