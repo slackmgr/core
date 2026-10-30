@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-30
+
 ### Added
 - Duplicate Slack post prevention: when creating a post fails with an unknown outcome (timeout, HTTP 5xx, `fatal_error`, `internal_error`), the post is no longer retried. The issue is marked as pending (new `slackPostPendingSince` field in the stored issue JSON), and the post is looked up in the channel history before a new one is created. Found posts are adopted, and duplicates deleted (always hard-deleted, even with thread replies). Issues with a pending post are not archived, and their post is not deleted (e.g. for escalation mentions) nor the issue moved, until it is resolved. Channel history reads are shared by all pending posts in a channel (cached for 10 seconds, failed reads retried after 30 seconds). A read that fails because the channel has too many messages since the start of the lookup window only blocks lookups with the same or a longer window, so that one old pending post does not block newer ones
 - Write-ahead save of issues before their Slack post is created, so that a post created right before a crash is adopted rather than posted again. The pending time of a write-ahead covers the max Slack call duration (HTTP timeout plus the larger retry budget), so the post is not assumed missing while the call is still running. Moved issues are now moved in the database (with a write-ahead pending post) before the post in the target channel is created, so that the target channel does not create a post of its own if the target channel lock expires during the move. If the database move fails, the issue is restored to the source channel. Once the issue is moved in the database, the move succeeds even if the final save fails
@@ -436,7 +438,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/slackmgr/core/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/slackmgr/core/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/slackmgr/core/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/slackmgr/core/compare/v0.13.0...v0.14.0
