@@ -213,7 +213,7 @@ func (c *SlackAPIClient) ListBotMessages(ctx context.Context, channelID string, 
 
 	params := &slack.GetConversationHistoryParameters{
 		ChannelID:          channelID,
-		Oldest:             fmt.Sprintf("%d.%06d", oldest.Unix(), oldest.Nanosecond()/1000),
+		Oldest:             FormatSlackTimestamp(oldest),
 		Limit:              200,
 		IncludeAllMetadata: true,
 	}
@@ -744,6 +744,14 @@ func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics typ
 	action string, f func(ctx context.Context) (V, W, error), expectedErrors ...string,
 ) (V, W, error) {
 	return callAPIWithPolicy(ctx, logger, metrics, cfg, gate, sem, action, nil, f, expectedErrors...)
+}
+
+// MaxCallDuration returns an upper bound for how long a Slack API call made by [SlackAPIClient] can take, including
+// retries: the larger of the rate limit and transient error retry budgets, plus the HTTP timeout of the last attempt.
+// Time spent waiting for a free concurrency slot (see [config.SlackClientConfig.Concurrency]) is not included.
+func MaxCallDuration(cfg *config.SlackClientConfig) time.Duration {
+	budget := max(cfg.MaxRateLimitErrorWaitTimeSeconds, cfg.MaxTransientErrorWaitTimeSeconds)
+	return time.Duration(budget+cfg.HTTPTimeoutSeconds) * time.Second
 }
 
 // callAPIWithPolicy is [callAPI] with an optional outcomeUnknown function. Errors for which it returns true

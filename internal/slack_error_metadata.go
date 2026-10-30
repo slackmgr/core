@@ -171,7 +171,8 @@ const (
 	SlackErrorClassRateLimited
 
 	// SlackErrorClassAuth covers authentication and authorization errors that affect
-	// every API call made with the token, not just the current request.
+	// every API call made with the token, not just the current request. The exception is
+	// [SlackErrMissingScope], which only affects the methods that require the missing scope.
 	SlackErrorClassAuth
 
 	// SlackErrorClassChannelUnavailable covers errors where the channel does not exist
@@ -245,12 +246,8 @@ func ClassifySlackError(err error) SlackErrorClass {
 		return SlackErrorClassOther
 	}
 
-	if class, ok := slackErrorClasses[err.Error()]; ok {
+	if class, ok := slackErrorClasses[SlackErrorCode(err)]; ok {
 		return class
-	}
-
-	if slackErr, ok := errors.AsType[slack.SlackErrorResponse](err); ok {
-		return slackErrorClasses[slackErr.Err]
 	}
 
 	if _, ok := errors.AsType[*slack.RateLimitedError](err); ok {
@@ -258,6 +255,24 @@ func ClassifySlackError(err error) SlackErrorClass {
 	}
 
 	return SlackErrorClassOther
+}
+
+// SlackErrorCode returns the Slack API error code of err, e.g. "channel_not_found". The error may wrap a
+// [slack.SlackErrorResponse], or be a bare known Slack error code. An empty string is returned for other errors.
+func SlackErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	if slackErr, ok := errors.AsType[slack.SlackErrorResponse](err); ok {
+		return slackErr.Err
+	}
+
+	if _, ok := slackErrorClasses[err.Error()]; ok {
+		return err.Error()
+	}
+
+	return ""
 }
 
 // getSlackErrorMetricLabel returns a metric label for a Slack API error.

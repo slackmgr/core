@@ -9,6 +9,7 @@ import (
 	"time"
 
 	slack "github.com/slack-go/slack"
+	"github.com/slackmgr/core/internal"
 	"github.com/slackmgr/core/internal/models"
 )
 
@@ -25,7 +26,7 @@ const (
 	postMetadataIssueIDKey = "issue_id"
 
 	// pendingPostLookupMargin is subtracted from the pending time when looking up a pending post (in addition to the
-	// HTTP timeout, see pendingPostLookupWindow), to allow for clock differences between this host and Slack.
+	// max call duration, see pendingPostLookupWindow), to allow for clock differences between this host and Slack.
 	pendingPostLookupMargin = time.Minute
 
 	// slackPendingPostsTotalMetric counts Slack posts with an unknown outcome, and how they were resolved.
@@ -46,6 +47,10 @@ const (
 // in the channel history yet, and the grace period has not elapsed. The post may still exist, so it can neither be
 // deleted nor assumed to not exist. The issue is left unchanged, and the delete should be retried later.
 var ErrPendingPostUnresolved = errors.New("pending Slack post is not resolved yet")
+
+// errPendingPostLookup is wrapped in errors returned by [Client.resolvePendingPost] when the channel history lookup
+// failed. Such errors abort a channel update in fewer cases than other Slack errors (see [abortsChannelUpdate]).
+var errPendingPostLookup = errors.New("failed to look up pending Slack post")
 
 // allPendingPostResults lists every result label, used to pre-warm metric label combinations.
 var allPendingPostResults = []string{ //nolint:gochecknoglobals // Constant list
@@ -93,9 +98,7 @@ func (c *Client) resolvePendingPost(ctx context.Context, issue *models.Issue) er
 			return nil
 		}
 
-		c.metrics.CounterInc(slackPendingPostsTotalMetric, pendingPostResultLookupFailed)
-
-		return fmt.Errorf("failed to look up pending Slack post for issue %s in channel %s: %w", issue.CorrelationID, channelID, err)
+		return fmt.Errorf("%w for issue %s in channel %s: %w", errPendingPostLookup, issue.CorrelationID, channelID, err)
 	}
 
 	var matches []slack.Message
@@ -120,7 +123,7 @@ func (c *Client) resolvePendingPost(ctx context.Context, issue *models.Issue) er
 		return nil
 	}
 
-	// Newest first. Slack timestamps have a fixed number of decimals, and compare correctly as strings.
+	// Newest first. Slack timestamps compare correctly as strings (see [internal.FormatSlackTimestamp]).
 	slices.SortFunc(matches, func(a, b slack.Message) int {
 		return strings.Compare(b.Timestamp, a.Timestamp)
 	})
@@ -152,11 +155,17 @@ func (c *Client) resolvePendingPost(ctx context.Context, issue *models.Issue) er
 
 // lookupPendingPosts returns the issue posts in the channel that may belong to a post pending since the given time,
 // and the time the channel history was read. See [postHistoryCache].
+// Failed history reads are counted in the pending posts metric once per read, rather than once per issue served from the cache.
 func (c *Client) lookupPendingPosts(ctx context.Context, channelID string, pendingSince time.Time) ([]slack.Message, time.Time, error) {
 	oldest := pendingSince.Add(-c.pendingPostLookupWindow())
 
 	return c.historyCache.lookup(ctx, channelID, oldest, func(ctx context.Context) ([]slack.Message, error) {
-		return c.api.ListBotMessages(ctx, channelID, oldest, postMetadataEventType)
+		msgs, err := c.api.ListBotMessages(ctx, channelID, oldest, postMetadataEventType)
+		if err != nil && ctx.Err() == nil {
+			c.metrics.CounterInc(slackPendingPostsTotalMetric, pendingPostResultLookupFailed)
+		}
+
+		return msgs, err
 	})
 }
 
@@ -183,9 +192,10 @@ func (c *Client) prefetchPendingPosts(ctx context.Context, issues []*models.Issu
 	}
 }
 
-// pendingPostLookupWindow returns how far back from the pending time a pending post is looked up. A post with an unknown
-// outcome is registered as pending after the failed call (see [Client.create]), but may have been created at any point
-// during the call. The window therefore covers the HTTP timeout, plus [pendingPostLookupMargin] for clock differences.
+// pendingPostLookupWindow returns how far back from the pending time a pending post is looked up. The pending time is
+// when the post may have been created at the latest (see [models.Issue.SlackPostPendingSince]), but the post may have
+// been created at any point during the call, including retries. The window therefore covers the max call duration
+// (see [internal.MaxCallDuration]), plus [pendingPostLookupMargin] for clock differences.
 func (c *Client) pendingPostLookupWindow() time.Duration {
-	return time.Duration(c.cfg.SlackClient.HTTPTimeoutSeconds)*time.Second + pendingPostLookupMargin
+	return internal.MaxCallDuration(c.cfg.SlackClient) + pendingPostLookupMargin
 }

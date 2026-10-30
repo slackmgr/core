@@ -479,6 +479,14 @@ func TestAbortsChannelUpdate(t *testing.T) {
 		{name: "channel unavailable", ctx: context.Background(), err: slackapi.SlackErrorResponse{Err: internal.SlackErrChannelNotFound}, want: false},
 		{name: "unknown slack error", ctx: context.Background(), err: slackapi.SlackErrorResponse{Err: "some_unknown_error"}, want: false},
 		{name: "plain error", ctx: context.Background(), err: errors.New("failed"), want: false},
+		{name: "missing scope", ctx: context.Background(), err: slackapi.SlackErrorResponse{Err: internal.SlackErrMissingScope}, want: true},
+		{name: "lookup rate limit", ctx: context.Background(), err: fmt.Errorf("%w: %w", errPendingPostLookup, &slackapi.RateLimitedError{}), want: false},
+		{name: "lookup transient slack error", ctx: context.Background(), err: fmt.Errorf("%w: %w", errPendingPostLookup, slackapi.SlackErrorResponse{Err: internal.SlackErrInternalError}), want: false},
+		{name: "lookup http timeout", ctx: context.Background(), err: fmt.Errorf("%w: %w", errPendingPostLookup, timeoutURLErr), want: false},
+		{name: "lookup missing scope", ctx: context.Background(), err: fmt.Errorf("%w: %w", errPendingPostLookup, slackapi.SlackErrorResponse{Err: internal.SlackErrMissingScope}), want: false},
+		{name: "lookup auth", ctx: context.Background(), err: fmt.Errorf("%w: %w", errPendingPostLookup, slackapi.SlackErrorResponse{Err: internal.SlackErrInvalidAuth}), want: true},
+		{name: "lookup not connected", ctx: context.Background(), err: fmt.Errorf("%w: %w", errPendingPostLookup, internal.ErrNotConnected), want: true},
+		{name: "lookup cancelled context", ctx: cancelledCtx, err: fmt.Errorf("%w: %w", errPendingPostLookup, context.Canceled), want: true},
 	}
 
 	for _, tc := range tests {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	slack "github.com/slack-go/slack"
+	"github.com/slackmgr/core/internal"
 )
 
 const (
@@ -22,8 +23,10 @@ const (
 //
 // A successful lookup is reused for [postHistoryCacheTTL] by all issues in the channel whose lookup window it covers,
 // and a failed lookup is not retried within [postHistoryFailureBackoff]. Concurrent lookups in the same channel are
-// serialized, so that only one of them calls Slack. The cache is kept in memory, since a channel is only processed by
-// one manager instance at a time (channel lock).
+// serialized, so that only one of them calls Slack. The cache is kept in memory, since a channel is normally only
+// processed by one manager instance at a time (channel lock). Posts created by another instance after a lookup are not
+// in the cached result, but the grace period is evaluated at the time of the lookup, so they are waited for rather than
+// assumed to not exist.
 type postHistoryCache struct {
 	mu       sync.Mutex
 	channels map[string]*postHistoryChannel
@@ -48,6 +51,7 @@ type postHistoryEntry struct {
 	err       error
 }
 
+// newPostHistoryCache returns an empty [postHistoryCache].
 func newPostHistoryCache() *postHistoryCache {
 	return &postHistoryCache{
 		channels: make(map[string]*postHistoryChannel),
@@ -131,6 +135,7 @@ func (h *postHistoryCache) channel(channelID string) *postHistoryChannel {
 	return ch
 }
 
+// entry returns the latest lookup for the channel, or nil.
 func (h *postHistoryCache) entry(ch *postHistoryChannel) *postHistoryEntry {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -138,10 +143,10 @@ func (h *postHistoryCache) entry(ch *postHistoryChannel) *postHistoryEntry {
 	return ch.entry
 }
 
-// messagesSince returns the messages posted at or after oldest. Slack timestamps have a fixed number of decimals
-// (and seconds digits until the year 2286), and compare correctly as strings.
+// messagesSince returns the messages posted at or after oldest. Slack timestamps compare correctly as strings
+// (see [internal.FormatSlackTimestamp]).
 func messagesSince(msgs []slack.Message, oldest time.Time) []slack.Message {
-	since := fmt.Sprintf("%d.%06d", oldest.Unix(), oldest.Nanosecond()/1000)
+	since := internal.FormatSlackTimestamp(oldest)
 
 	var result []slack.Message
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/slackmgr/core/config"
+	"github.com/slackmgr/core/internal"
 	"github.com/slackmgr/core/internal/models"
 	slack "github.com/slackmgr/core/manager/internal/slack"
 	"github.com/slackmgr/types"
@@ -108,7 +109,7 @@ func newTestChannelManager(t *testing.T, channelID string, db types.DB, slackCli
 		&mockLogger{},
 		&types.NoopMetrics{},
 		nil, // webhook handlers — a default handler is created internally
-		&config.ManagerConfig{},
+		&config.ManagerConfig{SlackClient: config.NewDefaultSlackClientConfig()},
 		settings,
 		&NoopRateLimitGate{},
 	)
@@ -481,6 +482,9 @@ type moveRecordingDB struct {
 
 	calls   *[]string
 	moveErr error
+
+	// movedPendingSince is the pending Slack post time of the issue passed to MoveIssue.
+	movedPendingSince time.Time
 }
 
 func (m *moveRecordingDB) MoveIssue(_ context.Context, issue types.Issue, _, _ string) error {
@@ -490,6 +494,8 @@ func (m *moveRecordingDB) MoveIssue(_ context.Context, issue types.Issue, _, _ s
 	}
 
 	*m.calls = append(*m.calls, fmt.Sprintf("db.MoveIssue:pending=%t", issueModel.HasPendingSlackPost()))
+	m.movedPendingSince = issueModel.SlackPostPendingSince
+
 	return m.moveErr
 }
 
@@ -526,7 +532,8 @@ func TestChannelManager_MoveIssue_MovesInDatabaseBeforePosting(t *testing.T) {
 
 	var calls []string
 
-	cm := newTestChannelManager(t, "C-SOURCE", &moveRecordingDB{calls: &calls}, &moveRecordingSlackClient{calls: &calls}, &NoopChannelLocker{})
+	db := &moveRecordingDB{calls: &calls}
+	cm := newTestChannelManager(t, "C-SOURCE", db, &moveRecordingSlackClient{calls: &calls}, &NoopChannelLocker{})
 
 	alert, _, _ := newTestAlertFromData(t, types.Alert{
 		SlackChannelID: "C-SOURCE",
@@ -538,16 +545,21 @@ func TestChannelManager_MoveIssue_MovesInDatabaseBeforePosting(t *testing.T) {
 	alert.OriginalSlackChannelID = "C-SOURCE"
 	issue := models.NewIssue(alert, &mockLogger{})
 
+	movedAt := time.Now()
+
 	err := cm.moveIssue(context.Background(), issue, "C-TARGET", models.MoveIssueReasonUserCommand, "user", &mockLogger{})
 
 	require.NoError(t, err)
+
+	// The pending time covers the max Slack call duration, so that the target channel keeps waiting while the post is created
+	assert.False(t, db.movedPendingSince.Before(movedAt.Add(internal.MaxCallDuration(cm.cfg.SlackClient))))
 
 	// The issue is moved as pending, so that the target channel waits for the post rather than creating its own,
 	// but the pending state is cleared before the post is created here.
 	assert.Equal(t, []string{"slack.Delete", "db.SaveMoveMapping", "db.MoveIssue:pending=true", "slack.UpdateSingleIssue:C-TARGET:pending=false", "db.SaveIssue"}, calls)
 }
 
-func TestChannelManager_MoveIssue_DatabaseErrorClearsPending(t *testing.T) {
+func TestChannelManager_MoveIssue_DatabaseErrorRestoresIssue(t *testing.T) {
 	t.Parallel()
 
 	var calls []string
@@ -568,6 +580,9 @@ func TestChannelManager_MoveIssue_DatabaseErrorClearsPending(t *testing.T) {
 
 	require.ErrorContains(t, err, "db down")
 	assert.False(t, issue.HasPendingSlackPost())
+	assert.Equal(t, "C-SOURCE", issue.LastAlert.SlackChannelID, "the issue stays in the source channel")
+	assert.False(t, issue.IsMoved)
+	assert.Empty(t, issue.MovedByUser)
 	assert.Equal(t, []string{"slack.Delete", "db.SaveMoveMapping", "db.MoveIssue:pending=true"}, calls)
 }
 

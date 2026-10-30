@@ -1522,6 +1522,21 @@ func TestIssue_SlackPostPending(t *testing.T) {
 		assert.False(t, issue.HasPendingSlackPost())
 	})
 
+	t.Run("write-ahead", func(t *testing.T) {
+		t.Parallel()
+
+		issue := NewIssue(createTestAlert(), &mockLogger{})
+		before := time.Now()
+
+		issue.RegisterSlackPostPendingWriteAhead(2 * time.Minute)
+		assert.True(t, issue.HasPendingSlackPost())
+		assert.False(t, issue.SlackPostPendingSince.Before(before.Add(2*time.Minute)), "pending time is the latest possible post time")
+
+		// The grace period does not elapse while the post may still be created
+		assert.False(t, issue.SlackPostPendingGraceElapsedAt(before.Add(2*time.Minute)))
+		assert.True(t, issue.SlackPostPendingGraceElapsedAt(time.Now().Add(2*time.Minute+SlackPostPendingGracePeriod+time.Second)))
+	})
+
 	t.Run("grace elapsed and expired", func(t *testing.T) {
 		t.Parallel()
 
@@ -1577,4 +1592,5 @@ func TestSlackTimestampToTime(t *testing.T) {
 	assert.Equal(t, time.Unix(1700000000, 100000000).UTC(), slackTimestampToTime("1700000000.1"))
 	assert.Equal(t, time.Unix(1700000000, 0).UTC(), slackTimestampToTime("1700000000"))
 	assert.WithinDuration(t, time.Now(), slackTimestampToTime("invalid"), time.Minute)
+	assert.WithinDuration(t, time.Now(), slackTimestampToTime("1700000000.abc"), time.Minute)
 }

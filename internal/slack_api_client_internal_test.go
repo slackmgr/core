@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/url"
 	"testing"
+	"time"
 
 	slackapi "github.com/slack-go/slack"
+	"github.com/slackmgr/core/config"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -231,4 +233,41 @@ func TestIsTransientError_Wrapped(t *testing.T) {
 	assert.True(t, IsTransientError(fmt.Errorf("wrapped: %w", slackapi.SlackErrorResponse{Err: SlackErrServiceUnavailable})))
 	assert.False(t, IsTransientError(fmt.Errorf("wrapped: %w", slackapi.SlackErrorResponse{Err: SlackErrIsArchived})))
 	assert.False(t, IsTransientError(fmt.Errorf("wrapped: %w", &testError{Code: 499})))
+}
+
+// TestSlackErrorCode verifies that the Slack error code is extracted from bare and wrapped Slack errors only.
+func TestSlackErrorCode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "nil", err: nil, want: ""},
+		{name: "bare known code", err: errors.New(SlackErrChannelNotFound), want: SlackErrChannelNotFound},
+		{name: "bare unknown code", err: errors.New("some_unknown_error"), want: ""},
+		{name: "slack error response", err: slackapi.SlackErrorResponse{Err: "some_unknown_error"}, want: "some_unknown_error"},
+		{name: "wrapped slack error response", err: fmt.Errorf("wrapped: %w", slackapi.SlackErrorResponse{Err: SlackErrMissingScope}), want: SlackErrMissingScope},
+		{name: "rate limit", err: &slackapi.RateLimitedError{}, want: ""},
+		{name: "plain error", err: errors.New("failed to do something"), want: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, SlackErrorCode(tc.err))
+		})
+	}
+}
+
+// TestMaxCallDuration verifies that the max call duration covers the larger retry budget plus the HTTP timeout.
+func TestMaxCallDuration(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.SlackClientConfig{HTTPTimeoutSeconds: 20, MaxRateLimitErrorWaitTimeSeconds: 120, MaxTransientErrorWaitTimeSeconds: 60}
+	assert.Equal(t, 140*time.Second, MaxCallDuration(cfg))
+
+	cfg.MaxTransientErrorWaitTimeSeconds = 300
+	assert.Equal(t, 320*time.Second, MaxCallDuration(cfg))
 }

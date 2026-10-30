@@ -1160,20 +1160,28 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 	// Find the Slack channel name for the new channel.
 	channelName := c.slackClient.GetChannelName(ctx, targetChannel)
 
+	// Keep the issue state from before the move request, so that it can be restored if the database move fails.
+	// The last alert is copied separately, since the move request changes it through the pointer.
+	issueBeforeMove, alertBeforeMove := *issue, *issue.LastAlert
+
 	// Register the move request on the issue. This will override the Slack channel ID on the last alert.
 	issue.RegisterMoveRequest(reason, username, targetChannel, channelName)
 
 	// Move the issue in the database before creating the new Slack post, since the Slack client saves the issue
 	// before posting (write-ahead), and the issue must then already be stored in the target channel.
 	//
-	// The issue is moved with a pending Slack post. The target channel lock is held during the move, but it may expire
-	// if the Slack calls are slow (e.g. rate limit waits). The target channel manager may then process the issue before
-	// the post below is created (the move mapping is already saved), and must wait for the post (and adopt it), rather
-	// than create a post of its own. The pending state is cleared again before posting, since the post is created right away.
-	issue.RegisterSlackPostPending()
+	// The issue is moved with a write-ahead pending Slack post. The target channel lock is held during the move, but it
+	// may expire if the Slack calls are slow (e.g. rate limit waits). The target channel manager may then process the issue
+	// before the post below is created (the move mapping is already saved), and must wait for the post (and adopt it),
+	// rather than create a post of its own. The pending time covers the max Slack call duration, so that the target
+	// channel manager keeps waiting while the post is created. The Slack client registers a new write-ahead pending
+	// post when it creates the post, so the pending state is cleared again here.
+	issue.RegisterSlackPostPendingWriteAhead(internal.MaxCallDuration(c.cfg.SlackClient))
 
 	if err := c.db.MoveIssue(ctx, issue, sourceChannel, targetChannel); err != nil {
-		issue.ClearSlackPostPending()
+		// Restore the issue, so that it stays in (and is posted to) the source channel. The deleted Slack post is kept
+		// as deleted, since the issue state was copied after the delete.
+		*issue, *issue.LastAlert = issueBeforeMove, alertBeforeMove
 		return fmt.Errorf("failed to move issue in the database: %w", err)
 	}
 

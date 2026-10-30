@@ -346,7 +346,7 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 		if err := c.resolvePendingPost(ctx, issue); err != nil {
 			errs = append(errs, err)
 
-			if lookupAbortsChannelUpdate(ctx, err) {
+			if abortsChannelUpdate(ctx, err) {
 				break
 			}
 
@@ -390,23 +390,22 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 // a cancelled context, a client that is not connected, exhausted retries for rate limits or transient errors,
 // or an authentication error. The remaining issues are then skipped, since they would fail the same way,
 // add to rate limit pressure, or (for transient errors) hold the channel lock for a long time while retrying.
+//
+// Failed pending post lookups (see [errPendingPostLookup]) only abort for errors that affect all calls regardless of
+// the method. Rate limit, transient and missing scope errors are specific to the history method, and the failed lookup
+// is cached (see [postHistoryCache]), so the remaining pending issues fail fast rather than retrying.
 func abortsChannelUpdate(ctx context.Context, err error) bool {
-	if ctx.Err() != nil || errors.Is(err, internal.ErrNotConnected) || internal.IsTransientError(err) {
-		return true
-	}
-
-	return internal.ClassifySlackError(err) == internal.SlackErrorClassAuth
-}
-
-// lookupAbortsChannelUpdate is [abortsChannelUpdate] for failed pending post lookups. Rate limit and transient errors
-// do not abort the channel update, since they are specific to the history method, and the failed lookup is cached
-// (see [postHistoryCache]), so the remaining pending issues fail fast rather than retrying.
-func lookupAbortsChannelUpdate(ctx context.Context, err error) bool {
 	if ctx.Err() != nil || errors.Is(err, internal.ErrNotConnected) {
 		return true
 	}
 
-	return internal.ClassifySlackError(err) == internal.SlackErrorClassAuth
+	isAuthError := internal.ClassifySlackError(err) == internal.SlackErrorClassAuth
+
+	if errors.Is(err, errPendingPostLookup) {
+		return isAuthError && internal.SlackErrorCode(err) != internal.SlackErrMissingScope
+	}
+
+	return isAuthError || internal.IsTransientError(err)
 }
 
 func (c *Client) UpdateSingleIssue(ctx context.Context, issue *models.Issue, reason string) error {
@@ -634,7 +633,7 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 		// The post may still have been created, e.g. after a timeout. Register it as pending, so that it is
 		// looked up in the channel history before a new post is created (see resolvePendingPost).
 		// The pending time is reset to now (after the call), so that the grace period starts when the post may
-		// have been created at the latest. The lookup window covers the full HTTP timeout before it.
+		// have been created at the latest. The lookup window covers the full call duration before it.
 		if errors.Is(err, internal.ErrPostOutcomeUnknown) {
 			logger.Infof("Outcome of Slack post is unknown, the post will be looked up before creating a new one: %s", err)
 			issue.RegisterSlackPostPending()
@@ -667,9 +666,12 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 }
 
 // savePendingPost registers the issue post as pending, and saves the issue, before the post is created (see [Client.SetIssueSaver]).
+// The pending time is set to when the post may have been created at the latest (see [models.Issue.RegisterSlackPostPendingWriteAhead]),
+// so that another reader of the saved issue (e.g. a target channel manager whose lock expired during a move) does not
+// assume that the post was never created while the post call (including retries) is still running.
 // The pending state is cleared again if the save fails.
 func (c *Client) savePendingPost(ctx context.Context, issue *models.Issue) error {
-	issue.RegisterSlackPostPending()
+	issue.RegisterSlackPostPendingWriteAhead(internal.MaxCallDuration(c.cfg.SlackClient))
 
 	if err := c.issueSaver.SaveIssue(ctx, issue); err != nil {
 		issue.ClearSlackPostPending()

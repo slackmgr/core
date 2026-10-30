@@ -444,20 +444,51 @@ func TestCreate_WriteAhead(t *testing.T) {
 	})
 }
 
-func TestResolvePendingPost_LookupWindowCoversHTTPTimeout(t *testing.T) {
+func TestResolvePendingPost_LookupWindowCoversMaxCallDuration(t *testing.T) {
 	t.Parallel()
 
 	api := &fakeSlackAPI{}
 	c := newUpdateTestClient(t, api)
 	c.cfg.SlackClient.HTTPTimeoutSeconds = 120
+	c.cfg.SlackClient.MaxRateLimitErrorWaitTimeSeconds = 200
+	c.cfg.SlackClient.MaxTransientErrorWaitTimeSeconds = 100
 
 	issue := newPendingTestIssue("a", time.Second)
 
 	require.NoError(t, c.UpdateSingleIssue(context.Background(), issue, "test"))
 
-	// The pending time is registered after a failed call, so the post may have been created up to the HTTP timeout before it
+	// The post may have been created at any point during the call (including retries) before the pending time
 	require.Len(t, api.historyOldest, 1)
-	assert.Equal(t, issue.SlackPostPendingSince.Add(-120*time.Second-pendingPostLookupMargin), api.historyOldest[0])
+	assert.Equal(t, issue.SlackPostPendingSince.Add(-320*time.Second-pendingPostLookupMargin), api.historyOldest[0])
+}
+
+func TestCreate_WriteAheadPendingCoversMaxCallDuration(t *testing.T) {
+	t.Parallel()
+
+	api := &fakeSlackAPI{}
+	c := newUpdateTestClient(t, api)
+	saver := &fakeIssueSaver{api: api}
+	c.SetIssueSaver(saver)
+
+	before := time.Now()
+
+	require.NoError(t, c.UpdateSingleIssue(context.Background(), newUpdateTestIssue("a", ""), "test"))
+
+	require.Len(t, saver.saved, 1)
+
+	saved := &models.Issue{}
+	require.NoError(t, json.Unmarshal(saver.saved[0], saved))
+	assert.False(t, saved.SlackPostPendingSince.Before(before.Add(internal.MaxCallDuration(c.cfg.SlackClient))),
+		"the pending time is when the post may have been created at the latest")
+
+	// Another reader of the saved issue (e.g. a target channel manager whose lock expired during a move) keeps waiting
+	// for the post while the post call may still be running, rather than creating a post of its own
+	other := newUpdateTestClient(t, &fakeSlackAPI{})
+	otherAPI := other.api.(*fakeSlackAPI) //nolint:forcetypeassert // Test setup
+
+	require.NoError(t, other.UpdateSingleIssue(context.Background(), saved, "test"))
+	assert.Empty(t, otherAPI.posts)
+	assert.True(t, saved.HasPendingSlackPost())
 }
 
 // countingMetrics is a [types.Metrics] that counts CounterInc calls per metric and labels.
@@ -635,4 +666,67 @@ func TestDelete_RemovesPostFromHistoryCache(t *testing.T) {
 	assert.Equal(t, 1, api.historyCalls)
 	assert.Empty(t, issue.SlackPostID)
 	assert.True(t, issue.HasPendingSlackPost())
+}
+
+func TestUpdate_FailedLookupInDeleteDoesNotAbort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		historyErr error
+	}{
+		{name: "rate limit", historyErr: fmt.Errorf("retries exhausted: %w", &slackapi.RateLimitedError{RetryAfter: time.Second})},
+		{name: "transient", historyErr: fmt.Errorf("retries exhausted: %w", slackapi.SlackErrorResponse{Err: internal.SlackErrInternalError})},
+		{name: "missing scope", historyErr: slackapi.SlackErrorResponse{Err: internal.SlackErrMissingScope}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			api := &fakeSlackAPI{historyErr: tt.historyErr}
+			c := newUpdateTestClient(t, api)
+
+			// E.g. an escalation with mentions while the post is pending
+			pending := newPendingTestIssue("a", time.Second)
+			pending.SlackPostNeedsDelete = true
+
+			err := c.Update(context.Background(), updateTestChannel, []*models.Issue{pending, newUpdateTestIssue("b", "")})
+
+			require.ErrorIs(t, err, errPendingPostLookup)
+			assert.Equal(t, []string{"b"}, api.posts, "the create/update phase is not skipped")
+			assert.True(t, pending.HasPendingSlackPost())
+			assert.True(t, pending.SlackPostNeedsDelete)
+		})
+	}
+}
+
+func TestUpdate_MissingScopeLookupDoesNotAbort(t *testing.T) {
+	t.Parallel()
+
+	api := &fakeSlackAPI{historyErr: slackapi.SlackErrorResponse{Err: internal.SlackErrMissingScope}}
+	c := newUpdateTestClient(t, api)
+
+	issues := []*models.Issue{newPendingTestIssue("a", time.Second), newPendingTestIssue("b", time.Second), newUpdateTestIssue("c", "")}
+
+	err := c.Update(context.Background(), updateTestChannel, issues)
+
+	require.Error(t, err)
+	assert.Equal(t, []string{"c"}, api.posts, "the remaining issues are processed")
+}
+
+func TestResolvePendingPost_LookupFailedIsCountedOncePerRead(t *testing.T) {
+	t.Parallel()
+
+	api := &fakeSlackAPI{historyErr: errors.New("some_unknown_error")}
+	c := newUpdateTestClient(t, api)
+	metrics := &countingMetrics{}
+	c.metrics = metrics
+
+	issues := []*models.Issue{newPendingTestIssue("a", time.Second), newPendingTestIssue("b", time.Second)}
+
+	require.Error(t, c.Update(context.Background(), updateTestChannel, issues))
+
+	assert.Equal(t, 1, api.historyCalls)
+	assert.Equal(t, 1, metrics.count(slackPendingPostsTotalMetric, pendingPostResultLookupFailed))
 }
