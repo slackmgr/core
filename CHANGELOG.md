@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Grafana dashboard: pending Slack posts panels (`slack_pending_posts_total` by result, pending and duplicate-deleted window totals) and an HTTP requests in flight panel (`http_server_requests_in_flight`)
+- README section on metrics and the Grafana dashboard
+- CLAUDE.md: metric changes must include the matching dashboard changes
+
 ## [0.17.0] - 2026-10-30
 
 ### Added

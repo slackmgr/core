@@ -45,6 +45,24 @@ This ensures code quality, prevents broken releases, and maintains consistency a
 
 After every code change, check whether `README.md` needs updating. The README is the public-facing documentation and must always reflect the actual code.
 
+## Metrics and Grafana Dashboard
+
+**CRITICAL:** The Grafana dashboard `dashboards/slackmgr.json` must always match the metrics the code emits. **Every change to a metric MUST update the dashboard in the same commit.** A metric change without the matching dashboard change is incomplete, just like a code change without tests.
+
+This applies to every metric registered via `RegisterCounter`, `RegisterGauge` or `RegisterHistogram` (in `manager/`, `restapi/`, `insights/` and `internal/`):
+
+- **Added metric:** add a panel for it, in the matching row (or a new row). Do not leave new metrics off the dashboard
+- **Renamed metric, or changed type, labels or label values:** update every query, legend, override and panel description that refers to it
+- **Removed metric:** remove or rewrite every panel and query that uses it. No panel may query a metric that no longer exists
+- **Changed meaning or buckets:** update panel descriptions, units and thresholds accordingly
+
+Dashboard conventions:
+- Queries use the default `slackmgr_` prefix (`config.DefaultMetricsPrefix`) and the `${datasource}` variable, and must work across multiple instances (aggregate with `sum`/`max`, not per-instance series)
+- New panels go on a single line each (like the most recent panels), with a unique `id` and a non-overlapping `gridPos`. Shift the `y` of panels below when inserting
+- Bump the dashboard `version`
+- Verify before committing: the file is valid JSON, panel IDs are unique, and every metric name in the code appears in the dashboard (and vice versa)
+- Mention dashboard changes in `CHANGELOG.md`
+
 ## Examples Repo
 
 Do **not** modify files under `../examples/` unless explicitly asked to do so. They are updated independently.

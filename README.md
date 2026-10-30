@@ -225,6 +225,10 @@ state, _ := svc.CurrentState(ctx, insights.CurrentStateQuery{ChannelIDs: channel
 
 Activity methods return `types.ErrInsightsNotSupported` when no reader is available. A query matching more than `types.MaxInsightsRows` (10,000) groups fails with `types.ErrInsightsTooManyRows` rather than returning truncated results. This mainly affects `Series` with `ByChannel` and `OpenIssuesSeries` (one row per bucket and channel, and for `Series` also per event type, and per reason if a metric has one); use a shorter range, a larger bucket or fewer channels. `CurrentState` also works with any `types.DB` (`insights.NewFromDB` or `insights.WithDB`), including plugins without insights support.
 
+## Metrics and Grafana Dashboard
+
+Both `restapi` and `manager` emit metrics through the injected `types.Metrics` implementation, with all names prefixed by `MetricsPrefix` (default `slackmgr_`). A ready-made Grafana dashboard for a Prometheus data source is available in [`dashboards/slackmgr.json`](dashboards/slackmgr.json). It covers every metric emitted by the library: alert and issue flow, open issues, Slack API health, Slack posts (including pending posts), queue processing, lock contention and DB cache, the REST API, alert intake and the insights recorder. The queries assume the default prefix.
+
 ## Installation
 
 ```bash
