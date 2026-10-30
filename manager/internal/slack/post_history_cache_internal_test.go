@@ -10,6 +10,7 @@ import (
 	"time"
 
 	slackapi "github.com/slack-go/slack"
+	"github.com/slackmgr/core/internal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -198,6 +199,105 @@ func TestPostHistoryCache_FailedLookup(t *testing.T) {
 		_, _, err = h.lookup(ctx, "C1", start, fetch)
 		require.NoError(t, err)
 		assert.Equal(t, int32(1), calls.Load())
+	})
+}
+
+func TestPostHistoryCache_FailedLookupBlocksShorterWindows(t *testing.T) {
+	t.Parallel()
+
+	start := time.Unix(1700000000, 0)
+	h, _ := newTestPostHistoryCache()
+	fetch, calls := countingFetch(nil, errors.New("rate limited"))
+
+	_, _, err := h.lookup(context.Background(), "C1", start.Add(-time.Hour), fetch)
+	require.Error(t, err)
+
+	_, _, err = h.lookup(context.Background(), "C1", start, fetch)
+	require.Error(t, err, "errors other than too many messages do not depend on the window")
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+func TestPostHistoryCache_TooManyMessages(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	start := time.Unix(1700000000, 0)
+	longWindow := start.Add(-10 * time.Minute)
+	shortWindow := start.Add(-2 * time.Minute)
+	tooManyErr := fmt.Errorf("%w C1", internal.ErrTooManyMessages)
+	msgs := []slackapi.Message{historyMessage(-time.Minute)}
+
+	t.Run("same and longer windows are blocked within the backoff", func(t *testing.T) {
+		t.Parallel()
+
+		h, clock := newTestPostHistoryCache()
+		fetch, calls := countingFetch(nil, tooManyErr)
+
+		_, _, err := h.lookup(ctx, "C1", longWindow, fetch)
+		require.ErrorIs(t, err, internal.ErrTooManyMessages)
+
+		_, _, err = h.lookup(ctx, "C1", longWindow, fetch)
+		require.ErrorIs(t, err, internal.ErrTooManyMessages)
+		assert.Contains(t, err.Error(), "retrying after")
+
+		_, _, err = h.lookup(ctx, "C1", longWindow.Add(-time.Minute), fetch)
+		require.ErrorIs(t, err, internal.ErrTooManyMessages)
+		assert.Equal(t, int32(1), calls.Load())
+
+		clock.Advance(postHistoryFailureBackoff)
+
+		_, _, err = h.lookup(ctx, "C1", longWindow, fetch)
+		require.ErrorIs(t, err, internal.ErrTooManyMessages)
+		assert.Equal(t, int32(2), calls.Load(), "retried after the backoff")
+	})
+
+	t.Run("shorter windows are looked up, without replacing the failure", func(t *testing.T) {
+		t.Parallel()
+
+		h, _ := newTestPostHistoryCache()
+		failingFetch, failingCalls := countingFetch(nil, tooManyErr)
+		okFetch, okCalls := countingFetch(msgs, nil)
+
+		_, _, err := h.lookup(ctx, "C1", longWindow, failingFetch)
+		require.ErrorIs(t, err, internal.ErrTooManyMessages)
+
+		got, _, err := h.lookup(ctx, "C1", shortWindow, okFetch)
+		require.NoError(t, err)
+		assert.Equal(t, msgs, got)
+
+		// Both results are kept, so neither window is looked up again
+		_, _, err = h.lookup(ctx, "C1", longWindow, failingFetch)
+		require.ErrorIs(t, err, internal.ErrTooManyMessages)
+
+		got, _, err = h.lookup(ctx, "C1", shortWindow, okFetch)
+		require.NoError(t, err)
+		assert.Equal(t, msgs, got)
+
+		assert.Equal(t, int32(1), failingCalls.Load())
+		assert.Equal(t, int32(1), okCalls.Load())
+	})
+
+	t.Run("successful lookup covering the window clears the failure", func(t *testing.T) {
+		t.Parallel()
+
+		h, clock := newTestPostHistoryCache()
+		failingFetch, _ := countingFetch(nil, tooManyErr)
+		okFetch, okCalls := countingFetch(msgs, nil)
+
+		_, _, err := h.lookup(ctx, "C1", longWindow, failingFetch)
+		require.ErrorIs(t, err, internal.ErrTooManyMessages)
+
+		clock.Advance(postHistoryFailureBackoff)
+
+		_, _, err = h.lookup(ctx, "C1", longWindow, okFetch)
+		require.NoError(t, err)
+
+		_, tooMany := h.entries(h.channel("C1"))
+		assert.Nil(t, tooMany)
+
+		_, _, err = h.lookup(ctx, "C1", longWindow, okFetch)
+		require.NoError(t, err)
+		assert.Equal(t, int32(1), okCalls.Load(), "served from the cache")
 	})
 }
 

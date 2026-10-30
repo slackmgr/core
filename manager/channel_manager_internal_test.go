@@ -480,8 +480,10 @@ func TestChannelManager_ProcessAlert_ResolvedWithoutIssue(t *testing.T) {
 type moveRecordingDB struct {
 	stubDB
 
-	calls   *[]string
-	moveErr error
+	calls      *[]string
+	moveErr    error
+	mappingErr error
+	saveErr    error
 
 	// movedPendingSince is the pending Slack post time of the issue passed to MoveIssue.
 	movedPendingSince time.Time
@@ -501,12 +503,17 @@ func (m *moveRecordingDB) MoveIssue(_ context.Context, issue types.Issue, _, _ s
 
 func (m *moveRecordingDB) SaveMoveMapping(_ context.Context, _ types.MoveMapping) error {
 	*m.calls = append(*m.calls, "db.SaveMoveMapping")
-	return nil
+	return m.mappingErr
+}
+
+func (m *moveRecordingDB) DeleteMoveMapping(_ context.Context, _, _ string) error {
+	*m.calls = append(*m.calls, "db.DeleteMoveMapping")
+	return m.mappingErr
 }
 
 func (m *moveRecordingDB) SaveIssue(_ context.Context, _ types.Issue) error {
 	*m.calls = append(*m.calls, "db.SaveIssue")
-	return nil
+	return m.saveErr
 }
 
 // moveRecordingSlackClient records the Slack client calls made when moving an issue.
@@ -586,6 +593,79 @@ func TestChannelManager_MoveIssue_DatabaseErrorRestoresIssue(t *testing.T) {
 	assert.Equal(t, []string{"slack.Delete", "db.SaveMoveMapping", "db.MoveIssue:pending=true"}, calls)
 }
 
+// newMoveTestIssue returns an issue in channel C-SOURCE, which is also its original channel.
+func newMoveTestIssue(t *testing.T) *models.Issue {
+	t.Helper()
+
+	alert, _, _ := newTestAlertFromData(t, types.Alert{
+		SlackChannelID: "C-SOURCE",
+		CorrelationID:  "corr-123",
+		Header:         "header",
+		Severity:       types.AlertError,
+		Timestamp:      time.Now(),
+	})
+	alert.OriginalSlackChannelID = "C-SOURCE"
+
+	return models.NewIssue(alert, &mockLogger{})
+}
+
+func TestChannelManager_MoveIssue_FinalSaveErrorStillMoved(t *testing.T) {
+	t.Parallel()
+
+	var calls []string
+
+	cm := newTestChannelManager(t, "C-SOURCE", &moveRecordingDB{calls: &calls, saveErr: errors.New("db down")}, &moveRecordingSlackClient{calls: &calls}, &NoopChannelLocker{})
+	issue := newMoveTestIssue(t)
+
+	err := cm.moveIssue(context.Background(), issue, "C-TARGET", models.MoveIssueReasonUserCommand, "user", &mockLogger{})
+
+	require.NoError(t, err, "the issue is already moved in the database, so the move has succeeded")
+	assert.Equal(t, "C-TARGET", issue.LastAlert.SlackChannelID)
+	assert.Equal(t, []string{"slack.Delete", "db.SaveMoveMapping", "db.MoveIssue:pending=true", "slack.UpdateSingleIssue:C-TARGET:pending=false", "db.SaveIssue"}, calls)
+}
+
+func TestChannelManager_MoveIssue_MoveMappingErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		targetChannel string
+		originalSlack string
+		expectedCalls []string
+	}{
+		{
+			name:          "save move mapping fails",
+			targetChannel: "C-TARGET",
+			originalSlack: "C-SOURCE",
+			expectedCalls: []string{"slack.Delete", "db.SaveMoveMapping"},
+		},
+		{
+			name:          "delete move mapping fails when moving back to the original channel",
+			targetChannel: "C-ORIGINAL",
+			originalSlack: "C-ORIGINAL",
+			expectedCalls: []string{"slack.Delete", "db.DeleteMoveMapping"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var calls []string
+
+			cm := newTestChannelManager(t, "C-SOURCE", &moveRecordingDB{calls: &calls, mappingErr: errors.New("db down")}, &moveRecordingSlackClient{calls: &calls}, &NoopChannelLocker{})
+			issue := newMoveTestIssue(t)
+			issue.LastAlert.OriginalSlackChannelID = tt.originalSlack
+
+			err := cm.moveIssue(context.Background(), issue, tt.targetChannel, models.MoveIssueReasonUserCommand, "user", &mockLogger{})
+
+			require.ErrorContains(t, err, "db down")
+			assert.Equal(t, "C-SOURCE", issue.LastAlert.SlackChannelID, "the issue stays in the source channel")
+			assert.Equal(t, tt.expectedCalls, calls)
+		})
+	}
+}
+
 func TestChannelManager_MoveIssue_PostponedForUnresolvedPendingPost(t *testing.T) {
 	t.Parallel()
 
@@ -626,6 +706,42 @@ func (p *postponingSlackClient) Delete(_ context.Context, _ *models.Issue, _ str
 func (p *postponingSlackClient) Update(_ context.Context, _ string, issues []*models.Issue) error {
 	p.updated = append(p.updated, issues...)
 	return nil
+}
+
+// updateRecordingSlackClient is a Slack client that records the issues passed to Update.
+type updateRecordingSlackClient struct {
+	stubSlackClient
+
+	updated []*models.Issue
+}
+
+func (u *updateRecordingSlackClient) Update(_ context.Context, _ string, issues []*models.Issue) error {
+	u.updated = append(u.updated, issues...)
+	return nil
+}
+
+func TestChannelManager_ProcessActiveIssues_EscalationMoveFinalSaveError(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+
+	body := existingIssueJSON(t, types.AlertError, now, func(issue *models.Issue) {
+		issue.Created = now.Add(-time.Minute)
+		issue.LastAlert.Escalation = []*types.Escalation{{DelaySeconds: 0, Severity: types.AlertPanic, MoveToChannel: "C-TARGET"}}
+	})
+
+	db := &insightsStubDB{
+		openIssues:  map[string]json.RawMessage{"i1": body},
+		saveIssueFn: func() error { return errors.New("db down") },
+	}
+
+	slackClient := &updateRecordingSlackClient{}
+	cm := newTestChannelManager(t, insightsTestChannel, db, slackClient, &NoopChannelLocker{})
+
+	_, err := cm.processActiveIssues(context.Background(), time.Second)
+
+	require.NoError(t, err)
+	assert.Empty(t, slackClient.updated, "the moved issue is not updated in the source channel")
 }
 
 func TestChannelManager_ProcessActiveIssues_EscalationMovePostponed(t *testing.T) {

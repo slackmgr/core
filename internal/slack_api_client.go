@@ -47,6 +47,11 @@ var ErrNotConnected = errors.New("client not connected: Connect() must be called
 // Slack fatal_error. Such errors are not retried, since a retry could create a duplicate message.
 var ErrPostOutcomeUnknown = errors.New("outcome of Slack post is unknown")
 
+// ErrTooManyMessages is returned (wrapped) by [SlackAPIClient.ListBotMessages] when the channel has too many messages
+// since oldest to read within [maxBotMessagesPages] pages. Unlike other errors, it depends on how far back the messages
+// are read, so a read from a later oldest time may still succeed.
+var ErrTooManyMessages = errors.New("too many messages in channel")
+
 // maxBotMessagesPages is the maximum number of conversations.history pages read by [SlackAPIClient.ListBotMessages].
 const maxBotMessagesPages = 5
 
@@ -194,7 +199,8 @@ func (c *SlackAPIClient) ChatPostMessage(ctx context.Context, channelID string, 
 // message metadata with the given event type. Metadata is included in the returned messages.
 // Messages are matched on the bot ID, since messages posted with as_user=false (e.g. with a custom username) are
 // returned as bot_message without a user ID.
-// An error is returned if the channel has too many messages since oldest to read within a bounded number of pages.
+// An error wrapping [ErrTooManyMessages] is returned if the channel has too many messages since oldest to read within
+// a bounded number of pages.
 func (c *SlackAPIClient) ListBotMessages(ctx context.Context, channelID string, oldest time.Time, eventType string) ([]slack.Message, error) {
 	if err := c.checkConnected(); err != nil {
 		return nil, err
@@ -244,7 +250,7 @@ func (c *SlackAPIClient) ListBotMessages(ctx context.Context, channelID string, 
 		params.Cursor = resp.ResponseMetaData.NextCursor
 	}
 
-	return nil, fmt.Errorf("too many messages in channel %s since %s to list bot messages", channelID, oldest.Format(time.RFC3339))
+	return nil, fmt.Errorf("%w %s since %s to list bot messages", ErrTooManyMessages, channelID, oldest.Format(time.RFC3339))
 }
 
 func (c *SlackAPIClient) ChatUpdateMessage(ctx context.Context, channelID string, options ...slack.MsgOption) (string, error) {

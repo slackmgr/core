@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -44,11 +45,14 @@ type fakeIssueSaver struct {
 	api *fakeSlackAPI
 	err error
 
+	calls       int
 	saved       [][]byte
 	postsAtSave []int
 }
 
 func (f *fakeIssueSaver) SaveIssue(_ context.Context, issue types.Issue) error {
+	f.calls++
+
 	if f.err != nil {
 		return f.err
 	}
@@ -444,6 +448,25 @@ func TestCreate_WriteAhead(t *testing.T) {
 	})
 }
 
+func TestUpdate_WriteAheadSaveErrorAbortsChannelUpdate(t *testing.T) {
+	t.Parallel()
+
+	api := &fakeSlackAPI{}
+	c := newUpdateTestClient(t, api)
+
+	saver := &fakeIssueSaver{api: api, err: &url.Error{Op: "Post", URL: "https://db.example.com", Err: errors.New("connection refused")}}
+	c.SetIssueSaver(saver)
+
+	issues := []*models.Issue{newUpdateTestIssue("a", ""), newUpdateTestIssue("b", ""), newUpdateTestIssue("c", "ts-c")}
+
+	err := c.Update(context.Background(), updateTestChannel, issues)
+
+	require.ErrorIs(t, err, errWriteAheadSave)
+	assert.Equal(t, 1, saver.calls, "the remaining creates are skipped")
+	assert.Empty(t, api.posts)
+	assert.Empty(t, api.updates, "the remaining updates are skipped as well")
+}
+
 func TestResolvePendingPost_LookupWindowCoversMaxCallDuration(t *testing.T) {
 	t.Parallel()
 
@@ -606,6 +629,34 @@ func TestUpdate_PendingPostsAreLookedUpOncePerChannel(t *testing.T) {
 	assert.Equal(t, testTS(3), cc.SlackPostID)
 }
 
+func TestUpdate_TooManyMessagesForOldPendingPostDoesNotBlockNewer(t *testing.T) {
+	t.Parallel()
+
+	api := &fakeSlackAPI{}
+	c := newUpdateTestClient(t, api)
+
+	old := newPendingTestIssue("old", 8*time.Minute)
+	recent := newPendingTestIssue("recent", time.Second)
+	api.history = []slackapi.Message{botMessage(testTS(1), old), botMessage(testTS(2), recent)}
+
+	// The channel has too many messages to read since the start of the lookup window of the old pending post
+	recentOldest := recent.SlackPostPendingSince.Add(-c.pendingPostLookupWindow())
+	api.historyErrFn = func(oldest time.Time) error {
+		if oldest.Before(recentOldest) {
+			return fmt.Errorf("%w %s", internal.ErrTooManyMessages, updateTestChannel)
+		}
+
+		return nil
+	}
+
+	err := c.Update(context.Background(), updateTestChannel, []*models.Issue{old, recent})
+
+	require.ErrorIs(t, err, internal.ErrTooManyMessages)
+	assert.Equal(t, testTS(2), recent.SlackPostID, "the recent pending post is found with its own, shorter lookup window")
+	assert.True(t, old.HasPendingSlackPost(), "the old pending post stays pending")
+	assert.Equal(t, 2, api.historyCalls, "the long window is read once (prefetch), and the short window once")
+}
+
 func TestUpdate_RateLimitedLookupDoesNotAbort(t *testing.T) {
 	t.Parallel()
 
@@ -699,6 +750,31 @@ func TestUpdate_FailedLookupInDeleteDoesNotAbort(t *testing.T) {
 			assert.True(t, pending.SlackPostNeedsDelete)
 		})
 	}
+}
+
+func TestUpdate_FailedLookupInDeleteIsReportedOnce(t *testing.T) {
+	t.Parallel()
+
+	api := &fakeSlackAPI{historyErr: slackapi.SlackErrorResponse{Err: internal.SlackErrMissingScope}}
+	c := newUpdateTestClient(t, api)
+
+	pending := newPendingTestIssue("a", time.Second)
+	pending.SlackPostNeedsDelete = true
+
+	err := c.Update(context.Background(), updateTestChannel, []*models.Issue{pending})
+
+	joined, ok := err.(interface{ Unwrap() []error })
+	require.True(t, ok, "Update returns joined errors")
+
+	lookupErrs := 0
+
+	for _, e := range joined.Unwrap() {
+		if errors.Is(e, errPendingPostLookup) {
+			lookupErrs++
+		}
+	}
+
+	assert.Equal(t, 1, lookupErrs, "the lookup error from the delete is not reported again by the create/update phase")
 }
 
 func TestUpdate_MissingScopeLookupDoesNotAbort(t *testing.T) {

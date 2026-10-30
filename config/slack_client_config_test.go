@@ -91,14 +91,12 @@ func TestSlackClientConfig_SetDefaults(t *testing.T) {
 			AppToken:     "xapp-test",
 			BotToken:     "xoxb-test",
 			DebugLogging: true,
-			DryRun:       true,
 		}
 		cfg.SetDefaults()
 
 		assert.Equal(t, "xapp-test", cfg.AppToken)
 		assert.Equal(t, "xoxb-test", cfg.BotToken)
 		assert.True(t, cfg.DebugLogging)
-		assert.True(t, cfg.DryRun)
 	})
 }
 
@@ -142,6 +140,13 @@ func TestSlackClientConfig_Validate(t *testing.T) {
 				c.HTTPTimeoutSeconds = -1
 			},
 			expectError: "http timeout must be between 1 and 300 seconds",
+		},
+		{
+			name: "dry run enabled",
+			modify: func(c *config.SlackClientConfig) {
+				c.DryRun = true
+			},
+			expectError: "dry run mode has been removed: use a test channel or workspace instead",
 		},
 	}
 

@@ -1187,6 +1187,9 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 
 	issue.ClearSlackPostPending()
 
+	// The issue is now stored in the target channel, so the move has succeeded, and no errors are returned from here on.
+	// The caller must not process the issue in the source channel anymore.
+
 	// Create a new Slack post for the issue in the target channel.
 	// Errors from the Slack client are logged, but not returned.
 	// If the Slack post is not created from some reason, it will be created on the next issue processing cycle.
@@ -1194,9 +1197,11 @@ func (c *channelManager) moveIssue(ctx context.Context, issue *models.Issue, tar
 		logger.Errorf("Failed to update moved issue in Slack: %s", err)
 	}
 
-	// Save the Slack post state to the database, regardless of any Slack errors above.
+	// Save the Slack post state to the database, regardless of any Slack errors above. If the save fails, the stored
+	// issue keeps its pending Slack post (the write-ahead above, or the one saved by the Slack client before posting),
+	// so the target channel manager finds and adopts the post rather than creating a new one.
 	if err := c.db.SaveIssue(ctx, issue); err != nil {
-		return fmt.Errorf("failed to save moved issue to database: %w", err)
+		logger.Errorf("Failed to save moved issue to database, the Slack post will be adopted by the target channel: %s", err)
 	}
 
 	logger.Info("Issue moved to target channel")

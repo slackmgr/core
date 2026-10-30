@@ -77,6 +77,8 @@ func postMetadata(issue *models.Issue, method postUpdateMethod) slack.SlackMetad
 // It does nothing if the issue has no pending post. The channel history is cached (see [postHistoryCache]).
 //
 //   - If found, the newest matching post is adopted as the issue post, and older matches (duplicates) are deleted.
+//     Duplicates are always hard-deleted, without checking for replies (unlike [Client.Delete]). This is by design:
+//     a duplicate is never the issue post, and keeping it would leave a post in the channel that is not tracked by any issue.
 //   - If not found, the post is assumed to not exist if the grace period had elapsed when the history was read.
 //     Until then, the issue stays pending, and no new post is created.
 //   - If the lookup fails, the error is returned and the issue stays pending, unless the pending post has expired.

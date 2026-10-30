@@ -31,9 +31,10 @@ type fakeSlackAPI struct {
 	updateErr func(ts string) error
 	deleteErr func(ts string) error
 
-	// history is returned by ListBotMessages, unless historyErr is set.
-	history    []slackapi.Message
-	historyErr error
+	// history is returned by ListBotMessages, unless historyErr or historyErrFn returns an error.
+	history      []slackapi.Message
+	historyErr   error
+	historyErrFn func(oldest time.Time) error
 
 	// hasReplies is returned by MessageHasReplies.
 	hasReplies bool
@@ -120,6 +121,12 @@ func (f *fakeSlackAPI) ListBotMessages(_ context.Context, _ string, oldest time.
 	f.historyCalls++
 	f.historyOldest = append(f.historyOldest, oldest)
 	f.mu.Unlock()
+
+	if f.historyErrFn != nil {
+		if err := f.historyErrFn(oldest); err != nil {
+			return nil, err
+		}
+	}
 
 	return f.history, f.historyErr
 }
@@ -487,6 +494,8 @@ func TestAbortsChannelUpdate(t *testing.T) {
 		{name: "lookup auth", ctx: context.Background(), err: fmt.Errorf("%w: %w", errPendingPostLookup, slackapi.SlackErrorResponse{Err: internal.SlackErrInvalidAuth}), want: true},
 		{name: "lookup not connected", ctx: context.Background(), err: fmt.Errorf("%w: %w", errPendingPostLookup, internal.ErrNotConnected), want: true},
 		{name: "lookup cancelled context", ctx: cancelledCtx, err: fmt.Errorf("%w: %w", errPendingPostLookup, context.Canceled), want: true},
+		{name: "write-ahead save", ctx: context.Background(), err: fmt.Errorf("%w: %w", errWriteAheadSave, errors.New("connection refused")), want: true},
+		{name: "write-ahead save http timeout", ctx: context.Background(), err: fmt.Errorf("%w: %w", errWriteAheadSave, timeoutURLErr), want: true},
 	}
 
 	for _, tc := range tests {

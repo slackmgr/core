@@ -112,12 +112,6 @@ const (
 // When DebugLogging is true, all Slack API requests and responses are logged at debug
 // level. This is useful for troubleshooting but should be disabled in production as
 // it may log sensitive information.
-//
-// # Dry Run Mode
-//
-// When DryRun is true, the client logs what it would do without actually calling the
-// Slack API. Useful for testing configuration and message formatting without sending
-// real messages.
 type SlackClientConfig struct {
 	// AppToken is the Slack App-Level Token (xapp-...) used for Socket Mode connections.
 	// This token enables real-time event handling including reactions, mentions, and
@@ -135,9 +129,11 @@ type SlackClientConfig struct {
 	// sensitive data in logs.
 	DebugLogging bool `json:"debugLogging" mapstructure:"debugLogging" yaml:"debugLogging"`
 
-	// DryRun prevents actual Slack API calls when true. The client logs intended
-	// actions without executing them. Useful for testing configuration and validating
-	// message formatting without affecting real Slack channels.
+	// DryRun is no longer supported, and [SlackClientConfig.Validate] fails if it is true.
+	// The field is kept so that configurations that still enable it fail at startup,
+	// rather than silently creating real Slack posts.
+	//
+	// Deprecated: Dry run mode has been removed. Use a test channel or workspace instead.
 	DryRun bool `json:"dryRun" mapstructure:"dryRun" yaml:"dryRun"`
 
 	// Concurrency sets the maximum number of concurrent Slack API requests.
@@ -231,6 +227,7 @@ func (c *SlackClientConfig) SetDefaults() {
 //   - All MaxAttempts fields: must be between 1 and 100
 //   - All MaxWaitTime fields: must be between 1 and 600 seconds
 //   - HTTPTimeoutSeconds: must be between 1 and 300 seconds
+//   - DryRun: must be false (dry run mode has been removed)
 func (c *SlackClientConfig) Validate() error {
 	if c.AppToken == "" {
 		return errors.New("app token is empty")
@@ -262,6 +259,10 @@ func (c *SlackClientConfig) Validate() error {
 
 	if c.HTTPTimeoutSeconds < MinHTTPTimeoutSeconds || c.HTTPTimeoutSeconds > MaxHTTPTimeoutSeconds {
 		return fmt.Errorf("http timeout must be between %d and %d seconds", MinHTTPTimeoutSeconds, MaxHTTPTimeoutSeconds)
+	}
+
+	if c.DryRun {
+		return errors.New("dry run mode has been removed: use a test channel or workspace instead")
 	}
 
 	return nil

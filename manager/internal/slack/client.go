@@ -51,6 +51,10 @@ type IssueFinder interface {
 	FindIssueBySlackPost(ctx context.Context, channelID string, slackPostID string, includeArchived bool) *models.Issue
 }
 
+// errWriteAheadSave is wrapped in errors returned when saving an issue before its Slack post is created failed
+// (see [Client.savePendingPost]). Such errors always abort a channel update (see [abortsChannelUpdate]).
+var errWriteAheadSave = errors.New("failed to save issue before creating Slack post")
+
 // IssueSaver saves an issue to the database. See [Client.SetIssueSaver].
 type IssueSaver interface {
 	SaveIssue(ctx context.Context, issue types.Issue) error
@@ -222,11 +226,6 @@ func (c *Client) OpenModal(ctx context.Context, triggerID string, request slack.
 }
 
 func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error) {
-	if c.cfg.SlackClient.DryRun {
-		c.logger.WithField("user_id", userID).WithField("channel_id", channelID).Info("DRYRUN: Slack post ephemeral message")
-		return "", nil
-	}
-
 	ts, err := c.api.PostEphemeral(ctx, channelID, userID, options...)
 	if err != nil {
 		return "", fmt.Errorf("failed to post ephemeral Slack message to user %s in channel %s: %w", userID, channelID, err)
@@ -235,6 +234,10 @@ func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, op
 	return ts, nil
 }
 
+// Update runs a channel update cycle for the non-archived issues in the channel: posts are deleted where requested
+// (or for re-ordering), pending posts are looked up, and posts are created or updated where needed.
+// A failed issue does not block the other issues, unless the error affects all Slack calls (see [abortsChannelUpdate]).
+// All errors from the cycle are returned joined.
 func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues []*models.Issue) error {
 	issues := []*models.Issue{}
 	openIssueCount := 0
@@ -303,7 +306,7 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 					return
 				}
 
-				// The issue keeps its delete flag, and is skipped by the create/update phase below while pending.
+				// The issue keeps its delete flag, and is skipped by the create/update phase below (see unresolvedDeletes).
 				// The delete is retried in the next cycle.
 				if errors.Is(err, ErrPendingPostUnresolved) {
 					c.logger.WithFields(d.issue.LogFields()).Debug("Slack post delete postponed until the pending post is resolved")
@@ -332,6 +335,16 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 		}
 	}
 
+	// Issues whose delete was postponed or failed because their pending post is not resolved are skipped below.
+	// The lookup was already made (and any error collected) by the delete, and a pending issue is not posted anyway.
+	unresolvedDeletes := make(map[string]struct{})
+
+	for _, d := range deletes {
+		if d.issue.HasPendingSlackPost() {
+			unresolvedDeletes[d.issue.ID] = struct{}{}
+		}
+	}
+
 	// Sort the issues again IFF at least one Slack post was deleted in the previous step.
 	// This is required since deleted issues are sorted based on both priority and timestamp.
 	if len(deletes) > 0 {
@@ -342,6 +355,10 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 
 	// Go through all the issues and create/update Slack post where needed
 	for _, issue := range issues {
+		if _, ok := unresolvedDeletes[issue.ID]; ok {
+			continue
+		}
+
 		// Look up pending posts before deciding the action, since a found post changes it
 		if err := c.resolvePendingPost(ctx, issue); err != nil {
 			errs = append(errs, err)
@@ -366,11 +383,6 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 			continue
 		}
 
-		if c.cfg.SlackClient.DryRun {
-			c.logger.WithFields(issue.LogFields()).WithField("action", action).Info("DRYRUN: Slack issue action")
-			continue
-		}
-
 		reason := fmt.Sprintf("channel update: issue requests action '%s'", action)
 
 		// A failed issue does not block the remaining issues, unless the error affects all Slack calls.
@@ -391,11 +403,16 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 // or an authentication error. The remaining issues are then skipped, since they would fail the same way,
 // add to rate limit pressure, or (for transient errors) hold the channel lock for a long time while retrying.
 //
+// A failed save before creating a Slack post (see [errWriteAheadSave]) always aborts, since the database is then
+// likely unavailable, and every remaining create would wait for the database to fail as well. It is checked before
+// the Slack error classes, so that the outcome does not depend on the database implementation (e.g. an HTTP based
+// database returning timeouts that would otherwise be treated as transient Slack errors).
+//
 // Failed pending post lookups (see [errPendingPostLookup]) only abort for errors that affect all calls regardless of
 // the method. Rate limit, transient and missing scope errors are specific to the history method, and the failed lookup
 // is cached (see [postHistoryCache]), so the remaining pending issues fail fast rather than retrying.
 func abortsChannelUpdate(ctx context.Context, err error) bool {
-	if ctx.Err() != nil || errors.Is(err, internal.ErrNotConnected) {
+	if ctx.Err() != nil || errors.Is(err, internal.ErrNotConnected) || errors.Is(err, errWriteAheadSave) {
 		return true
 	}
 
@@ -408,6 +425,9 @@ func abortsChannelUpdate(ctx context.Context, err error) bool {
 	return isAuthError || internal.IsTransientError(err)
 }
 
+// UpdateSingleIssue creates or updates the Slack post for the issue, if the issue requires it (see
+// [models.Issue.GetSlackAction]). A pending post is looked up first (see [Client.resolvePendingPost]), and an error is
+// returned if the lookup fails. Before a new post is created, the issue is saved to the database (see [Client.SetIssueSaver]).
 func (c *Client) UpdateSingleIssue(ctx context.Context, issue *models.Issue, reason string) error {
 	if err := c.resolvePendingPost(ctx, issue); err != nil {
 		return err
@@ -419,9 +439,11 @@ func (c *Client) UpdateSingleIssue(ctx context.Context, issue *models.Issue, rea
 		return nil
 	}
 
-	return c.createOrUpdate(ctx, issue, reason, issue.GetSlackAction())
+	return c.createOrUpdate(ctx, issue, reason, action)
 }
 
+// UpdateSingleIssueWithThrottling is [Client.UpdateSingleIssue], except that the post is not created or updated if
+// the issue is throttled, based on its activity and the number of open issues in the channel.
 func (c *Client) UpdateSingleIssueWithThrottling(ctx context.Context, issue *models.Issue, reason string, issuesInChannel int) error {
 	if err := c.resolvePendingPost(ctx, issue); err != nil {
 		return err
@@ -443,6 +465,13 @@ func (c *Client) UpdateSingleIssueWithThrottling(ctx context.Context, issue *mod
 	return c.createOrUpdate(ctx, issue, reason, action)
 }
 
+// Delete deletes the Slack post of the issue, if any, and registers the post as deleted on the issue. If
+// updateIfMessageHasReplies is true and the post has replies, the post is updated to look deleted instead.
+// Errors where the channel or the message is no longer available are ignored.
+//
+// A pending post (see [models.Issue.SlackPostPendingSince]) is looked up first. If the lookup fails, and the pending
+// post has not expired, the error is returned (wrapping [errPendingPostLookup]). If the post is not found, and the grace period has not elapsed,
+// [ErrPendingPostUnresolved] is returned, and the delete must be retried later.
 func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string, updateIfMessageHasReplies bool) error {
 	// A pending post must be found before it can be deleted. If it is not found, it is assumed to not exist
 	// once the grace period has elapsed. Until then, the delete is postponed, since the post may still appear.
@@ -460,11 +489,6 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string,
 	}
 
 	logger := c.logger.WithFields(issue.LogFields()).WithField("post_update_reason", reason)
-
-	if c.cfg.SlackClient.DryRun {
-		logger.Info("DRYRUN: Slack delete issue")
-		return nil
-	}
 
 	hardDelete := true
 
@@ -503,7 +527,12 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string,
 		c.recordPost(slackPostResultDeleted, types.InsightsEventSlackPostDeleted, "", issue)
 	}
 
-	// The post is gone (or soft-deleted), and must not be adopted from a cached history lookup
+	// The post is gone (or soft-deleted), and must not be adopted from a cached history lookup.
+	// If the error was ignored because the message can no longer be deleted or edited (e.g. cant_delete_message or
+	// edit_window_closed), the post still exists with issue post metadata, and a later history lookup may find it,
+	// if the issue gets a pending post within the lookup window. The post is then adopted and updated with the current
+	// issue content (or deleted as a duplicate, if there is a newer post). This is accepted, since such errors are rare
+	// for the bot's own messages, and an adopted post is better than an untracked one.
 	c.historyCache.removeMessage(issue.LastAlert.SlackChannelID, issue.SlackPostID)
 
 	issue.RegisterSlackPostDeleted()
@@ -513,11 +542,6 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string,
 
 func (c *Client) DeletePost(ctx context.Context, channelID, ts string) error {
 	if ts == PostIDInvalidChannel {
-		return nil
-	}
-
-	if c.cfg.SlackClient.DryRun {
-		c.logger.WithField("slack_post_id", ts).Info("DRYRUN: Slack delete post")
 		return nil
 	}
 
@@ -669,13 +693,13 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 // The pending time is set to when the post may have been created at the latest (see [models.Issue.RegisterSlackPostPendingWriteAhead]),
 // so that another reader of the saved issue (e.g. a target channel manager whose lock expired during a move) does not
 // assume that the post was never created while the post call (including retries) is still running.
-// The pending state is cleared again if the save fails.
+// The pending state is cleared again if the save fails, and the returned error wraps [errWriteAheadSave].
 func (c *Client) savePendingPost(ctx context.Context, issue *models.Issue) error {
 	issue.RegisterSlackPostPendingWriteAhead(internal.MaxCallDuration(c.cfg.SlackClient))
 
 	if err := c.issueSaver.SaveIssue(ctx, issue); err != nil {
 		issue.ClearSlackPostPending()
-		return fmt.Errorf("failed to save issue %s in channel %s before creating Slack post: %w", issue.CorrelationID, issue.LastAlert.SlackChannelID, err)
+		return fmt.Errorf("%w %s in channel %s: %w", errWriteAheadSave, issue.CorrelationID, issue.LastAlert.SlackChannelID, err)
 	}
 
 	return nil

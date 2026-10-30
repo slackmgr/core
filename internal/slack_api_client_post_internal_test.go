@@ -197,7 +197,7 @@ func TestListBotMessages_TooManyPages(t *testing.T) {
 
 	_, err := c.ListBotMessages(context.Background(), "C1", time.Now(), "slackmgr_issue")
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrTooManyMessages)
 	assert.Equal(t, int32(maxBotMessagesPages), calls.Load())
 }
 
