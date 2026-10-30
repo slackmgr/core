@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Grafana dashboard: pending Slack posts panels (`slack_pending_posts_total` by result, pending and duplicate-deleted window totals) and an HTTP requests in flight panel (`http_server_requests_in_flight`)
+- Grafana dashboard: "Metrics prefix" variable (default `slackmgr_`), so the dashboard works with a custom `MetricsPrefix`. Previously all queries hard-coded `slackmgr_`
 - README section on metrics and the Grafana dashboard
 - CLAUDE.md: metric changes must include the matching dashboard changes
 

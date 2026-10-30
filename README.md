@@ -227,7 +227,7 @@ Activity methods return `types.ErrInsightsNotSupported` when no reader is availa
 
 ## Metrics and Grafana Dashboard
 
-Both `restapi` and `manager` emit metrics through the injected `types.Metrics` implementation, with all names prefixed by `MetricsPrefix` (default `slackmgr_`). A ready-made Grafana dashboard for a Prometheus data source is available in [`dashboards/slackmgr.json`](dashboards/slackmgr.json). It covers every metric emitted by the library: alert and issue flow, open issues, Slack API health, Slack posts (including pending posts), queue processing, lock contention and DB cache, the REST API, alert intake and the insights recorder. The queries assume the default prefix.
+Both `restapi` and `manager` emit metrics through the injected `types.Metrics` implementation, with all names prefixed by `MetricsPrefix` (default `slackmgr_`). A ready-made Grafana dashboard for a Prometheus data source is available in [`dashboards/slackmgr.json`](dashboards/slackmgr.json). It covers every metric emitted by the library: alert and issue flow, open issues, Slack API health, Slack posts (including pending posts), queue processing, lock contention and DB cache, the REST API, alert intake and the insights recorder. If you use a custom prefix, set the dashboard's "Metrics prefix" variable (default `slackmgr_`) to match, either in the dashboard settings or with the `var-prefix` URL parameter.
 
 ## Installation
 

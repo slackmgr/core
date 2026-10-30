@@ -57,7 +57,7 @@ This applies to every metric registered via `RegisterCounter`, `RegisterGauge` o
 - **Changed meaning or buckets:** update panel descriptions, units and thresholds accordingly
 
 Dashboard conventions:
-- Queries use the default `slackmgr_` prefix (`config.DefaultMetricsPrefix`) and the `${datasource}` variable, and must work across multiple instances (aggregate with `sum`/`max`, not per-instance series)
+- Queries reference metrics as `${prefix}<name>` (never a hard-coded `slackmgr_`) and use the `${datasource}` variable, and must work across multiple instances (aggregate with `sum`/`max`, not per-instance series)
 - New panels go on a single line each (like the most recent panels), with a unique `id` and a non-overlapping `gridPos`. Shift the `y` of panels below when inserting
 - Bump the dashboard `version`
 - Verify before committing: the file is valid JSON, panel IDs are unique, and every metric name in the code appears in the dashboard (and vice versa)
