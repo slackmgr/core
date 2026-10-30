@@ -59,6 +59,13 @@ This applies to every metric registered via `RegisterCounter`, `RegisterGauge` o
 Dashboard conventions:
 - Queries reference metrics as `${prefix}<name>` (never a hard-coded `slackmgr_`) and use the `${datasource}` variable, and must work across multiple instances (aggregate with `sum`/`max`, not per-instance series)
 - New panels go on a single line each (like the most recent panels), with a unique `id` and a non-overlapping `gridPos`. Shift the `y` of panels below when inserting
+- Colors:
+  - Red, pink and similar hues are reserved for error series (e.g. `failed`, `slack_error`, `write_error`). Never use them for OK series
+  - Panels with a small, known set of label values (results, reasons, events, actions, percentiles) get an explicit `byName` color override for **every** value, distinct within the panel. Never override only some values: the remaining series get palette colors that can clash with the fixed ones (or be red)
+  - Avoid near-identical colors in the same panel (e.g. `red` and `dark-red`, `orange` and `semi-dark-orange`)
+  - Use the same color for the same meaning across panels (e.g. `p50` green, `p95` yellow, `p99` orange; matching issue events and command actions)
+  - High-cardinality identity panels (channels, HTTP paths, Slack API actions, rejection reasons) keep `palette-classic`
+  - When adding a label value, add its color override
 - Bump the dashboard `version`
 - Verify before committing: the file is valid JSON, panel IDs are unique, and every metric name in the code appears in the dashboard (and vice versa)
 - Mention dashboard changes in `CHANGELOG.md`
