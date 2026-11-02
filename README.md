@@ -77,6 +77,13 @@ Before sending, a button can optionally display a confirmation dialog, collect f
 
 Webhook dispatch is governed by the `manager.WebhookHandler` interface. Each handler declares which targets it claims via `ShouldHandleWebhook` and delivers the payload via `HandleWebhook`. Registered handlers are evaluated in order; the first match wins. The built-in HTTP handler is always available and claims any `https://` URL. Additional handlers can be registered with `mgr.RegisterWebhookHandler`. The `sqs` and `pubsub` plugins (see [Plugins](#plugins) below) each provide a handler that intercepts targets whose format matches their respective service — an SQS queue URL or a Pub/Sub topic name — and publishes the callback payload directly to that queue or topic instead of making an HTTP call. Any custom delivery target is supported by implementing the two-method interface.
 
+The user who clicked the button gets feedback on whether the webhook was delivered:
+
+- **With a confirmation dialog:** the dialog stays open after submission and shows the status — first *sending*, then *sent* or *failed* with a reason. If the user closes the dialog before the outcome is known, failures are reported in an ephemeral message instead (successes are not).
+- **Without a confirmation dialog:** only failures are reported, in an ephemeral message. Successes are silent, keeping these buttons lightweight.
+
+Failure reasons are user-friendly categories (e.g. timed out, receiving system unreachable, rejected with HTTP 422) and never include the target URL. The status reflects delivery only: any change to the alert itself is up to the receiving system, which typically updates the alert via the API. Custom handlers can return (wrap) a `manager.WebhookHTTPError` to include an HTTP status code in the failure reason.
+
 Webhook payloads are AES-256 encrypted in transit between the API server and the Manager, so both components must share a common `EncryptionKey`. When no key is configured, the API rejects alerts that include webhooks with HTTP 400, preventing unencrypted payloads from reaching the queue.
 
 ### Notification Delay

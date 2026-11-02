@@ -630,6 +630,12 @@ func (c *channelManager) execCmd(ctx context.Context, cmd *models.Command) (*mod
 
 	if issue == nil && !cmd.ExecuteWhenNoIssueFound {
 		logger.Info("No issue found for Slack message command")
+
+		if cmd.Action == models.CommandActionWebhook {
+			outcome := models.NewWebhookOutcome(cmd, "", models.WebhookOutcomeFailed).Failed(models.WebhookReasonIssueNotActive, false)
+			go notifyWebhookOutcome(ctx, c.slackClient, outcome)
+		}
+
 		return nil, true, nil
 	}
 
@@ -1233,13 +1239,20 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 	webhook := issue.FindWebhook(cmd.WebhookParameters.WebhookID)
 
 	if webhook == nil {
+		// Typically because the alert was updated (without the webhook) after the button was clicked.
+		outcome := models.NewWebhookOutcome(cmd, "", models.WebhookOutcomeFailed).Failed(models.WebhookReasonWebhookUnavailable, false)
+		go notifyWebhookOutcome(ctx, c.slackClient, outcome)
+
 		return false, fmt.Errorf("no webhook found with ID %s", cmd.WebhookParameters.WebhookID)
 	}
 
-	logger = c.logger.WithField("webhook_target", webhook.URL)
+	outcome := models.NewWebhookOutcome(cmd, webhook.ButtonText, models.WebhookOutcomeSending)
+
+	logger = logger.WithField("webhook_target", webhook.URL)
 
 	payload, err := internal.DecryptWebhookPayload(webhook, []byte(c.cfg.EncryptionKey))
 	if err != nil {
+		go notifyWebhookOutcome(ctx, c.slackClient, outcome.Failed(models.WebhookReasonConfigError, false))
 		return false, fmt.Errorf("failed to decrypt webhook payload: %w", err)
 	}
 
@@ -1253,6 +1266,7 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 	}
 
 	if handler == nil {
+		go notifyWebhookOutcome(ctx, c.slackClient, outcome.Failed(models.WebhookReasonConfigError, false))
 		return false, fmt.Errorf("no webhook handler found for target %s", webhook.URL)
 	}
 
@@ -1273,7 +1287,7 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 	}
 
 	// We do this in a separate goroutine to avoid blocking the command processing.
-	// The webhook may fail, in which case we log the error and continue.
+	// The webhook may fail, in which case we log the error, inform the user and continue.
 	var event *types.InsightsEvent
 
 	if c.insights.Enabled() {
@@ -1284,7 +1298,7 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 		event = &e
 	}
 
-	go postWebhook(ctx, handler, webhook.URL, data, logger, c.insights, event)
+	go postWebhook(ctx, handler, webhook.URL, data, logger, c.insights, event, c.slackClient, outcome)
 
 	// We return false, indicating that the issue does not need to be saved to the database (since we did not modify it).
 	return false, nil
@@ -1335,10 +1349,17 @@ func (c *channelManager) releaseLock(lock ChannelLock) {
 }
 
 // postWebhook calls the webhook handler. If event is non-nil, it is recorded as a webhook succeeded or failed event.
-func postWebhook(ctx context.Context, handler WebhookHandler, target string, data *types.WebhookCallback, logger types.Logger, recorder *insights.Recorder, event *types.InsightsEvent) {
+// The user who clicked the webhook button is informed about the outcome.
+func postWebhook(ctx context.Context, handler WebhookHandler, target string, data *types.WebhookCallback, logger types.Logger,
+	recorder *insights.Recorder, event *types.InsightsEvent, slackClient SlackClient, outcome *models.WebhookOutcome,
+) {
 	err := handler.HandleWebhook(ctx, target, data, logger)
 	if err != nil {
 		logger.Errorf("Failed to handle webhook: %s", err)
+		reason, retryable := webhookFailureReason(err)
+		notifyWebhookOutcome(ctx, slackClient, outcome.Failed(reason, retryable))
+	} else {
+		notifyWebhookOutcome(ctx, slackClient, outcome.Delivered())
 	}
 
 	if event != nil {

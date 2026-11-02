@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -1023,7 +1024,7 @@ func TestInteractiveController_handleWebhookRequest(t *testing.T) {
 		apiClient.AssertNotCalled(t, "OpenModal", mock.Anything, mock.Anything, mock.Anything)
 	})
 
-	t.Run("skip confirmation logs error when GetUserInfo fails and does not dispatch", func(t *testing.T) {
+	t.Run("skip confirmation reports error when GetUserInfo fails and does not dispatch", func(t *testing.T) {
 		t.Parallel()
 
 		webhook := &types.Webhook{
@@ -1039,6 +1040,9 @@ func TestInteractiveController_handleWebhookRequest(t *testing.T) {
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, userID).Return(nil, errors.New("slack down")).Once()
+		apiClient.On("SendResponse", mock.Anything, channelID, responseURL, "ephemeral", mock.MatchedBy(func(text string) bool {
+			return strings.Contains(text, models.WebhookReasonUserLookupFailed) && strings.Contains(text, "try again")
+		})).Return(nil).Once()
 
 		queue := &mockFifoQueueProducer{}
 
@@ -1055,7 +1059,7 @@ func TestInteractiveController_handleWebhookRequest(t *testing.T) {
 		queue.AssertNotCalled(t, "Send", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
 	})
 
-	t.Run("skip confirmation logs error when sendCommand fails", func(t *testing.T) {
+	t.Run("skip confirmation reports error when sendCommand fails", func(t *testing.T) {
 		t.Parallel()
 
 		webhook := &types.Webhook{
@@ -1071,6 +1075,9 @@ func TestInteractiveController_handleWebhookRequest(t *testing.T) {
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("GetUserInfo", mock.Anything, userID).Return(&slack.User{ID: userID, RealName: userName}, nil).Once()
+		apiClient.On("SendResponse", mock.Anything, channelID, responseURL, "ephemeral", mock.MatchedBy(func(text string) bool {
+			return strings.Contains(text, models.WebhookReasonQueueFailed)
+		})).Return(nil).Once()
 
 		queue := &mockFifoQueueProducer{}
 		queue.On("Send", mock.Anything, channelID, mock.Anything, mock.Anything).Return(errors.New("queue full")).Once()
@@ -1095,6 +1102,7 @@ func TestInteractiveController_handleWebhookRequest(t *testing.T) {
 			ID:          webhookID,
 			URL:         "https://example.com/hook",
 			AccessLevel: types.WebhookAccessLevelChannelMembers,
+			ButtonText:  "Deploy",
 			// SkipConfirmationDialog: false (default)
 		}
 		issue := newIssueWithWebhook(webhook)
@@ -1104,7 +1112,8 @@ func TestInteractiveController_handleWebhookRequest(t *testing.T) {
 
 		apiClient := &mockSlackAPIClient{}
 		apiClient.On("OpenModal", mock.Anything, "trigger-123", mock.MatchedBy(func(req slack.ModalViewRequest) bool {
-			return req.CallbackID == ConfirmWebhookModal
+			return req.CallbackID == ConfirmWebhookModal &&
+				strings.Contains(req.PrivateMetadata, `"buttonText":"Deploy"`)
 		})).Return(nil).Once()
 
 		queue := &mockFifoQueueProducer{}
@@ -1158,6 +1167,205 @@ func TestInteractiveController_handleWebhookRequest(t *testing.T) {
 		apiClient.AssertExpectations(t)
 		queue.AssertExpectations(t)
 		logger.AssertExpectations(t)
+	})
+}
+
+func TestInteractiveController_webhookViewSubmission(t *testing.T) {
+	t.Parallel()
+
+	const (
+		channelID = "C12345"
+		messageTs = "1700000000.000100"
+		userID    = "U12345"
+		userName  = "Test User"
+		viewID    = "V12345"
+	)
+
+	newEventAndInteraction := func(t *testing.T) (*socketmode.Event, slack.InteractionCallback) {
+		t.Helper()
+
+		metadata, err := newPrivateModalMetadata().
+			Set("channelId", channelID).
+			Set("messageTs", messageTs).
+			Set("webhookId", "deploy").
+			Set("buttonText", "Deploy").ToJSON()
+		require.NoError(t, err)
+
+		interaction := slack.InteractionCallback{
+			User: slack.User{ID: userID},
+			View: slack.View{
+				ID:              viewID,
+				CallbackID:      ConfirmWebhookModal,
+				PrivateMetadata: metadata,
+				State: &slack.ViewState{Values: map[string]map[string]slack.BlockAction{
+					"reason": {"reason": {Type: slack.ActionType(slack.METPlainTextInput), Value: "because"}},
+				}},
+			},
+		}
+
+		return &socketmode.Event{Request: &socketmode.Request{EnvelopeID: "env-1"}, Data: interaction}, interaction
+	}
+
+	// ackedStatusText returns the text of the status modal in the ack payload, and asserts that the ack updates the view.
+	ackedStatusText := func(t *testing.T, payload any) string {
+		t.Helper()
+
+		resp, ok := payload.(*slack.ViewSubmissionResponse)
+		require.True(t, ok)
+		assert.Equal(t, slack.RAUpdate, resp.ResponseAction)
+		require.NotNil(t, resp.View)
+		assert.Nil(t, resp.View.Submit, "status modal must not have a submit button")
+		require.Len(t, resp.View.Blocks.BlockSet, 1)
+
+		section, ok := resp.View.Blocks.BlockSet[0].(*slack.SectionBlock)
+		require.True(t, ok)
+
+		return section.Text.Text
+	}
+
+	t.Run("dispatches command with view ID and acks with sending status", func(t *testing.T) {
+		t.Parallel()
+
+		evt, interaction := newEventAndInteraction(t)
+
+		apiClient := &mockSlackAPIClient{}
+		apiClient.On("GetUserInfo", mock.Anything, userID).Return(&slack.User{ID: userID, RealName: userName}, nil).Once()
+
+		queue := &mockFifoQueueProducer{}
+		queue.On("Send", mock.Anything, channelID, mock.Anything, mock.MatchedBy(func(body string) bool {
+			return assert.Contains(t, body, `"action":"webhook"`) &&
+				assert.Contains(t, body, `"webhookId":"deploy"`) &&
+				assert.Contains(t, body, `"viewId":"V12345"`) &&
+				assert.Contains(t, body, `"plainTextInput":{"reason":"because"}`) &&
+				assert.Contains(t, body, `"ts":"1700000000.000100"`)
+		})).Return(nil).Once()
+
+		var ackPayload any
+
+		client := newMockSocketModeClient()
+		client.On("AckWithPayload", evt.Request, mock.Anything).Run(func(args mock.Arguments) { ackPayload = args.Get(1) }).Once()
+
+		logger := &mockLogger{}
+		controller := newInteractiveController(client, apiClient, queue, &mockIssueFinder{}, logger, newTestManagerSettings())
+
+		controller.webhookViewSubmission(context.Background(), evt, interaction, logger)
+
+		apiClient.AssertExpectations(t)
+		queue.AssertExpectations(t)
+		client.AssertExpectations(t)
+		logger.AssertExpectations(t)
+		assert.Contains(t, ackedStatusText(t, ackPayload), `Sending "Deploy"`)
+	})
+
+	t.Run("acks with failure status when GetUserInfo fails", func(t *testing.T) {
+		t.Parallel()
+
+		evt, interaction := newEventAndInteraction(t)
+
+		apiClient := &mockSlackAPIClient{}
+		apiClient.On("GetUserInfo", mock.Anything, userID).Return(nil, errors.New("slack down")).Once()
+
+		queue := &mockFifoQueueProducer{}
+
+		var ackPayload any
+
+		client := newMockSocketModeClient()
+		client.On("AckWithPayload", evt.Request, mock.Anything).Run(func(args mock.Arguments) { ackPayload = args.Get(1) }).Once()
+
+		logger := &mockLogger{}
+		logger.On("Errorf", "Failed to get user info: %s", mock.Anything).Once()
+
+		controller := newInteractiveController(client, apiClient, queue, &mockIssueFinder{}, logger, newTestManagerSettings())
+
+		controller.webhookViewSubmission(context.Background(), evt, interaction, logger)
+
+		client.AssertExpectations(t)
+		logger.AssertExpectations(t)
+		queue.AssertNotCalled(t, "Send", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+
+		text := ackedStatusText(t, ackPayload)
+		assert.Contains(t, text, `"Deploy" could not be sent`)
+		assert.Contains(t, text, models.WebhookReasonUserLookupFailed)
+		assert.Contains(t, text, "try again")
+	})
+
+	t.Run("acks with failure status when sendCommand fails", func(t *testing.T) {
+		t.Parallel()
+
+		evt, interaction := newEventAndInteraction(t)
+
+		apiClient := &mockSlackAPIClient{}
+		apiClient.On("GetUserInfo", mock.Anything, userID).Return(&slack.User{ID: userID, RealName: userName}, nil).Once()
+
+		queue := &mockFifoQueueProducer{}
+		queue.On("Send", mock.Anything, channelID, mock.Anything, mock.Anything).Return(errors.New("queue full")).Once()
+
+		var ackPayload any
+
+		client := newMockSocketModeClient()
+		client.On("AckWithPayload", evt.Request, mock.Anything).Run(func(args mock.Arguments) { ackPayload = args.Get(1) }).Once()
+
+		logger := &mockLogger{}
+		logger.On("Errorf", "Failed to send command '%s': %s", mock.Anything).Once()
+
+		controller := newInteractiveController(client, apiClient, queue, &mockIssueFinder{}, logger, newTestManagerSettings())
+
+		controller.webhookViewSubmission(context.Background(), evt, interaction, logger)
+
+		queue.AssertExpectations(t)
+		client.AssertExpectations(t)
+		logger.AssertExpectations(t)
+		assert.Contains(t, ackedStatusText(t, ackPayload), models.WebhookReasonQueueFailed)
+	})
+
+	t.Run("dispatch is bounded by a deadline", func(t *testing.T) {
+		t.Parallel()
+
+		evt, interaction := newEventAndInteraction(t)
+
+		apiClient := &mockSlackAPIClient{}
+		apiClient.On("GetUserInfo", mock.MatchedBy(func(ctx context.Context) bool {
+			deadline, ok := ctx.Deadline()
+			return ok && time.Until(deadline) <= WebhookSubmissionDispatchTimeout
+		}), userID).Return(&slack.User{ID: userID, RealName: userName}, nil).Once()
+
+		queue := &mockFifoQueueProducer{}
+		queue.On("Send", mock.Anything, channelID, mock.Anything, mock.Anything).Return(nil).Once()
+
+		client := newMockSocketModeClient()
+		client.On("AckWithPayload", evt.Request, mock.Anything).Once()
+
+		logger := &mockLogger{}
+		controller := newInteractiveController(client, apiClient, queue, &mockIssueFinder{}, logger, newTestManagerSettings())
+
+		controller.webhookViewSubmission(context.Background(), evt, interaction, logger)
+
+		apiClient.AssertExpectations(t)
+	})
+
+	t.Run("view submission handler routes to webhook submission", func(t *testing.T) {
+		t.Parallel()
+
+		evt, _ := newEventAndInteraction(t)
+
+		apiClient := &mockSlackAPIClient{}
+		apiClient.On("GetUserInfo", mock.Anything, userID).Return(&slack.User{ID: userID, RealName: userName}, nil).Once()
+
+		queue := &mockFifoQueueProducer{}
+		queue.On("Send", mock.Anything, channelID, mock.Anything, mock.Anything).Return(nil).Once()
+
+		client := newMockSocketModeClient()
+		client.On("AckWithPayload", evt.Request, mock.Anything).Once()
+
+		logger := &mockLogger{}
+		logger.On("Debug", mock.Anything).Maybe()
+
+		controller := newInteractiveController(client, apiClient, queue, &mockIssueFinder{}, logger, newTestManagerSettings())
+
+		controller.viewSubmissionHandler(context.Background(), evt)
+
+		queue.AssertExpectations(t)
+		client.AssertExpectations(t)
 	})
 }
 

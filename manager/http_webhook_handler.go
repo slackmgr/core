@@ -12,6 +12,19 @@ import (
 	"github.com/slackmgr/types"
 )
 
+// WebhookHTTPError is returned (wrapped) by [HTTPWebhookHandler.HandleWebhook] when the webhook target responds
+// with a non-2xx HTTP status code. Custom [WebhookHandler] implementations may return (wrap) it as well, to have
+// the status code included in the failure message shown to the user who clicked the webhook button.
+type WebhookHTTPError struct {
+	// StatusCode is the HTTP status code returned by the webhook target.
+	StatusCode int
+}
+
+// Error implements the error interface.
+func (e *WebhookHTTPError) Error() string {
+	return fmt.Sprintf("webhook target responded with HTTP status code %d", e.StatusCode)
+}
+
 // HTTPWebhookHandler is an implementation of the WebhookHandler interface that sends webhooks via HTTP.
 // This is the default webhook handler when no other webhook handlers are configured.
 type HTTPWebhookHandler struct {
@@ -49,7 +62,7 @@ func (h *HTTPWebhookHandler) ShouldHandleWebhook(_ context.Context, target strin
 }
 
 // HandleWebhook sends the webhook data to the target URL via an HTTP POST request.
-// It expects a successful HTTP status code (2xx) in response.
+// It expects a successful HTTP status code (2xx) in response. Other status codes result in a (wrapped) [WebhookHTTPError].
 func (h *HTTPWebhookHandler) HandleWebhook(ctx context.Context, target string, data *types.WebhookCallback, logger types.Logger) error {
 	response, err := h.client.R().SetContext(ctx).SetBody(data).Post(target)
 	if err != nil {
@@ -59,7 +72,7 @@ func (h *HTTPWebhookHandler) HandleWebhook(ctx context.Context, target string, d
 	logger.Debugf("Webhook POST %s %s", response.Request.URL, response.Status())
 
 	if !response.IsSuccess() {
-		return fmt.Errorf("webhook POST %s failed with status code %d", response.Request.URL, response.StatusCode())
+		return fmt.Errorf("webhook POST %s failed: %w", response.Request.URL, &WebhookHTTPError{StatusCode: response.StatusCode()})
 	}
 
 	return nil

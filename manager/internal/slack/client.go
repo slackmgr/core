@@ -19,6 +19,7 @@ import (
 	"github.com/slackmgr/core/internal"
 	"github.com/slackmgr/core/internal/models"
 	"github.com/slackmgr/core/manager/internal/slack/controllers"
+	"github.com/slackmgr/core/manager/internal/slack/views"
 	"github.com/slackmgr/types"
 )
 
@@ -74,6 +75,7 @@ type slackAPI interface {
 	ListBotMessages(ctx context.Context, channelID string, oldest time.Time, eventType string) ([]slack.Message, error)
 	PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error)
 	OpenModal(ctx context.Context, triggerID string, request slack.ModalViewRequest) error
+	UpdateModal(ctx context.Context, viewID string, request slack.ModalViewRequest) error
 	MessageHasReplies(ctx context.Context, channelID, ts string) (bool, error)
 	GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error)
 	GetUserInfo(ctx context.Context, userID string) (*slack.User, error)
@@ -223,6 +225,53 @@ func (c *Client) OpenModal(ctx context.Context, triggerID string, request slack.
 	}
 
 	return nil
+}
+
+// UpdateModal replaces the content of an open modal view. It fails if the user has closed the modal.
+func (c *Client) UpdateModal(ctx context.Context, viewID string, request slack.ModalViewRequest) error {
+	if err := c.api.UpdateModal(ctx, viewID, request); err != nil {
+		return fmt.Errorf("failed to update modal Slack view %s: %w", viewID, err)
+	}
+
+	return nil
+}
+
+// NotifyWebhookOutcome informs the user who clicked a webhook button about the webhook outcome.
+//
+// If the webhook was confirmed in a modal (see [models.WebhookOutcome.ViewID]), the modal is updated with the outcome.
+// If the modal can't be updated (typically because the user has closed it), failures are reported in an ephemeral
+// message instead, while successes are not reported at all.
+//
+// Without a modal, only failures are reported, in an ephemeral message. Successes are not reported, since webhooks
+// without a confirmation dialog are meant to be lightweight.
+//
+// Errors are logged, not returned.
+func (c *Client) NotifyWebhookOutcome(ctx context.Context, outcome *models.WebhookOutcome) {
+	if outcome == nil {
+		return
+	}
+
+	logger := c.logger.
+		WithField("channel_id", outcome.ChannelID).
+		WithField("user_id", outcome.UserID).
+		WithField("webhook_outcome", outcome.Status)
+
+	if outcome.ViewID != "" {
+		err := c.UpdateModal(ctx, outcome.ViewID, views.WebhookStatusModal(outcome))
+		if err == nil {
+			return
+		}
+
+		logger.WithField("view_id", outcome.ViewID).Infof("Failed to update webhook status modal, the user may have closed it: %s", err)
+	}
+
+	if outcome.Status != models.WebhookOutcomeFailed {
+		return
+	}
+
+	if _, err := c.PostEphemeral(ctx, outcome.ChannelID, outcome.UserID, slack.MsgOptionText(views.WebhookStatusText(outcome), true)); err != nil {
+		logger.Errorf("Failed to post webhook status message: %s", err)
+	}
 }
 
 func (c *Client) PostEphemeral(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error) {

@@ -361,6 +361,29 @@ func (c *SlackAPIClient) OpenModal(ctx context.Context, triggerID string, reques
 	return err
 }
 
+// UpdateModal replaces the content of an open modal view, identified by its view ID.
+// It fails (with a non-retryable error) if the user has closed the modal.
+func (c *SlackAPIClient) UpdateModal(ctx context.Context, viewID string, request slack.ModalViewRequest) error {
+	if err := c.checkConnected(); err != nil {
+		return err
+	}
+
+	if viewID == "" {
+		return errors.New("viewID cannot be empty")
+	}
+
+	action := "views.update"
+
+	f := func(ctx context.Context) (any, any, error) {
+		_, err := c.api.UpdateViewContext(ctx, request, "", "", viewID)
+		return nil, nil, err
+	}
+
+	_, _, err := callAPI(ctx, c.logger.WithField("view_id", viewID), c.metrics, c.cfg, c.gate, c.sem, action, f)
+
+	return err
+}
+
 func (c *SlackAPIClient) MessageHasReplies(ctx context.Context, channelID, ts string) (bool, error) {
 	if err := c.checkConnected(); err != nil {
 		return false, err

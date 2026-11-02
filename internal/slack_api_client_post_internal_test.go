@@ -249,3 +249,52 @@ func TestIsPostOutcomeUnknown(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateModal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("success", func(t *testing.T) {
+		t.Parallel()
+
+		var calls atomic.Int32
+
+		c := newTestSlackAPIClient(t, func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			assert.Equal(t, "/views.update", r.URL.Path)
+
+			var body map[string]any
+			assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			assert.Equal(t, "V123", body["view_id"])
+
+			writeJSON(w, map[string]any{"ok": true})
+		})
+
+		err := c.UpdateModal(context.Background(), "V123", slack.ModalViewRequest{Type: slack.VTModal})
+
+		require.NoError(t, err)
+		assert.Equal(t, int32(1), calls.Load())
+	})
+
+	t.Run("closed view is not retried", func(t *testing.T) {
+		t.Parallel()
+
+		var calls atomic.Int32
+
+		c := newTestSlackAPIClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			calls.Add(1)
+			writeJSON(w, map[string]any{"ok": false, "error": "not_found"})
+		})
+
+		err := c.UpdateModal(context.Background(), "V123", slack.ModalViewRequest{Type: slack.VTModal})
+
+		require.ErrorContains(t, err, "not_found")
+		assert.Equal(t, int32(1), calls.Load())
+	})
+
+	t.Run("empty view ID", func(t *testing.T) {
+		t.Parallel()
+
+		err := (&SlackAPIClient{connected: true}).UpdateModal(context.Background(), "", slack.ModalViewRequest{})
+		require.ErrorContains(t, err, "viewID cannot be empty")
+	})
+}

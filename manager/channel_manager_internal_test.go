@@ -21,6 +21,15 @@ import (
 // stubSlackClient is a minimal stub implementing SlackClient for channelManager tests.
 type stubSlackClient struct {
 	isAlertChannelFn func(ctx context.Context, channelID string) (bool, string, error)
+
+	// webhookOutcomes receives all webhook outcomes, if non-nil.
+	webhookOutcomes chan *models.WebhookOutcome
+}
+
+func (s *stubSlackClient) NotifyWebhookOutcome(_ context.Context, outcome *models.WebhookOutcome) {
+	if s.webhookOutcomes != nil {
+		s.webhookOutcomes <- outcome
+	}
 }
 
 func (s *stubSlackClient) GetChannelName(_ context.Context, _ string) string { return "" }

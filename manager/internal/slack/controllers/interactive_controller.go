@@ -30,6 +30,10 @@ const (
 	// MinWebhookClickInterval defines the minimum allowed interval between two clicks on the same webhook.
 	// This is to prevent accidental double clicks and potential issues caused by them.
 	MinWebhookClickInterval = 2 * time.Second
+
+	// WebhookSubmissionDispatchTimeout is the maximum time spent dispatching a webhook command after the confirmation
+	// modal is submitted. Slack requires the submission to be acked within 3 seconds.
+	WebhookSubmissionDispatchTimeout = 2 * time.Second
 )
 
 type IssueFinder interface {
@@ -558,23 +562,18 @@ func (c *interactiveController) handleWebhookRequest(ctx context.Context, intera
 		return
 	}
 
-	// Special case for webhooks with skipConfirmationDialog=true - we trigger them immediately without showing the confirmation modal
+	// Special case for webhooks with skipConfirmationDialog=true - we trigger them immediately without showing the confirmation modal.
+	// Only failures are reported back to the user (as ephemeral messages), since these webhooks are meant to be lightweight.
 	if webhook.SkipConfirmationDialog {
-		userInfo, err := c.apiClient.GetUserInfo(ctx, interaction.User.ID)
-		if err != nil {
-			logger.Errorf("Failed to get user info: %s", err)
-			return
-		}
-
 		params := &models.WebhookCommandParams{WebhookID: webhook.ID}
 
-		// Send an async command to handle the webhook
-		cmdAction := models.CommandActionWebhook
-		cmd := models.NewCommand(interaction.Channel.ID, interaction.Message.Timestamp, "", userInfo.ID, userInfo.RealName, cmdAction, nil)
-		cmd.WebhookParameters = params
+		if reason := c.dispatchWebhookCommand(ctx, interaction.Channel.ID, interaction.Message.Timestamp, interaction.User.ID, params, logger); reason != "" {
+			outcome := &models.WebhookOutcome{ButtonText: webhook.ButtonText}
+			outcome = outcome.Failed(reason, true)
 
-		if err := sendCommand(ctx, c.commandQueue, cmd); err != nil {
-			logger.Errorf("Failed to send command '%s': %s", cmdAction, err)
+			if err := c.apiClient.SendResponse(ctx, interaction.Channel.ID, interaction.ResponseURL, "ephemeral", views.WebhookStatusText(outcome)); err != nil {
+				logger.Errorf("Failed to send interactive response: %s", err)
+			}
 		}
 
 		return
@@ -584,7 +583,8 @@ func (c *interactiveController) handleWebhookRequest(ctx context.Context, intera
 	metadata, err := newPrivateModalMetadata().
 		Set("channelId", interaction.Channel.ID).
 		Set("messageTs", interaction.Message.Timestamp).
-		Set("webhookId", webhook.ID).ToJSON()
+		Set("webhookId", webhook.ID).
+		Set("buttonText", webhook.ButtonText).ToJSON()
 	if err != nil {
 		logger.Errorf("Failed to create modal metadata: %s", err)
 		return
@@ -638,37 +638,61 @@ func (c *interactiveController) verifyWebhookAccess(ctx context.Context, interac
 
 // webhookViewSubmission handles the callback from the modal confirm webhook dialog (created by handleWebhookRequest).
 // It dispatches an async command with info about the webhook.
+//
+// The modal is kept open: the ack replaces it with a status view, which the channel manager later updates with the
+// webhook outcome (via the view ID in the command). If the command can't be dispatched, the ack shows the failure instead.
+//
+// The command is queued before the ack is sent, so that dispatch failures can be shown in the ack. The ack is sent over
+// the already open socket immediately after, so it reaches Slack well before the channel manager's outcome update.
 func (c *interactiveController) webhookViewSubmission(ctx context.Context, evt *socketmode.Event, interaction slack.InteractionCallback, logger types.Logger) {
-	// Fetch info about the user
-	userInfo, err := c.apiClient.GetUserInfo(ctx, interaction.User.ID)
-	if err != nil {
-		logger.Errorf("Failed to get user info: %s", err)
-		return
-	}
-
-	// All is good - send normal ack and clear the modal view
-	c.clt.AckWithPayload(ctx, evt.Request, slack.NewClearViewSubmissionResponse())
-
-	// Parse the incoming metadata
 	metadata := c.parsePrivateModalMetadata(interaction.View.PrivateMetadata)
-
-	plainTextinput := getViewStatePlainTextValues(interaction.View)
-	checkboxInput := getViewStateCheckboxSelectedValues(interaction.View)
 
 	params := &models.WebhookCommandParams{
 		WebhookID:      metadata.Get("webhookId"),
-		PlainTextInput: plainTextinput,
-		CheckboxInput:  checkboxInput,
+		PlainTextInput: getViewStatePlainTextValues(interaction.View),
+		CheckboxInput:  getViewStateCheckboxSelectedValues(interaction.View),
+		ViewID:         interaction.View.ID,
 	}
 
-	// Send an async command to handle the webhook
+	outcome := &models.WebhookOutcome{
+		ChannelID:  metadata.Get("channelId"),
+		UserID:     interaction.User.ID,
+		ViewID:     interaction.View.ID,
+		ButtonText: metadata.Get("buttonText"),
+		Status:     models.WebhookOutcomeSending,
+	}
+
+	// Slack requires the ack within 3 seconds, so the dispatch must complete well before that.
+	dispatchCtx, cancel := context.WithTimeout(ctx, WebhookSubmissionDispatchTimeout)
+	defer cancel()
+
+	if reason := c.dispatchWebhookCommand(dispatchCtx, outcome.ChannelID, metadata.Get("messageTs"), interaction.User.ID, params, logger); reason != "" {
+		outcome = outcome.Failed(reason, true)
+	}
+
+	view := views.WebhookStatusModal(outcome)
+	c.clt.AckWithPayload(ctx, evt.Request, slack.NewUpdateViewSubmissionResponse(&view))
+}
+
+// dispatchWebhookCommand looks up the clicking user and queues an async command to send the webhook.
+// On failure, the error is logged and a user-facing failure reason is returned. An empty string means success.
+func (c *interactiveController) dispatchWebhookCommand(ctx context.Context, channelID, messageTs, userID string, params *models.WebhookCommandParams, logger types.Logger) string {
+	userInfo, err := c.apiClient.GetUserInfo(ctx, userID)
+	if err != nil {
+		logger.Errorf("Failed to get user info: %s", err)
+		return models.WebhookReasonUserLookupFailed
+	}
+
 	cmdAction := models.CommandActionWebhook
-	cmd := models.NewCommand(metadata.Get("channelId"), metadata.Get("messageTs"), "", userInfo.ID, userInfo.RealName, cmdAction, nil)
+	cmd := models.NewCommand(channelID, messageTs, "", userInfo.ID, userInfo.RealName, cmdAction, nil)
 	cmd.WebhookParameters = params
 
 	if err := sendCommand(ctx, c.commandQueue, cmd); err != nil {
 		logger.Errorf("Failed to send command '%s': %s", cmdAction, err)
+		return models.WebhookReasonQueueFailed
 	}
+
+	return ""
 }
 
 func (c *interactiveController) isWebhookClickAllowed(channelID, messageTs, webhookID string) bool {

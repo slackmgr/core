@@ -53,6 +53,11 @@ type WebhookCommandParams struct {
 	WebhookID      string              `json:"webhookId"`
 	PlainTextInput map[string]string   `json:"plainTextInput,omitempty"`
 	CheckboxInput  map[string][]string `json:"checkboxInput,omitempty"`
+
+	// ViewID is the ID of the Slack modal used to confirm the webhook, if any.
+	// The modal is kept open after submission and updated with the webhook outcome.
+	// Empty when the webhook was triggered without a confirmation dialog.
+	ViewID string `json:"viewId,omitempty"`
 }
 
 // NewCommandFromQueueItem creates a Command instance from a FIFO queue item.

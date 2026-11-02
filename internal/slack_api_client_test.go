@@ -155,6 +155,12 @@ func TestClient_ErrNotConnected(t *testing.T) {
 			},
 		},
 		{
+			name: "UpdateModal",
+			fn: func(c *internal.SlackAPIClient) error {
+				return c.UpdateModal(ctx, "view", slack.ModalViewRequest{})
+			},
+		},
+		{
 			name: "MessageHasReplies",
 			fn: func(c *internal.SlackAPIClient) error {
 				_, err := c.MessageHasReplies(ctx, "channel", "ts")

@@ -37,4 +37,8 @@ type SlackClient interface {
 
 	// DeletePost deletes an arbitrary Slack message identified by channelID and timestamp.
 	DeletePost(ctx context.Context, channelID, ts string) error
+
+	// NotifyWebhookOutcome informs the user who clicked a webhook button about the outcome, either by updating the
+	// confirmation modal or with an ephemeral message. Errors are logged, not returned.
+	NotifyWebhookOutcome(ctx context.Context, outcome *models.WebhookOutcome)
 }
