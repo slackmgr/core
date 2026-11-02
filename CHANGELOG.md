@@ -7,12 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-02
+
 ### Added
+- Webhook delivery feedback for the user who clicked a webhook button. With a confirmation dialog, the dialog stays open after submission and shows the status: sending, then sent or failed with a reason. If the dialog is closed before the outcome is known, failures are reported in an ephemeral message (successes are not). Without a confirmation dialog, only failures are reported, in an ephemeral message. Failure reasons are user-friendly categories (timeout, unreachable, HTTP status code, issue no longer active, button no longer available, configuration error) and never include the target URL
+- `manager.WebhookHTTPError` (with `StatusCode`), returned (wrapped) by `HTTPWebhookHandler` for non-2xx responses. Custom webhook handlers can return it to include the HTTP status code in the failure reason shown to the user
 - Grafana dashboard: pending Slack posts panels (`slack_pending_posts_total` by result, pending and duplicate-deleted window totals) and an HTTP requests in flight panel (`http_server_requests_in_flight`)
 - Grafana dashboard: "Metrics prefix" variable (default `slackmgr_`), so the dashboard works with a custom `MetricsPrefix`. Previously all queries hard-coded `slackmgr_`
 - Grafana dashboard: distinct, explicit colors for every series in panels with known label values (e.g. Slack posts `updated` and `failed` had the same color). Red and pink are reserved for errors. HTTP Error Rate is colored by path, with 4xx dashed
 - README section on metrics and the Grafana dashboard
 - CLAUDE.md: metric changes must include the matching dashboard changes
+
+### Changed
+- Webhook HTTP failure errors now wrap `WebhookHTTPError`, so the message changed from `...failed with status code N` to `...failed: webhook target responded with HTTP status code N`
+
+### Fixed
+- Webhook dispatch failures (Slack user lookup or command queue send) after a button click were only logged, leaving the user without feedback. The user is now informed. The confirmation dialog submission is also always acknowledged, and the user lookup no longer risks exceeding Slack's 3 second acknowledgement deadline
+- Webhook handling log entries were missing the issue and command fields
 
 ## [0.17.0] - 2026-10-30
 
@@ -445,7 +456,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/slackmgr/core/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/slackmgr/core/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/slackmgr/core/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/slackmgr/core/compare/v0.14.0...v0.15.0
