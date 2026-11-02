@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,48 +26,56 @@ func TestWebhookFailureReason(t *testing.T) {
 		err           error
 		wantReason    string
 		wantRetryable bool
+		wantTargetErr bool
 	}{
 		{
 			name:          "http 4xx",
 			err:           fmt.Errorf("webhook POST failed: %w", &WebhookHTTPError{StatusCode: http.StatusUnprocessableEntity}),
 			wantReason:    "the request was rejected by the receiving system (HTTP 422)",
 			wantRetryable: false,
+			wantTargetErr: true,
 		},
 		{
 			name:          "http 429",
 			err:           fmt.Errorf("webhook POST failed: %w", &WebhookHTTPError{StatusCode: http.StatusTooManyRequests}),
 			wantReason:    "the receiving system is busy (HTTP 429)",
 			wantRetryable: true,
+			wantTargetErr: true,
 		},
 		{
 			name:          "http 5xx",
 			err:           fmt.Errorf("webhook POST failed: %w", &WebhookHTTPError{StatusCode: http.StatusBadGateway}),
 			wantReason:    "the receiving system returned an error (HTTP 502)",
 			wantRetryable: true,
+			wantTargetErr: true,
 		},
 		{
 			name:          "context deadline",
 			err:           fmt.Errorf("webhook POST failed: %w", context.DeadlineExceeded),
 			wantReason:    models.WebhookReasonTimeout,
 			wantRetryable: true,
+			wantTargetErr: true,
 		},
 		{
 			name:          "net timeout",
 			err:           &url.Error{Op: "Post", URL: "https://example.com/secret-token", Err: &net.DNSError{IsTimeout: true}},
 			wantReason:    models.WebhookReasonTimeout,
 			wantRetryable: true,
+			wantTargetErr: true,
 		},
 		{
 			name:          "dns failure",
 			err:           &url.Error{Op: "Post", URL: "https://example.com/secret-token", Err: &net.DNSError{IsNotFound: true}},
 			wantReason:    models.WebhookReasonUnreachable,
 			wantRetryable: true,
+			wantTargetErr: true,
 		},
 		{
 			name:          "connection refused",
 			err:           &url.Error{Op: "Post", URL: "https://example.com/secret-token", Err: &net.OpError{Op: "dial", Err: errors.New("connection refused")}},
 			wantReason:    models.WebhookReasonUnreachable,
 			wantRetryable: true,
+			wantTargetErr: true,
 		},
 		{
 			name:          "other error",
@@ -84,6 +93,7 @@ func TestWebhookFailureReason(t *testing.T) {
 
 			assert.Equal(t, tt.wantReason, reason)
 			assert.Equal(t, tt.wantRetryable, retryable)
+			assert.Equal(t, tt.wantTargetErr, isWebhookTargetError(tt.err))
 			assert.NotContains(t, reason, "secret-token")
 			assert.NotContains(t, reason, "sqs.example.com")
 		})
@@ -326,6 +336,74 @@ func TestHTTPWebhookHandler_StatusCodes(t *testing.T) {
 			httpErr, ok := errors.AsType[*WebhookHTTPError](err)
 			require.True(t, ok, "expected a WebhookHTTPError, got %v", err)
 			assert.Equal(t, tt.statusCode, httpErr.StatusCode)
+		})
+	}
+}
+
+// levelRecordingLogger records the level of each log line.
+type levelRecordingLogger struct {
+	mockLogger
+
+	mu     sync.Mutex
+	levels []string
+}
+
+func (l *levelRecordingLogger) Infof(_ string, _ ...any)  { l.record("info") }
+func (l *levelRecordingLogger) Errorf(_ string, _ ...any) { l.record("error") }
+
+func (l *levelRecordingLogger) record(level string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.levels = append(l.levels, level)
+}
+
+func TestPostWebhook_LogLevel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		err        error
+		wantLevels []string
+	}{
+		{
+			name:       "delivered",
+			err:        nil,
+			wantLevels: nil,
+		},
+		{
+			name:       "http error from target",
+			err:        fmt.Errorf("webhook POST failed: %w", &WebhookHTTPError{StatusCode: http.StatusUnprocessableEntity}),
+			wantLevels: []string{"info"},
+		},
+		{
+			name:       "timeout",
+			err:        fmt.Errorf("webhook POST failed: %w", context.DeadlineExceeded),
+			wantLevels: []string{"info"},
+		},
+		{
+			name:       "network error",
+			err:        &url.Error{Op: "Post", URL: "https://example.com", Err: &net.OpError{Op: "dial", Err: errors.New("connection refused")}},
+			wantLevels: []string{"info"},
+		},
+		{
+			name:       "other error",
+			err:        errors.New("sqs: access denied"),
+			wantLevels: []string{"error"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			logger := &levelRecordingLogger{}
+			handler := &funcWebhookHandler{shouldHandle: true, handle: func() error { return tt.err }}
+			slackClient := &stubSlackClient{webhookOutcomes: make(chan *models.WebhookOutcome, 1)}
+
+			postWebhook(t.Context(), handler, "https://example.com", &types.WebhookCallback{}, logger, nil, nil, slackClient, &models.WebhookOutcome{})
+
+			assert.Equal(t, tt.wantLevels, logger.levels)
 		})
 	}
 }

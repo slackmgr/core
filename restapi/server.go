@@ -97,6 +97,8 @@ type Server struct {
 //   - [Server.WithMetrics] — sets the metrics implementation (defaults to no-op)
 //   - [Server.WithSettings] — sets the initial API settings (defaults to zero-value)
 func New(alertQueue FifoQueueProducer, logger types.Logger, cfg *config.APIConfig) *Server {
+	logger = internal.NewUniqueFieldsLogger(logger)
+
 	s := &Server{
 		alertQueue:        alertQueue,
 		limitersByChannel: make(map[string]*rate.Limiter),

@@ -46,6 +46,22 @@ func webhookFailureReason(err error) (string, bool) {
 	return models.WebhookReasonDeliveryFailed, true
 }
 
+// isWebhookTargetError returns true if err is caused by the webhook target, i.e. a non-2xx response, a timeout or
+// a network error, rather than by the manager itself.
+func isWebhookTargetError(err error) bool {
+	if _, ok := errors.AsType[*WebhookHTTPError](err); ok {
+		return true
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	_, ok := errors.AsType[net.Error](err)
+
+	return ok
+}
+
 // notifyWebhookOutcome informs the user who clicked a webhook button about the outcome.
 // It is not cancelled with ctx, so that the user is informed also during shutdown, but it is bounded by [webhookNotifyTimeout].
 func notifyWebhookOutcome(ctx context.Context, slackClient SlackClient, outcome *models.WebhookOutcome) {

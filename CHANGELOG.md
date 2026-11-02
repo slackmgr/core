@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Duplicate field keys in log lines (e.g. `channel_id` three times in "Handle issue webhook" and "Issue created"), which produced ambiguous JSON. The logger injected into `manager.New` and `restapi.New` is now wrapped so that each key appears once per line, with the most recently added value
+
+### Changed
+- Webhook failures caused by the target (non-2xx response, timeout, network error) are logged at info level instead of error. The user is already informed in Slack. Other webhook failures (e.g. custom handler errors) are still logged at error level
+
 ## [0.18.0] - 2026-11-02
 
 ### Added

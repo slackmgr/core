@@ -60,6 +60,8 @@ type rateLimitGateFactory interface {
 //   - [Manager.WithMetrics] — sets the metrics implementation (defaults to no-op)
 //   - [Manager.WithSettings] — sets the initial manager settings (defaults to zero-value)
 func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, logger types.Logger, cfg *config.ManagerConfig) *Manager {
+	logger = coreinternal.NewUniqueFieldsLogger(logger)
+
 	return &Manager{
 		db:              db,
 		alertQueue:      alertQueue,

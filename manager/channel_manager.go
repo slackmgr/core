@@ -1355,7 +1355,13 @@ func postWebhook(ctx context.Context, handler WebhookHandler, target string, dat
 ) {
 	err := handler.HandleWebhook(ctx, target, data, logger)
 	if err != nil {
-		logger.Errorf("Failed to handle webhook: %s", err)
+		// Problems on the receiving side are not manager errors, and the user is informed in Slack.
+		if isWebhookTargetError(err) {
+			logger.Infof("Failed to handle webhook: %s", err)
+		} else {
+			logger.Errorf("Failed to handle webhook: %s", err)
+		}
+
 		reason, retryable := webhookFailureReason(err)
 		notifyWebhookOutcome(ctx, slackClient, outcome.Failed(reason, retryable))
 	} else {
