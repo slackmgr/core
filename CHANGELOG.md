@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.2] - 2026-11-03
+
 ### Fixed
 - An alert that clears a webhook post-click state (pending or shown) now updates the Slack post immediately, instead of being throttled. Receiving systems that re-send the alert right after answering a webhook click previously left the post unchanged for up to `MaxThrottleDurationSeconds` on busy issues, with no feedback to the user
 
@@ -507,7 +509,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.21.1...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.21.2...HEAD
+[0.21.2]: https://github.com/slackmgr/core/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/slackmgr/core/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/slackmgr/core/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/slackmgr/core/compare/v0.19.0...v0.20.0
