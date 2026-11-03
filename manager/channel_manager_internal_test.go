@@ -136,7 +136,7 @@ func newTestChannelManager(t *testing.T, channelID string, db types.DB, slackCli
 		locker,
 		&mockLogger{},
 		&types.NoopMetrics{},
-		nil, // webhook handlers — a default handler is created internally
+		nil, // webhook handlers — tests that need one set cm.webhookHandlers
 		&config.ManagerConfig{SlackClient: config.NewDefaultSlackClientConfig()},
 		settings,
 		&NoopRateLimitGate{},

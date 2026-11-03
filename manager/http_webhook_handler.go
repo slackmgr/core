@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/slackmgr/core/config"
 	"github.com/slackmgr/types"
 )
 
@@ -67,7 +68,9 @@ func (e *WebhookRejectedError) Unwrap() error {
 const maxWebhookResponseBodySize = 16 * 1024
 
 // HTTPWebhookHandler is an implementation of the [WebhookHandler] and [WebhookResultHandler] interfaces that sends
-// webhooks via HTTP. This is the default webhook handler when no other webhook handlers are configured.
+// webhooks via HTTP. The manager always registers one as the last (fallback) handler, with the timeout from
+// [config.ManagerConfig.WebhookTimeoutSeconds]. Register a separate instance with [Manager.RegisterWebhookHandler]
+// to override it, e.g. to use a different timeout.
 //
 // The target may respond with a [types.WebhookResponse] body (content type application/json, max 16 KiB), to give
 // feedback to the user who clicked the button. A 2xx response means the request was accepted, a 4xx response with
@@ -76,7 +79,8 @@ type HTTPWebhookHandler struct {
 	client *resty.Client
 }
 
-// NewHTTPWebhookHandler creates a new HTTPWebhookHandler.
+// NewHTTPWebhookHandler creates a new HTTPWebhookHandler, with a request timeout of
+// [config.DefaultWebhookTimeoutSeconds] seconds.
 func NewHTTPWebhookHandler(logger types.Logger) *HTTPWebhookHandler {
 	restyLogger := newRestyLogger(logger)
 
@@ -88,18 +92,24 @@ func NewHTTPWebhookHandler(logger types.Logger) *HTTPWebhookHandler {
 		AddRetryHook(closeRetriedResponseBody).
 		SetDoNotParseResponse(true).
 		SetLogger(restyLogger).
-		SetTimeout(3 * time.Second)
+		SetTimeout(config.DefaultWebhookTimeoutSeconds * time.Second)
 
 	return &HTTPWebhookHandler{
 		client: client,
 	}
 }
 
-// WithRequestTimeout sets the timeout for HTTP requests made by the webhook handler.
-// The default timeout is 3 seconds.
+// WithRequestTimeout sets the timeout of each HTTP request made by the webhook handler. Retried requests get the
+// full timeout for each attempt. The timeout is clamped to between [config.MinWebhookTimeoutSeconds] and
+// [config.MaxWebhookTimeoutSeconds] seconds. The default is [config.DefaultWebhookTimeoutSeconds] seconds.
 func (h *HTTPWebhookHandler) WithRequestTimeout(timeout time.Duration) *HTTPWebhookHandler {
-	h.client.SetTimeout(timeout)
+	h.client.SetTimeout(clampWebhookTimeout(timeout))
 	return h
+}
+
+// clampWebhookTimeout clamps the timeout to the range allowed by [HTTPWebhookHandler.WithRequestTimeout].
+func clampWebhookTimeout(timeout time.Duration) time.Duration {
+	return min(max(timeout, config.MinWebhookTimeoutSeconds*time.Second), config.MaxWebhookTimeoutSeconds*time.Second)
 }
 
 // ShouldHandleWebhook returns true if the target is an HTTP or HTTPS URL.

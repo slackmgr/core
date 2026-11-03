@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `ManagerConfig.WebhookTimeoutSeconds`: per-request timeout of the built-in HTTP webhook handler (default 5, range 1–15; zero or negative is set to the default). Registered with `SetManagerConfigDefaults`
+
+### Changed
+- The default HTTP webhook timeout is increased from 3 to 5 seconds
+- `HTTPWebhookHandler.WithRequestTimeout` clamps the timeout to 1–15 seconds
+- The default HTTP webhook handler is created once per manager, instead of once per channel
+
+### Fixed
+- The built-in HTTP webhook handler is now always available as a fallback (evaluated last). Previously it was only used when no webhook handlers were registered, so registering e.g. the `sqs` or `pubsub` handler broke delivery to `http://`/`https://` targets unless an `HTTPWebhookHandler` was registered as well
+
 ## [0.20.0] - 2026-11-03
 
 ### Added

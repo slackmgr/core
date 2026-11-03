@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -25,6 +26,7 @@ func TestNewDefaultManagerConfig(t *testing.T) {
 	assert.Equal(t, config.DefaultChannelManagerDrainTimeoutMs, cfg.ChannelManagerDrainTimeoutMs)
 	assert.Equal(t, config.DefaultSocketModeMaxWorkers, cfg.SocketModeMaxWorkers)
 	assert.Equal(t, config.DefaultSocketModeDrainTimeoutMs, cfg.SocketModeDrainTimeoutMs)
+	assert.Equal(t, config.DefaultWebhookTimeoutSeconds, cfg.WebhookTimeoutSeconds)
 }
 
 func TestManagerConfig_Validate(t *testing.T) {
@@ -563,6 +565,41 @@ func TestManagerConfig_Validate_BoundaryValues(t *testing.T) {
 		err := cfg.Validate()
 		require.Error(t, err)
 		assert.Equal(t, "socket mode drain timeout must be between 2000 ms and 300000 ms", err.Error())
+	})
+
+	// WebhookTimeoutSeconds boundaries
+	for _, v := range []int{0, -1} {
+		t.Run(fmt.Sprintf("webhook timeout %d is set to default", v), func(t *testing.T) {
+			t.Parallel()
+			cfg := validManagerConfig()
+			cfg.WebhookTimeoutSeconds = v
+			require.NoError(t, cfg.Validate())
+			assert.Equal(t, config.DefaultWebhookTimeoutSeconds, cfg.WebhookTimeoutSeconds)
+		})
+	}
+
+	t.Run("webhook timeout at lower bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.WebhookTimeoutSeconds = config.MinWebhookTimeoutSeconds
+		require.NoError(t, cfg.Validate())
+		assert.Equal(t, config.MinWebhookTimeoutSeconds, cfg.WebhookTimeoutSeconds)
+	})
+
+	t.Run("webhook timeout at upper bound", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.WebhookTimeoutSeconds = config.MaxWebhookTimeoutSeconds
+		assert.NoError(t, cfg.Validate())
+	})
+
+	t.Run("webhook timeout exceeds maximum", func(t *testing.T) {
+		t.Parallel()
+		cfg := validManagerConfig()
+		cfg.WebhookTimeoutSeconds = config.MaxWebhookTimeoutSeconds + 1
+		err := cfg.Validate()
+		require.Error(t, err)
+		assert.Equal(t, "webhook timeout must be between 1 and 15 seconds", err.Error())
 	})
 }
 

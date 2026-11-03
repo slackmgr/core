@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -77,6 +78,8 @@ func New(db types.DB, alertQueue FifoQueue, commandQueue FifoQueue, logger types
 // RegisterWebhookHandler adds a [WebhookHandler] that is consulted whenever an
 // issue has a webhook callback configured. Handlers are tried in registration
 // order; the first one whose ShouldHandleWebhook returns true handles the call.
+// An [HTTPWebhookHandler] is always tried last, as a fallback for http:// and https://
+// targets, with the timeout from [config.ManagerConfig.WebhookTimeoutSeconds].
 // Returns the [Manager] to allow method chaining.
 func (m *Manager) RegisterWebhookHandler(handler WebhookHandler) *Manager {
 	m.webhookHandlers = append(m.webhookHandlers, handler)
@@ -255,7 +258,7 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	m.gate.SetReadyCheck(m.slackClient.SocketModeQuiet)
 
-	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.cacheStore, m.locker, m.logger, m.metrics, m.webhookHandlers, m.gate, m.cfg, m.managerSettings)
+	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.cacheStore, m.locker, m.logger, m.metrics, m.allWebhookHandlers(), m.gate, m.cfg, m.managerSettings)
 	m.coordinator.insights = recorder
 	m.coordinator.commandQueue = m.commandQueue
 	m.coordinator.channelStatsInterval = time.Duration(m.insightsConfig().ChannelStatsIntervalSeconds) * time.Second
@@ -431,4 +434,11 @@ func isCtxCanceledErr(err error) bool {
 	}
 
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// allWebhookHandlers returns the registered webhook handlers, followed by the fallback [HTTPWebhookHandler] with the
+// configured timeout. The registered handlers are not modified.
+func (m *Manager) allWebhookHandlers() []WebhookHandler {
+	fallback := NewHTTPWebhookHandler(m.logger).WithRequestTimeout(time.Duration(m.cfg.WebhookTimeoutSeconds) * time.Second)
+	return append(slices.Clone(m.webhookHandlers), fallback)
 }

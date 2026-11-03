@@ -18,6 +18,7 @@ func SetManagerConfigDefaults(v DefaultsSetter) {
 	v.SetDefault("channelManagerDrainTimeoutMs", DefaultChannelManagerDrainTimeoutMs)
 	v.SetDefault("socketModeMaxWorkers", DefaultSocketModeMaxWorkers)
 	v.SetDefault("socketModeDrainTimeoutMs", DefaultSocketModeDrainTimeoutMs)
+	v.SetDefault("webhookTimeoutSeconds", DefaultWebhookTimeoutSeconds)
 	setSlackClientConfigDefaults(v, "slackClient")
 }
 

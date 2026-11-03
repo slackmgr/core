@@ -101,6 +101,18 @@ const (
 	// in milliseconds. 5 seconds provides enough time for most handlers to complete their
 	// work (Slack API calls, queue writes) during graceful shutdown.
 	DefaultSocketModeDrainTimeoutMs = 5_000
+
+	// MinWebhookTimeoutSeconds is the minimum allowed value for [ManagerConfig.WebhookTimeoutSeconds].
+	MinWebhookTimeoutSeconds = 1
+
+	// MaxWebhookTimeoutSeconds is the maximum allowed value for [ManagerConfig.WebhookTimeoutSeconds].
+	// The timeout applies to each attempt, and failed requests are retried twice with a 1 second wait,
+	// so a delivery can take up to 3 × 15 + 2 = 47 seconds. This must stay below the 1 minute grace
+	// period after which a pending post-click state is discarded.
+	MaxWebhookTimeoutSeconds = 15
+
+	// DefaultWebhookTimeoutSeconds is the default value for [ManagerConfig.WebhookTimeoutSeconds].
+	DefaultWebhookTimeoutSeconds = 5
 )
 
 // ManagerConfig holds configuration for the Slack Manager service.
@@ -247,6 +259,17 @@ type ManagerConfig struct {
 	// Default: 5000 (5s). Must be between 2000 (2s) and 300000 (5m).
 	SocketModeDrainTimeoutMs int `json:"socketModeDrainTimeoutMs" mapstructure:"socketModeDrainTimeoutMs" yaml:"socketModeDrainTimeoutMs"`
 
+	// WebhookTimeoutSeconds is the timeout of each HTTP request made by the built-in HTTP webhook
+	// handler (see manager.HTTPWebhookHandler), which delivers webhooks with http:// and https:// targets.
+	// Failed requests (connection errors, HTTP 429 and 5xx) are retried twice, each attempt with the
+	// full timeout. Webhook handlers registered by the host application are not affected.
+	//
+	// A synchronous receiver must respond within this timeout, which limits how much work (e.g.
+	// validation) it can do before responding.
+	//
+	// Default: 5. Zero or negative values are set to the default by Validate. Must be between 1 and 15.
+	WebhookTimeoutSeconds int `json:"webhookTimeoutSeconds" mapstructure:"webhookTimeoutSeconds" yaml:"webhookTimeoutSeconds"`
+
 	// EnableLegacyFeatures enables compatibility features for clients built against the
 	// legacy Slack Manager. It is intended for migration periods and should be disabled
 	// once all clients have been updated.
@@ -280,6 +303,7 @@ type ManagerConfig struct {
 //   - Channel manager drain timeout of 3 seconds
 //   - Socket mode max workers of 100
 //   - Socket mode drain timeout of 5 seconds
+//   - Webhook timeout of 5 seconds
 //   - Database cache enabled (SkipDatabaseCache = false)
 //
 // The EncryptionKey is intentionally left empty and must be set before use.
@@ -294,6 +318,7 @@ func NewDefaultManagerConfig() *ManagerConfig {
 		ChannelManagerDrainTimeoutMs: DefaultChannelManagerDrainTimeoutMs,
 		SocketModeMaxWorkers:         DefaultSocketModeMaxWorkers,
 		SocketModeDrainTimeoutMs:     DefaultSocketModeDrainTimeoutMs,
+		WebhookTimeoutSeconds:        DefaultWebhookTimeoutSeconds,
 	}
 }
 
@@ -311,6 +336,7 @@ func NewDefaultManagerConfig() *ManagerConfig {
 //   - ChannelManagerDrainTimeoutMs: must be between 2000 ms and 300000 ms
 //   - SocketModeMaxWorkers: must be between 10 and 1000
 //   - SocketModeDrainTimeoutMs: must be between 2000 ms and 300000 ms
+//   - WebhookTimeoutSeconds: zero or negative is set to the default; must be between 1 and 15 seconds
 //   - Insights: if non-nil, defaults are applied to unset fields and it must pass its own validation
 func (c *ManagerConfig) Validate() error {
 	if c.EncryptionKey != "" && !encryptionKeyRegex.MatchString(c.EncryptionKey) {
@@ -359,6 +385,14 @@ func (c *ManagerConfig) Validate() error {
 
 	if c.SocketModeDrainTimeoutMs < MinDrainTimeoutMs || c.SocketModeDrainTimeoutMs > MaxDrainTimeoutMs {
 		return fmt.Errorf("socket mode drain timeout must be between %d ms and %d ms", MinDrainTimeoutMs, MaxDrainTimeoutMs)
+	}
+
+	if c.WebhookTimeoutSeconds <= 0 {
+		c.WebhookTimeoutSeconds = DefaultWebhookTimeoutSeconds
+	}
+
+	if c.WebhookTimeoutSeconds < MinWebhookTimeoutSeconds || c.WebhookTimeoutSeconds > MaxWebhookTimeoutSeconds {
+		return fmt.Errorf("webhook timeout must be between %d and %d seconds", MinWebhookTimeoutSeconds, MaxWebhookTimeoutSeconds)
 	}
 
 	if c.Insights != nil {

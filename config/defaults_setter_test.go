@@ -34,6 +34,7 @@ func TestSetManagerConfigDefaults(t *testing.T) {
 	assert.Equal(t, config.DefaultChannelManagerDrainTimeoutMs, stub.m["channelManagerDrainTimeoutMs"])
 	assert.Equal(t, config.DefaultSocketModeMaxWorkers, stub.m["socketModeMaxWorkers"])
 	assert.Equal(t, config.DefaultSocketModeDrainTimeoutMs, stub.m["socketModeDrainTimeoutMs"])
+	assert.Equal(t, config.DefaultWebhookTimeoutSeconds, stub.m["webhookTimeoutSeconds"])
 
 	// SlackClient defaults nested under "slackClient"
 	assert.Equal(t, config.DefaultConcurrency, stub.m["slackClient.concurrency"])
