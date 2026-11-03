@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-03
+
 ### Added
 - Webhook feedback from the receiving system: the HTTP webhook handler reads a `types.WebhookResponse` body (`{"slackManagerResult": {"message": "..."}}`, `application/json`, max 16 KiB; other bodies are ignored). On 2xx, the message is shown to the clicking user with the *sent* status; on 4xx with a result body, the request is reported as *rejected* with the message instead of the generic failure reason. Messages are shown in the status dialog, or in an ephemeral message (now also on success, but only when there is a message)
 - `manager.WebhookResultHandler`: optional interface for synchronous webhook handlers that return a `*types.WebhookResult`. Implemented by `HTTPWebhookHandler` (`HandleWebhookWithResult`). Existing `WebhookHandler` implementations are unaffected
@@ -14,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Post-click state from the receiving system: a 2xx result can include `afterClick`, which overrides the webhook's own `AfterClick` for the click. It also works for webhooks without `AfterClick`; the state is then applied only if no alert was received since the click (5 second margin for clock skew) and no newer click is pending or shown. The `webhook_result` command carries it (`afterClick` field), and is now also sent for such clicks
 
 ### Changed
+- Bumped `github.com/slackmgr/types` to v0.10.0
 - `HTTPWebhookHandler` reads at most 16 KiB of each response body (previously the full body was read)
 
 ## [0.19.0] - 2026-11-03
@@ -480,7 +483,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/slackmgr/core/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/slackmgr/core/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/slackmgr/core/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/slackmgr/core/compare/v0.16.0...v0.17.0
