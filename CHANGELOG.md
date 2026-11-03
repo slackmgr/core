@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-03
+
 ### Added
 - `MinThrottleDurationSeconds` manager setting (default 10): the initial throttle window for content changes of a Slack post (see "Post Update Throttling" in the README)
 
@@ -522,7 +524,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.21.2...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/slackmgr/core/compare/v0.21.2...v0.22.0
 [0.21.2]: https://github.com/slackmgr/core/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/slackmgr/core/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/slackmgr/core/compare/v0.20.0...v0.21.0
