@@ -149,6 +149,7 @@ func TestWebhookInputView_PlainTextInput(t *testing.T) {
 		require.True(t, ok, "expected *slack.PlainTextInputBlockElement")
 		assert.Equal(t, 5, element.MinLength)
 		assert.Equal(t, 100, element.MaxLength)
+		assert.False(t, inputBlock.Optional, "input with min length > 0 must be required")
 	})
 
 	t.Run("zero min/max length not propagated", func(t *testing.T) {
@@ -169,6 +170,7 @@ func TestWebhookInputView_PlainTextInput(t *testing.T) {
 		require.True(t, ok2, "expected *slack.PlainTextInputBlockElement")
 		assert.Equal(t, 0, element.MinLength)
 		assert.Equal(t, 0, element.MaxLength)
+		assert.True(t, inputBlock.Optional, "input with zero min length must be optional")
 	})
 
 	t.Run("multiline and initial value propagated", func(t *testing.T) {

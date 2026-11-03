@@ -49,7 +49,12 @@ func createStringInputBlock(input *types.WebhookPlainTextInput) *slack.InputBloc
 
 	inputElement.InitialValue = input.InitialValue
 
-	return slack.NewInputBlock(input.ID, label, nil, inputElement)
+	block := slack.NewInputBlock(input.ID, label, nil, inputElement)
+
+	// Slack requires a value in every input block not marked optional, regardless of the element's min length.
+	block.Optional = input.MinLength == 0
+
+	return block
 }
 
 func createCheckboxInputBlock(input *types.WebhookCheckboxInput) *slack.InputBlock {
