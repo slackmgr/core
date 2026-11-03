@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -133,6 +134,7 @@ func TestChannelManager_HandleWebhook_Outcome(t *testing.T) {
 		wantReason    string
 		wantRetryable bool
 		wantButton    string
+		wantResult    models.WebhookOutcomeStatus // Empty if no result command is expected
 	}{
 		{
 			name:       "delivered",
@@ -140,6 +142,7 @@ func TestChannelManager_HandleWebhook_Outcome(t *testing.T) {
 			handler:    &funcWebhookHandler{shouldHandle: true, handle: func() error { return nil }},
 			wantStatus: models.WebhookOutcomeDelivered,
 			wantButton: "Go",
+			wantResult: models.WebhookOutcomeDelivered,
 		},
 		{
 			name:      "handler error",
@@ -150,6 +153,7 @@ func TestChannelManager_HandleWebhook_Outcome(t *testing.T) {
 			wantStatus: models.WebhookOutcomeFailed,
 			wantReason: "the request was rejected by the receiving system (HTTP 400)",
 			wantButton: "Go",
+			wantResult: models.WebhookOutcomeFailed,
 		},
 		{
 			name:       "webhook not found",
@@ -186,8 +190,10 @@ func TestChannelManager_HandleWebhook_Outcome(t *testing.T) {
 
 			slackClient := &stubSlackClient{webhookOutcomes: make(chan *models.WebhookOutcome, 1)}
 
+			queue := &recordingCommandSender{sent: make(chan sentCommand, 1)}
 			cm := newTestChannelManager(t, channelID, &stubDB{}, slackClient, &NoopChannelLocker{})
 			cm.webhookHandlers = []WebhookHandler{tt.handler}
+			cm.commandQueue = queue
 
 			alert, _, _ := newTestAlertFromData(t, types.Alert{
 				SlackChannelID: channelID,
@@ -198,7 +204,9 @@ func TestChannelManager_HandleWebhook_Outcome(t *testing.T) {
 			issue := models.NewIssue(alert, &mockLogger{})
 			cmd := &models.Command{
 				SlackChannelID:    channelID,
+				SlackPostID:       "1700000000.000100",
 				UserID:            userID,
+				UserRealName:      "Test User",
 				WebhookParameters: &models.WebhookCommandParams{WebhookID: tt.webhookID, ViewID: viewID},
 			}
 
@@ -219,6 +227,34 @@ func TestChannelManager_HandleWebhook_Outcome(t *testing.T) {
 				assert.Equal(t, viewID, outcome.ViewID)
 			case <-time.After(time.Second):
 				t.Fatal("webhook outcome was not reported")
+			}
+
+			if tt.wantResult == "" {
+				select {
+				case <-queue.sent:
+					t.Fatal("no webhook result command expected")
+				case <-time.After(50 * time.Millisecond):
+				}
+
+				return
+			}
+
+			select {
+			case sent := <-queue.sent:
+				assert.Equal(t, channelID, sent.channelID)
+
+				resultCmd := decodeCommand(t, sent.body)
+				assert.Equal(t, sent.dedupID, resultCmd.DedupID())
+				assert.Equal(t, models.CommandActionWebhookResult, resultCmd.Action)
+				assert.Equal(t, channelID, resultCmd.SlackChannelID)
+				assert.Equal(t, "1700000000.000100", resultCmd.SlackPostID)
+				assert.Equal(t, userID, resultCmd.UserID)
+				assert.Equal(t, "Test User", resultCmd.UserRealName)
+				require.NotNil(t, resultCmd.WebhookResult)
+				assert.Equal(t, tt.webhookID, resultCmd.WebhookResult.WebhookID)
+				assert.Equal(t, tt.wantResult, resultCmd.WebhookResult.Status)
+			case <-time.After(time.Second):
+				t.Fatal("webhook result command was not sent")
 			}
 		})
 	}
@@ -401,9 +437,195 @@ func TestPostWebhook_LogLevel(t *testing.T) {
 			handler := &funcWebhookHandler{shouldHandle: true, handle: func() error { return tt.err }}
 			slackClient := &stubSlackClient{webhookOutcomes: make(chan *models.WebhookOutcome, 1)}
 
-			postWebhook(t.Context(), handler, "https://example.com", &types.WebhookCallback{}, logger, nil, nil, slackClient, &models.WebhookOutcome{})
+			postWebhook(t.Context(), handler, "https://example.com", &types.WebhookCallback{}, logger, nil, nil, slackClient, &models.WebhookOutcome{}, nil)
 
 			assert.Equal(t, tt.wantLevels, logger.levels)
 		})
 	}
+}
+
+// sentCommand is a message sent with recordingCommandSender.
+type sentCommand struct {
+	channelID string
+	dedupID   string
+	body      string
+	ctxErr    error
+}
+
+// recordingCommandSender is a commandSender that records sent messages, and returns err.
+type recordingCommandSender struct {
+	sent chan sentCommand
+	err  error
+}
+
+func (s *recordingCommandSender) Send(ctx context.Context, slackChannelID, dedupID, body string) error {
+	s.sent <- sentCommand{channelID: slackChannelID, dedupID: dedupID, body: body, ctxErr: ctx.Err()}
+	return s.err
+}
+
+func decodeCommand(t *testing.T, body string) *models.Command {
+	t.Helper()
+
+	msg, err := models.NewCommandFromQueueItem(&types.FifoQueueItem{Body: body})
+	require.NoError(t, err)
+
+	cmd, ok := msg.(*models.Command)
+	require.True(t, ok)
+
+	return cmd
+}
+
+func TestChannelManager_SendWebhookResult(t *testing.T) {
+	t.Parallel()
+
+	webhookCmd := models.NewCommand("C123456", "1700000000.000100", "", "U123456", "Test User", models.CommandActionWebhook, nil)
+	webhookCmd.WebhookParameters = &models.WebhookCommandParams{WebhookID: "hook1"}
+
+	t.Run("nil queue is a no-op", func(t *testing.T) {
+		t.Parallel()
+
+		cm := newTestChannelManager(t, "C123456", &stubDB{}, &stubSlackClient{}, &NoopChannelLocker{})
+		logger := &levelRecordingLogger{}
+
+		cm.sendWebhookResult(t.Context(), webhookCmd, models.WebhookOutcomeDelivered, logger)
+
+		assert.Empty(t, logger.levels)
+	})
+
+	t.Run("sent after context cancellation", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		queue := &recordingCommandSender{sent: make(chan sentCommand, 1)}
+		cm := newTestChannelManager(t, "C123456", &stubDB{}, &stubSlackClient{}, &NoopChannelLocker{})
+		cm.commandQueue = queue
+
+		cm.sendWebhookResult(ctx, webhookCmd, models.WebhookOutcomeDelivered, &levelRecordingLogger{})
+
+		sent := <-queue.sent
+		require.NoError(t, sent.ctxErr)
+		assert.Equal(t, models.WebhookOutcomeDelivered, decodeCommand(t, sent.body).WebhookResult.Status)
+	})
+
+	t.Run("send error is logged", func(t *testing.T) {
+		t.Parallel()
+
+		queue := &recordingCommandSender{sent: make(chan sentCommand, 1), err: errors.New("queue down")}
+		cm := newTestChannelManager(t, "C123456", &stubDB{}, &stubSlackClient{}, &NoopChannelLocker{})
+		cm.commandQueue = queue
+		logger := &levelRecordingLogger{}
+
+		cm.sendWebhookResult(t.Context(), webhookCmd, models.WebhookOutcomeFailed, logger)
+
+		<-queue.sent
+		assert.Equal(t, []string{"error"}, logger.levels)
+	})
+}
+
+func TestPostWebhook_SendResult(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus models.WebhookOutcomeStatus
+	}{
+		{name: "delivered", err: nil, wantStatus: models.WebhookOutcomeDelivered},
+		{name: "failed", err: errors.New("boom"), wantStatus: models.WebhookOutcomeFailed},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := &funcWebhookHandler{shouldHandle: true, handle: func() error { return tt.err }}
+			slackClient := &stubSlackClient{webhookOutcomes: make(chan *models.WebhookOutcome, 1)}
+
+			var got []models.WebhookOutcomeStatus
+
+			sendResult := func(_ context.Context, status models.WebhookOutcomeStatus) {
+				got = append(got, status)
+			}
+
+			postWebhook(t.Context(), handler, "https://example.com", &types.WebhookCallback{}, &mockLogger{}, nil, nil, slackClient, &models.WebhookOutcome{}, sendResult)
+
+			assert.Equal(t, []models.WebhookOutcomeStatus{tt.wantStatus}, got)
+		})
+	}
+}
+
+// saveCountingDB is a stubDB that returns a fixed issue for Slack post lookups, and counts issue saves.
+type saveCountingDB struct {
+	stubDB
+
+	postIssue json.RawMessage
+	saves     int
+}
+
+func (d *saveCountingDB) FindIssueBySlackPostID(_ context.Context, _, _ string) (string, json.RawMessage, error) {
+	return "", d.postIssue, nil
+}
+
+func (d *saveCountingDB) SaveIssue(_ context.Context, _ types.Issue) error {
+	d.saves++
+	return nil
+}
+
+func TestChannelManager_ExecCmd_WebhookResult(t *testing.T) {
+	t.Parallel()
+
+	const channelID = insightsTestChannel // The channel of existingIssueJSON
+
+	webhookCmd := models.NewCommand(channelID, "1234.5678", "", "U123456", "Test User", models.CommandActionWebhook, nil)
+	webhookCmd.WebhookParameters = &models.WebhookCommandParams{WebhookID: "hook1", ViewID: "V123456"}
+
+	t.Run("issue found", func(t *testing.T) {
+		t.Parallel()
+
+		db := &saveCountingDB{postIssue: existingIssueJSON(t, types.AlertError, time.Now().UTC(), nil)}
+		slackClient := &stubSlackClient{webhookOutcomes: make(chan *models.WebhookOutcome, 1)}
+		cm := newTestChannelManager(t, channelID, db, slackClient, &NoopChannelLocker{})
+
+		issue, skipped, err := cm.execCmd(t.Context(), models.NewWebhookResultCommand(webhookCmd, models.WebhookOutcomeDelivered))
+
+		require.NoError(t, err)
+		assert.NotNil(t, issue)
+		assert.False(t, skipped)
+		assert.Zero(t, db.saves, "the issue is not changed yet")
+	})
+
+	t.Run("missing result parameters", func(t *testing.T) {
+		t.Parallel()
+
+		db := &saveCountingDB{postIssue: existingIssueJSON(t, types.AlertError, time.Now().UTC(), nil)}
+		cm := newTestChannelManager(t, channelID, db, &stubSlackClient{}, &NoopChannelLocker{})
+
+		cmd := models.NewWebhookResultCommand(webhookCmd, models.WebhookOutcomeDelivered)
+		cmd.WebhookResult = nil
+
+		_, _, err := cm.execCmd(t.Context(), cmd)
+
+		require.Error(t, err)
+	})
+
+	t.Run("issue not found is skipped without notifying the user", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &stubSlackClient{webhookOutcomes: make(chan *models.WebhookOutcome, 1)}
+		cm := newTestChannelManager(t, channelID, &stubDB{}, slackClient, &NoopChannelLocker{})
+
+		issue, skipped, err := cm.execCmd(t.Context(), models.NewWebhookResultCommand(webhookCmd, models.WebhookOutcomeDelivered))
+
+		require.NoError(t, err)
+		assert.Nil(t, issue)
+		assert.True(t, skipped)
+
+		select {
+		case <-slackClient.webhookOutcomes:
+			t.Fatal("no webhook outcome expected for webhook result commands")
+		case <-time.After(50 * time.Millisecond):
+		}
+	})
 }

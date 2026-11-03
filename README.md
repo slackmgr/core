@@ -84,6 +84,8 @@ The user who clicked the button gets feedback on whether the webhook was deliver
 
 Failure reasons are user-friendly categories (e.g. timed out, receiving system unreachable, rejected with HTTP 422) and never include the target URL. The status reflects delivery only: any change to the alert itself is up to the receiving system, which typically updates the alert via the API. Custom handlers can return (wrap) a `manager.WebhookHTTPError` to include an HTTP status code in the failure reason.
 
+Once the result is known, the manager sends an internal `webhook_result` command to the command queue, so the result is processed under the channel lock like any user command. Each webhook click therefore produces two command queue messages. Webhook result commands are not recorded as insights command events.
+
 Webhook payloads are AES-256 encrypted in transit between the API server and the Manager, so both components must share a common `EncryptionKey`. When no key is configured, the API rejects alerts that include webhooks with HTTP 400, preventing unencrypted payloads from reaching the queue.
 
 ### Notification Delay

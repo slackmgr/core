@@ -28,6 +28,10 @@ const (
 	CommandActionShowIssueOptionButtons = CommandAction("show_issue_option_buttons")
 	CommandActionHideIssueOptionButtons = CommandAction("hide_issue_option_buttons")
 	CommandActionWebhook                = CommandAction("webhook")
+
+	// CommandActionWebhookResult is an internal command, sent by the manager itself when the result of a webhook
+	// is known. It is never triggered directly by a user.
+	CommandActionWebhookResult = CommandAction("webhook_result")
 )
 
 // Command represents a user-initiated action within Slack that the system needs to process.
@@ -41,6 +45,7 @@ type Command struct {
 	Action                  CommandAction         `json:"action,omitempty"`
 	Parameters              map[string]any        `json:"parameters,omitempty"`
 	WebhookParameters       *WebhookCommandParams `json:"webhookParameters,omitempty"`
+	WebhookResult           *WebhookResultParams  `json:"webhookResult,omitempty"`
 	IncludeArchivedIssues   bool                  `json:"includeArchivedIssues"`
 	ExecuteWhenNoIssueFound bool                  `json:"executeWhenNoIssueFound"`
 
@@ -58,6 +63,18 @@ type WebhookCommandParams struct {
 	// The modal is kept open after submission and updated with the webhook outcome.
 	// Empty when the webhook was triggered without a confirmation dialog.
 	ViewID string `json:"viewId,omitempty"`
+}
+
+// WebhookResultParams holds parameters specific to webhook result commands. See [CommandActionWebhookResult].
+type WebhookResultParams struct {
+	// WebhookID is the ID of the webhook that was triggered.
+	WebhookID string `json:"webhookId"`
+
+	// Status is the webhook result, i.e. [WebhookOutcomeDelivered] or [WebhookOutcomeFailed].
+	Status WebhookOutcomeStatus `json:"status"`
+
+	// Completed is the time when the result was known.
+	Completed time.Time `json:"completed"`
 }
 
 // NewCommandFromQueueItem creates a Command instance from a FIFO queue item.
@@ -91,6 +108,22 @@ func NewCommand(slackChannelID, ts, reaction, userID, userRealName string, actio
 		Action:         action,
 		Parameters:     parameters,
 	}
+}
+
+// NewWebhookResultCommand creates a [CommandActionWebhookResult] command for the given webhook command, which
+// reports the webhook result back to the channel manager. The user and Slack post are copied from webhookCmd.
+func NewWebhookResultCommand(webhookCmd *Command, status WebhookOutcomeStatus) *Command {
+	cmd := NewCommand(webhookCmd.SlackChannelID, webhookCmd.SlackPostID, "", webhookCmd.UserID, webhookCmd.UserRealName, CommandActionWebhookResult, nil)
+	cmd.WebhookResult = &WebhookResultParams{
+		Status:    status,
+		Completed: cmd.Timestamp,
+	}
+
+	if webhookCmd.WebhookParameters != nil {
+		cmd.WebhookResult.WebhookID = webhookCmd.WebhookParameters.WebhookID
+	}
+
+	return cmd
 }
 
 // Ack acknowledges the command message, indicating successful processing.
@@ -137,6 +170,11 @@ func (c *Command) LogFields() map[string]any {
 
 	if c.Parameters != nil {
 		fields["params"] = fmt.Sprintf("%v", c.Parameters)
+	}
+
+	if c.WebhookResult != nil {
+		fields["webhook_id"] = c.WebhookResult.WebhookID
+		fields["webhook_status"] = c.WebhookResult.Status
 	}
 
 	return fields

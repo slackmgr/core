@@ -7,6 +7,11 @@ import (
 )
 
 // FifoQueue is an interface for interacting with a fifo queue.
+// commandSender sends commands to the command queue. It is satisfied by [FifoQueue].
+type commandSender interface {
+	Send(ctx context.Context, slackChannelID, dedupID, body string) error
+}
+
 type FifoQueue interface {
 	// Name returns the name of the queue.
 	Name() string

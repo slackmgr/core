@@ -40,6 +40,9 @@ type coordinator struct {
 	// insights records insights events. A nil recorder is valid and records nothing.
 	insights *insights.Recorder
 
+	// commandQueue is passed on to channel managers, see channelManager.commandQueue.
+	commandQueue commandSender
+
 	// channelStatsInterval is passed on to channel managers, see channelManager.channelStatsInterval.
 	channelStatsInterval time.Duration
 }
@@ -329,6 +332,7 @@ func (c *coordinator) createChannelManager(ctx context.Context, channelID string
 
 	channelManager := newChannelManager(channelID, channelName, c.slack, c.db, c.locker, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings, c.gate)
 	channelManager.insights = c.insights
+	channelManager.commandQueue = c.commandQueue
 	channelManager.channelStatsInterval = c.channelStatsInterval
 
 	c.metrics.GaugeAdd(activeChannelManagersMetric, 1)

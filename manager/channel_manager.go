@@ -90,6 +90,10 @@ type channelManager struct {
 	// insights records insights events. A nil recorder is valid and records nothing.
 	insights *insights.Recorder
 
+	// commandQueue is used to send internal commands, such as webhook results, back to the channel manager.
+	// They are processed under the channel lock, like user commands. A nil queue disables internal commands.
+	commandQueue commandSender
+
 	// channelStatsInterval is the interval between channel stats events.
 	channelStatsInterval time.Duration
 }
@@ -139,6 +143,7 @@ func newChannelManager(channelID string, channelName string, slackClient SlackCl
 		models.CommandActionShowIssueOptionButtons: c.showIssueOptionButtons,
 		models.CommandActionHideIssueOptionButtons: c.hideIssueOptionButtons,
 		models.CommandActionWebhook:                c.handleWebhook,
+		models.CommandActionWebhookResult:          c.handleWebhookResult,
 	}
 
 	durationBuckets := []float64{0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30}
@@ -603,7 +608,11 @@ func (c *channelManager) processCmd(ctx context.Context, cmd *models.Command) er
 
 	// Commands are attempted exactly once. Increment metric and ack after processing regardless of outcome.
 	issue, skipped, cmdErr := c.execCmd(ctx, cmd)
-	c.recordCommand(cmd, issue, skipped, cmdErr)
+
+	// Internal commands are not user actions, so they are not recorded as insights command events.
+	if cmd.Action != models.CommandActionWebhookResult {
+		c.recordCommand(cmd, issue, skipped, cmdErr)
+	}
 
 	c.metrics.CounterInc(commandsProcessedTotalMetric, string(cmd.Action))
 
@@ -1298,7 +1307,11 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 		event = &e
 	}
 
-	go postWebhook(ctx, handler, webhook.URL, data, logger, c.insights, event, c.slackClient, outcome)
+	sendResult := func(ctx context.Context, status models.WebhookOutcomeStatus) {
+		c.sendWebhookResult(ctx, cmd, status, logger)
+	}
+
+	go postWebhook(ctx, handler, webhook.URL, data, logger, c.insights, event, c.slackClient, outcome, sendResult)
 
 	// We return false, indicating that the issue does not need to be saved to the database (since we did not modify it).
 	return false, nil
@@ -1349,9 +1362,11 @@ func (c *channelManager) releaseLock(lock ChannelLock) {
 }
 
 // postWebhook calls the webhook handler. If event is non-nil, it is recorded as a webhook succeeded or failed event.
-// The user who clicked the webhook button is informed about the outcome.
+// The user who clicked the webhook button is informed about the outcome, and the result is passed to sendResult
+// (if non-nil), to report it back to the channel manager.
 func postWebhook(ctx context.Context, handler WebhookHandler, target string, data *types.WebhookCallback, logger types.Logger,
 	recorder *insights.Recorder, event *types.InsightsEvent, slackClient SlackClient, outcome *models.WebhookOutcome,
+	sendResult func(context.Context, models.WebhookOutcomeStatus),
 ) {
 	err := handler.HandleWebhook(ctx, target, data, logger)
 	if err != nil {
@@ -1368,6 +1383,15 @@ func postWebhook(ctx context.Context, handler WebhookHandler, target string, dat
 		notifyWebhookOutcome(ctx, slackClient, outcome.Delivered())
 	}
 
+	if sendResult != nil {
+		status := models.WebhookOutcomeDelivered
+		if err != nil {
+			status = models.WebhookOutcomeFailed
+		}
+
+		sendResult(ctx, status)
+	}
+
 	if event != nil {
 		e := *event
 		if err != nil {
@@ -1376,4 +1400,41 @@ func postWebhook(ctx context.Context, handler WebhookHandler, target string, dat
 
 		recorder.Record(e)
 	}
+}
+
+// sendWebhookResult sends a [models.CommandActionWebhookResult] command for the given webhook command to the command
+// queue, so that the result is processed under the channel lock. It is not cancelled with ctx, so that the result is
+// sent also during shutdown, but it is bounded by [webhookResultSendTimeout]. Errors are logged, not returned.
+func (c *channelManager) sendWebhookResult(ctx context.Context, webhookCmd *models.Command, status models.WebhookOutcomeStatus, logger types.Logger) {
+	if c.commandQueue == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webhookResultSendTimeout)
+	defer cancel()
+
+	cmd := models.NewWebhookResultCommand(webhookCmd, status)
+
+	body, err := json.Marshal(cmd)
+	if err != nil {
+		logger.Errorf("Failed to marshal webhook result command: %s", err)
+		return
+	}
+
+	if err := c.commandQueue.Send(ctx, cmd.SlackChannelID, cmd.DedupID(), string(body)); err != nil {
+		logger.Errorf("Failed to queue webhook result command: %s", err)
+	}
+}
+
+// handleWebhookResult handles a [models.CommandActionWebhookResult] command, i.e. the result of a webhook that was
+// triggered earlier. It runs under the channel lock. Commands for issues that no longer exist (e.g. archived or moved)
+// are skipped before this function is called.
+func (c *channelManager) handleWebhookResult(_ context.Context, _ *models.Issue, cmd *models.Command, logger types.Logger) (bool, error) {
+	if cmd.WebhookResult == nil {
+		return false, errors.New("missing webhook result parameters in webhook result command")
+	}
+
+	logger.Debug("Handle webhook result")
+
+	return false, nil
 }

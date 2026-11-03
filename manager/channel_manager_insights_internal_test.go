@@ -294,6 +294,25 @@ func TestChannelManager_Insights_Commands(t *testing.T) {
 		assert.Empty(t, skipped[0].IssueID)
 	})
 
+	t.Run("webhook result command is not recorded", func(t *testing.T) {
+		t.Parallel()
+
+		recorder, sink := newTestRecorder(t)
+		db := &insightsStubDB{postIssue: existingIssueJSON(t, types.AlertError, now, nil)}
+		cm := newInsightsChannelManager(t, db, &NoopChannelLocker{}, recorder)
+
+		webhookCmd := models.NewCommand(insightsTestChannel, "1234.5678", "", "U1", "Jane", models.CommandActionWebhook, nil)
+		webhookCmd.WebhookParameters = &models.WebhookCommandParams{WebhookID: "hook1"}
+
+		require.NoError(t, cm.processCmd(context.Background(), models.NewWebhookResultCommand(webhookCmd, models.WebhookOutcomeDelivered)))
+
+		flush(recorder)
+
+		assert.Empty(t, sink.ofType(types.InsightsEventCommandExecuted))
+		assert.Empty(t, sink.ofType(types.InsightsEventCommandSkipped))
+		assert.Empty(t, sink.ofType(types.InsightsEventCommandFailed))
+	})
+
 	t.Run("failing command is recorded as failed", func(t *testing.T) {
 		t.Parallel()
 

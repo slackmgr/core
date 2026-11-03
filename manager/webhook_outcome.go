@@ -14,6 +14,9 @@ import (
 // webhookNotifyTimeout is the maximum time spent informing the user about a webhook outcome.
 const webhookNotifyTimeout = 10 * time.Second
 
+// webhookResultSendTimeout is the maximum time spent sending a webhook result command to the command queue.
+const webhookResultSendTimeout = 10 * time.Second
+
 // webhookFailureReason maps a webhook handler error to a user-facing failure reason, and whether the user may succeed
 // by trying again. The reason never includes the error message itself, since it may contain internal details such as
 // the target URL.

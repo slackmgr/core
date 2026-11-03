@@ -257,6 +257,7 @@ func (m *Manager) Run(ctx context.Context) error {
 
 	m.coordinator = newCoordinator(m.db, m.alertQueue, m.slackClient, m.cacheStore, m.locker, m.logger, m.metrics, m.webhookHandlers, m.gate, m.cfg, m.managerSettings)
 	m.coordinator.insights = recorder
+	m.coordinator.commandQueue = m.commandQueue
 	m.coordinator.channelStatsInterval = time.Duration(m.insightsConfig().ChannelStatsIntervalSeconds) * time.Second
 
 	if err := m.coordinator.init(ctx); err != nil {

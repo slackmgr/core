@@ -583,3 +583,60 @@ func TestCommandActionConstants(t *testing.T) {
 	assert.Equal(t, CommandActionHideIssueOptionButtons, CommandAction("hide_issue_option_buttons"))
 	assert.Equal(t, CommandActionWebhook, CommandAction("webhook"))
 }
+
+func TestNewWebhookResultCommand(t *testing.T) {
+	fixedTime := time.Date(2026, 11, 3, 10, 30, 0, 0, time.UTC)
+	cleanup := setCommandTestTime(fixedTime)
+	defer cleanup()
+
+	t.Run("copies user and post from webhook command", func(t *testing.T) {
+		webhookCmd := NewCommand("C12345", "1234567890.123456", "", "U12345", "Test User", CommandActionWebhook, nil)
+		webhookCmd.WebhookParameters = &WebhookCommandParams{WebhookID: "hook1", ViewID: "V123", PlainTextInput: map[string]string{"a": "b"}}
+
+		cmd := NewWebhookResultCommand(webhookCmd, WebhookOutcomeDelivered)
+
+		require.NotNil(t, cmd)
+		assert.Equal(t, CommandActionWebhookResult, cmd.Action)
+		assert.Equal(t, "C12345", cmd.SlackChannelID)
+		assert.Equal(t, "1234567890.123456", cmd.SlackPostID)
+		assert.Equal(t, "U12345", cmd.UserID)
+		assert.Equal(t, "Test User", cmd.UserRealName)
+		assert.Equal(t, fixedTime, cmd.Timestamp)
+		assert.Nil(t, cmd.WebhookParameters, "user input must not be copied")
+		assert.False(t, cmd.ExecuteWhenNoIssueFound)
+		assert.False(t, cmd.IncludeArchivedIssues)
+		assert.Equal(t, &WebhookResultParams{WebhookID: "hook1", Status: WebhookOutcomeDelivered, Completed: fixedTime}, cmd.WebhookResult)
+	})
+
+	t.Run("missing webhook parameters", func(t *testing.T) {
+		webhookCmd := NewCommand("C12345", "1234567890.123456", "", "U12345", "Test User", CommandActionWebhook, nil)
+
+		cmd := NewWebhookResultCommand(webhookCmd, WebhookOutcomeFailed)
+
+		require.NotNil(t, cmd.WebhookResult)
+		assert.Empty(t, cmd.WebhookResult.WebhookID)
+		assert.Equal(t, WebhookOutcomeFailed, cmd.WebhookResult.Status)
+	})
+
+	t.Run("JSON round trip", func(t *testing.T) {
+		webhookCmd := NewCommand("C12345", "1234567890.123456", "", "U12345", "Test User", CommandActionWebhook, nil)
+		webhookCmd.WebhookParameters = &WebhookCommandParams{WebhookID: "hook1"}
+
+		cmd := NewWebhookResultCommand(webhookCmd, WebhookOutcomeDelivered)
+
+		body, err := json.Marshal(cmd)
+		require.NoError(t, err)
+
+		msg, err := NewCommandFromQueueItem(&types.FifoQueueItem{Body: string(body)})
+		require.NoError(t, err)
+
+		decoded, ok := msg.(*Command)
+		require.True(t, ok)
+		assert.Equal(t, cmd.WebhookResult, decoded.WebhookResult)
+		assert.Equal(t, CommandActionWebhookResult, decoded.Action)
+
+		fields := decoded.LogFields()
+		assert.Equal(t, "hook1", fields["webhook_id"])
+		assert.Equal(t, WebhookOutcomeDelivered, fields["webhook_status"])
+	})
+}
