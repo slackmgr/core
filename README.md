@@ -101,6 +101,7 @@ Receiving systems often take a while before they update the alert. A webhook can
 
 - When the webhook is **delivered**, the post hides the clicked button, all webhook buttons, or the listed webhooks (`HideButtons`, `HideWebhookIDs`), and shows a status line below the buttons: the optional `StatusText`, the button, the user who clicked it and the time. Slack mentions in `StatusText` are removed.
 - **Any alert** for the issue clears the state and restores the normal post, even if the alert is otherwise unchanged or ignored (e.g. not newer, or the issue is already resolved).
+- An alert that clears a pending or shown state updates the post immediately, bypassing the update throttling for busy issues (`MinIssueCountForThrottle`, `MaxThrottleDurationSeconds`). Receiving systems often re-send the alert right after the click, so the user sees the result without delay.
 - If no alert arrives within `ResetAfterSeconds` (default 5 minutes, max 24 hours), the buttons are shown again with a note that no update was received.
 - If delivery **fails**, the post is unchanged; the clicking user is informed as described above.
 - If the button is clicked again (e.g. another visible button with after-click settings), the latest click wins.

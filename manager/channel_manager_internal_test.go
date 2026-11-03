@@ -31,6 +31,9 @@ type stubSlackClient struct {
 
 	// singleIssueUpdates records the reasons of all UpdateSingleIssue calls.
 	singleIssueUpdates []string
+
+	// throttledIssueUpdates records the reasons of all UpdateSingleIssueWithThrottling calls.
+	throttledIssueUpdates []string
 }
 
 func (s *stubSlackClient) NotifyWebhookOutcome(_ context.Context, outcome *models.WebhookOutcome) {
@@ -51,7 +54,12 @@ func (s *stubSlackClient) IsAlertChannel(ctx context.Context, channelID string) 
 
 func (s *stubSlackClient) Update(_ context.Context, _ string, _ []*models.Issue) error { return nil }
 
-func (s *stubSlackClient) UpdateSingleIssueWithThrottling(_ context.Context, _ *models.Issue, _ string, _ int) error {
+func (s *stubSlackClient) UpdateSingleIssueWithThrottling(_ context.Context, _ *models.Issue, reason string, _ int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.throttledIssueUpdates = append(s.throttledIssueUpdates, reason)
+
 	return nil
 }
 
@@ -75,6 +83,13 @@ func (s *stubSlackClient) singleIssueUpdateReasons() []string {
 	defer s.mu.Unlock()
 
 	return slices.Clone(s.singleIssueUpdates)
+}
+
+func (s *stubSlackClient) throttledIssueUpdateReasons() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return slices.Clone(s.throttledIssueUpdates)
 }
 
 // alwaysFailLocker is a ChannelLocker that immediately returns an error, simulating a lock that can never be obtained.

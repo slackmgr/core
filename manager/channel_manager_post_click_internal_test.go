@@ -204,14 +204,15 @@ func TestChannelManager_Alert_ClearsPostClickState(t *testing.T) {
 		issue           json.RawMessage
 		alertTime       time.Time
 		wantSaved       bool
-		wantSlackUpdate bool
+		wantSlackUpdate []string // Reasons of unthrottled Slack updates
+		wantThrottled   []string // Reasons of throttled Slack updates
 	}{
 		{
 			name:            "ignored (not newer) alert clears the active state",
 			issue:           postClickIssueJSON(t, lastAlertTime, withActiveClick(click)),
 			alertTime:       lastAlertTime,
 			wantSaved:       true,
-			wantSlackUpdate: true,
+			wantSlackUpdate: []string{"webhook post-click state cleared"},
 		},
 		{
 			name:      "ignored alert clears the pending state without a Slack update",
@@ -225,10 +226,25 @@ func TestChannelManager_Alert_ClearsPostClickState(t *testing.T) {
 			alertTime: lastAlertTime,
 		},
 		{
-			name:      "accepted alert clears the active state",
-			issue:     postClickIssueJSON(t, lastAlertTime, withActiveClick(click)),
-			alertTime: now,
-			wantSaved: true,
+			name:            "accepted alert clears the active state and updates Slack without throttling",
+			issue:           postClickIssueJSON(t, lastAlertTime, withActiveClick(click)),
+			alertTime:       now,
+			wantSaved:       true,
+			wantSlackUpdate: []string{"alert added to existing issue after webhook click"},
+		},
+		{
+			name:            "accepted alert clears the pending state and updates Slack without throttling",
+			issue:           postClickIssueJSON(t, lastAlertTime, withPendingClick(click)),
+			alertTime:       now,
+			wantSaved:       true,
+			wantSlackUpdate: []string{"alert added to existing issue after webhook click"},
+		},
+		{
+			name:          "accepted alert without state updates Slack with throttling",
+			issue:         postClickIssueJSON(t, lastAlertTime, nil),
+			alertTime:     now,
+			wantSaved:     true,
+			wantThrottled: []string{"alert added to existing issue"},
 		},
 	}
 
@@ -256,10 +272,8 @@ func TestChannelManager_Alert_ClearsPostClickState(t *testing.T) {
 			require.Len(t, saved, 1)
 			assert.Nil(t, saved[0].PendingPostClick)
 			assert.Nil(t, saved[0].PostClick)
-
-			if tt.wantSlackUpdate {
-				assert.Equal(t, []string{"webhook post-click state cleared"}, slackClient.singleIssueUpdateReasons())
-			}
+			assert.Equal(t, tt.wantSlackUpdate, slackClient.singleIssueUpdateReasons())
+			assert.Equal(t, tt.wantThrottled, slackClient.throttledIssueUpdateReasons())
 		})
 	}
 }

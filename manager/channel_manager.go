@@ -944,9 +944,20 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 	}
 
 	// Update the issue in Slack.
+	// An alert that clears a post-click state is typically the receiving system's response to a button click, so the
+	// post is updated without throttling. Such updates are bounded by the click frequency, and the user who clicked
+	// gets immediate feedback, rather than waiting for the throttle window to pass.
 	// Errors from the Slack client are logged, but not returned.
-	if err := c.slackClient.UpdateSingleIssueWithThrottling(ctx, issue, "alert added to existing issue", openIssues); err != nil {
-		c.logger.Errorf("Failed to update issue in Slack: %s", err)
+	var slackErr error
+
+	if postClickCleared {
+		slackErr = c.slackClient.UpdateSingleIssue(ctx, issue, "alert added to existing issue after webhook click")
+	} else {
+		slackErr = c.slackClient.UpdateSingleIssueWithThrottling(ctx, issue, "alert added to existing issue", openIssues)
+	}
+
+	if slackErr != nil {
+		c.logger.Errorf("Failed to update issue in Slack: %s", slackErr)
 	}
 
 	if err := c.db.SaveIssue(ctx, issue); err != nil {
