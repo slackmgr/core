@@ -239,11 +239,9 @@ func (c *Client) UpdateModal(ctx context.Context, viewID string, request slack.M
 // NotifyWebhookOutcome informs the user who clicked a webhook button about the webhook outcome.
 //
 // If the webhook was confirmed in a modal (see [models.WebhookOutcome.ViewID]), the modal is updated with the outcome.
-// If the modal can't be updated (typically because the user has closed it), failures are reported in an ephemeral
-// message instead, while successes are not reported at all.
-//
-// Without a modal, only failures are reported, in an ephemeral message. Successes are not reported, since webhooks
-// without a confirmation dialog are meant to be lightweight.
+// If there is no modal, or it can't be updated (typically because the user has closed it), the outcome is reported in
+// an ephemeral message if [models.WebhookOutcome.NotifyWithoutModal] is true, i.e. for failures, rejections and
+// deliveries with a message from the receiving system. Plain deliveries are not reported.
 //
 // Errors are logged, not returned.
 func (c *Client) NotifyWebhookOutcome(ctx context.Context, outcome *models.WebhookOutcome) {
@@ -265,7 +263,7 @@ func (c *Client) NotifyWebhookOutcome(ctx context.Context, outcome *models.Webho
 		logger.WithField("view_id", outcome.ViewID).Infof("Failed to update webhook status modal, the user may have closed it: %s", err)
 	}
 
-	if outcome.Status != models.WebhookOutcomeFailed {
+	if !outcome.NotifyWithoutModal() {
 		return
 	}
 

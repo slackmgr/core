@@ -79,10 +79,22 @@ Webhook dispatch is governed by the `manager.WebhookHandler` interface. Each han
 
 The user who clicked the button gets feedback on whether the webhook was delivered:
 
-- **With a confirmation dialog:** the dialog stays open after submission and shows the status — first *sending*, then *sent* or *failed* with a reason. If the user closes the dialog before the outcome is known, failures are reported in an ephemeral message instead (successes are not).
-- **Without a confirmation dialog:** only failures are reported, in an ephemeral message. Successes are silent, keeping these buttons lightweight.
+- **With a confirmation dialog:** the dialog stays open after submission and shows the status — first *sending*, then *sent*, *rejected* or *failed* with a reason. If the user closes the dialog before the outcome is known, failures, rejections and messages from the receiving system are reported in an ephemeral message instead (plain successes are not).
+- **Without a confirmation dialog:** failures, rejections and messages from the receiving system are reported in an ephemeral message. Plain successes are silent, keeping these buttons lightweight.
 
 Failure reasons are user-friendly categories (e.g. timed out, receiving system unreachable, rejected with HTTP 422) and never include the target URL. The status reflects delivery only: any change to the alert itself is up to the receiving system, which typically updates the alert via the API. Custom handlers can return (wrap) a `manager.WebhookHTTPError` to include an HTTP status code in the failure reason.
+
+**Feedback from the receiving system:** a synchronous receiver can respond with a result body (`types.WebhookResponse`) to give the clicking user a message, e.g. a validation error or "3 pods will be restarted, the alert is updated in about 2 minutes":
+
+```json
+{"slackManagerResult": {"message": "3 pods will be restarted"}}
+```
+
+- The body is only read if the content type is `application/json`, it is at most 16 KiB, and it has the top-level `slackManagerResult` key. Other bodies (including other JSON) are ignored, so existing receivers are unaffected. Invalid results are ignored and logged at info level.
+- The HTTP status code decides the outcome: **2xx** means the request was accepted (the message is shown with *sent*); **4xx** with a result body means it was rejected (the message is shown with *rejected*, instead of the generic failure reason). 4xx without a result body, 429 and 5xx are failures as before. When requests are retried (429, 5xx), only the final response counts.
+- Messages are shown as plain text (no mentions or links), max 1000 characters.
+- The receiver must respond within the HTTP handler timeout (default 3 seconds, see `HTTPWebhookHandler.WithRequestTimeout`), which limits how much validation it can do synchronously.
+- Only synchronous handlers can give feedback. Custom handlers opt in by implementing `manager.WebhookResultHandler` (`HandleWebhookWithResult`, returning a `*types.WebhookResult`), and reject a request by returning (wrapping) a `manager.WebhookRejectedError`. The built-in HTTP handler implements it; the `sqs` and `pubsub` handlers have no response, so those receivers use the alert API instead.
 
 Receiving systems often take a while before they update the alert. A webhook can define an optional post-click state (`types.Webhook.AfterClick`), so everyone in the channel sees that the action is in progress, and duplicate clicks are avoided:
 

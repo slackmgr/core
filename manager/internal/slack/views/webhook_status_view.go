@@ -19,7 +19,8 @@ func WebhookStatusModal(outcome *models.WebhookOutcome) slack.ModalViewRequest {
 }
 
 // WebhookStatusText returns a plain text message describing the status of a user-triggered webhook,
-// e.g. for an ephemeral message.
+// e.g. for an ephemeral message. The outcome message (from the receiving system) is included as is, so the text must
+// be rendered as plain text, or with escaping (no Slack mentions or links).
 func WebhookStatusText(outcome *models.WebhookOutcome) string {
 	name := webhookDisplayName(outcome)
 
@@ -27,7 +28,17 @@ func WebhookStatusText(outcome *models.WebhookOutcome) string {
 	case models.WebhookOutcomeSending:
 		return fmt.Sprintf(":hourglass_flowing_sand: Sending %s...", name)
 	case models.WebhookOutcomeDelivered:
+		if outcome.Message != "" {
+			return fmt.Sprintf(":white_check_mark: %s was sent.\n\n%s", capitalizeFirst(name), outcome.Message)
+		}
+
 		return fmt.Sprintf(":white_check_mark: %s was sent.\n\nThe alert will be updated when the receiving system has processed the request. This may take a while.", capitalizeFirst(name))
+	case models.WebhookOutcomeRejected:
+		if outcome.Message != "" {
+			return fmt.Sprintf(":no_entry: %s was rejected by the receiving system:\n\n%s", capitalizeFirst(name), outcome.Message)
+		}
+
+		return fmt.Sprintf(":no_entry: %s was rejected by the receiving system.", capitalizeFirst(name))
 	case models.WebhookOutcomeFailed:
 		return webhookFailedText(name, outcome)
 	default:

@@ -19,3 +19,24 @@ type WebhookHandler interface {
 	// If unsuccessful, it should return the error (without logging it).
 	HandleWebhook(ctx context.Context, target string, data *types.WebhookCallback, logger types.Logger) error
 }
+
+// WebhookResultHandler is an optional extension of [WebhookHandler], for synchronous handlers that can give feedback
+// on a webhook button click, e.g. a validation error or "3 pods will be restarted". It is detected by type assertion.
+// [HTTPWebhookHandler] implements it.
+//
+// When implemented, the manager calls HandleWebhookWithResult instead of HandleWebhook.
+type WebhookResultHandler interface {
+	WebhookHandler
+
+	// HandleWebhookWithResult handles the webhook target, with the specified callback data, like
+	// [WebhookHandler.HandleWebhook].
+	//
+	// If the request was accepted, it returns the (optional, possibly nil) result and a nil error. The result message
+	// is shown to the user who clicked the button.
+	//
+	// If the receiving system rejected the request, it returns a (wrapped) [WebhookRejectedError] with an optional
+	// message for the user. Other errors are delivery failures, as for [WebhookHandler.HandleWebhook].
+	//
+	// The manager cleans and validates the result; invalid results are ignored (logged).
+	HandleWebhookWithResult(ctx context.Context, target string, data *types.WebhookCallback, logger types.Logger) (*types.WebhookResult, error)
+}

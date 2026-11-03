@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Webhook feedback from the receiving system: the HTTP webhook handler reads a `types.WebhookResponse` body (`{"slackManagerResult": {"message": "..."}}`, `application/json`, max 16 KiB; other bodies are ignored). On 2xx, the message is shown to the clicking user with the *sent* status; on 4xx with a result body, the request is reported as *rejected* with the message instead of the generic failure reason. Messages are shown in the status dialog, or in an ephemeral message (now also on success, but only when there is a message)
+- `manager.WebhookResultHandler`: optional interface for synchronous webhook handlers that return a `*types.WebhookResult`. Implemented by `HTTPWebhookHandler` (`HandleWebhookWithResult`). Existing `WebhookHandler` implementations are unaffected
+- `manager.WebhookRejectedError`: returned (wrapped) for rejected requests, with an optional message for the user. Unwraps to `WebhookHTTPError` when it has a status code
+
+### Changed
+- `HTTPWebhookHandler` reads at most 16 KiB of each response body (previously the full body was read)
+
 ## [0.19.0] - 2026-11-03
 
 ### Added

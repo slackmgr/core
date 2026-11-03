@@ -30,6 +30,23 @@ func TestWebhookStatusText(t *testing.T) {
 			wantContain: []string{`"Deploy" was sent.`, "The alert will be updated"},
 		},
 		{
+			name:        "delivered with message",
+			outcome:     &models.WebhookOutcome{ButtonText: "Deploy", Status: models.WebhookOutcomeDelivered, Message: "Deploying 3 services"},
+			wantContain: []string{`"Deploy" was sent.`, "Deploying 3 services"},
+			wantAbsent:  []string{"The alert will be updated"},
+		},
+		{
+			name:        "rejected with message",
+			outcome:     &models.WebhookOutcome{ButtonText: "Deploy", Status: models.WebhookOutcomeRejected, Message: "Version 1.2 does not exist"},
+			wantContain: []string{`"Deploy" was rejected by the receiving system:`, "Version 1.2 does not exist"},
+			wantAbsent:  []string{"try again"},
+		},
+		{
+			name:        "rejected without message",
+			outcome:     &models.WebhookOutcome{Status: models.WebhookOutcomeRejected},
+			wantContain: []string{"The webhook was rejected by the receiving system."},
+		},
+		{
 			name:        "failed retryable",
 			outcome:     &models.WebhookOutcome{ButtonText: "Deploy", Status: models.WebhookOutcomeFailed, Reason: models.WebhookReasonTimeout, Retryable: true},
 			wantContain: []string{`"Deploy" could not be sent: the request timed out.`, "You can try again."},

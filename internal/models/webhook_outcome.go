@@ -12,6 +12,10 @@ const (
 
 	// WebhookOutcomeFailed means the webhook could not be delivered, or was never sent.
 	WebhookOutcomeFailed = WebhookOutcomeStatus("failed")
+
+	// WebhookOutcomeRejected means the webhook was delivered, but the receiving system rejected the request,
+	// e.g. because of invalid input.
+	WebhookOutcomeRejected = WebhookOutcomeStatus("rejected")
 )
 
 // Default user-facing failure reasons for webhooks. See [WebhookOutcome.Reason].
@@ -49,6 +53,10 @@ type WebhookOutcome struct {
 
 	// Retryable is true if the user may succeed by trying again. Only used when Status is [WebhookOutcomeFailed].
 	Retryable bool
+
+	// Message is an optional message from the receiving system (the Message of a types.WebhookResult), shown as plain
+	// text. Only used when Status is [WebhookOutcomeDelivered] or [WebhookOutcomeRejected].
+	Message string
 }
 
 // NewWebhookOutcome creates a [WebhookOutcome] with the given status, for the user and confirmation modal (if any)
@@ -74,16 +82,47 @@ func (o *WebhookOutcome) Failed(reason string, retryable bool) *WebhookOutcome {
 	c.Status = WebhookOutcomeFailed
 	c.Reason = reason
 	c.Retryable = retryable
+	c.Message = ""
 
 	return &c
 }
 
-// Delivered returns a copy of the outcome with status [WebhookOutcomeDelivered].
-func (o *WebhookOutcome) Delivered() *WebhookOutcome {
+// Delivered returns a copy of the outcome with status [WebhookOutcomeDelivered] and the given (optional) message from
+// the receiving system.
+func (o *WebhookOutcome) Delivered(message string) *WebhookOutcome {
 	c := *o
 	c.Status = WebhookOutcomeDelivered
 	c.Reason = ""
 	c.Retryable = false
+	c.Message = message
 
 	return &c
+}
+
+// Rejected returns a copy of the outcome with status [WebhookOutcomeRejected] and the given (optional) message from
+// the receiving system.
+func (o *WebhookOutcome) Rejected(message string) *WebhookOutcome {
+	c := *o
+	c.Status = WebhookOutcomeRejected
+	c.Reason = ""
+	c.Retryable = false
+	c.Message = message
+
+	return &c
+}
+
+// NotifyWithoutModal returns true if the user should be informed about the outcome also when there is no confirmation
+// modal to update: failures and rejections, and deliveries with a message from the receiving system.
+// Plain deliveries are not reported, since webhooks without a confirmation dialog are meant to be lightweight.
+func (o *WebhookOutcome) NotifyWithoutModal() bool {
+	switch o.Status {
+	case WebhookOutcomeFailed, WebhookOutcomeRejected:
+		return true
+	case WebhookOutcomeDelivered:
+		return o.Message != ""
+	case WebhookOutcomeSending:
+		return false
+	default:
+		return false
+	}
 }

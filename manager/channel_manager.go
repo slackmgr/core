@@ -1402,11 +1402,15 @@ func (c *channelManager) releaseLock(lock ChannelLock) {
 // postWebhook calls the webhook handler. If event is non-nil, it is recorded as a webhook succeeded or failed event.
 // The user who clicked the webhook button is informed about the outcome, and the result is passed to sendResult
 // (if non-nil), to report it back to the channel manager.
+//
+// Handlers implementing [WebhookResultHandler] may return a result message (shown to the user on delivery) or a
+// [WebhookRejectedError] (shown to the user as a rejection). Rejections are reported as failed webhooks.
 func postWebhook(ctx context.Context, handler WebhookHandler, target string, data *types.WebhookCallback, logger types.Logger,
 	recorder *insights.Recorder, event *types.InsightsEvent, slackClient SlackClient, outcome *models.WebhookOutcome,
 	sendResult func(context.Context, models.WebhookOutcomeStatus),
 ) {
-	err := handler.HandleWebhook(ctx, target, data, logger)
+	result, err := callWebhookHandler(ctx, handler, target, data, logger)
+
 	if err != nil {
 		// Problems on the receiving side are not manager errors, and the user is informed in Slack.
 		if isWebhookTargetError(err) {
@@ -1415,10 +1419,19 @@ func postWebhook(ctx context.Context, handler WebhookHandler, target string, dat
 			logger.Errorf("Failed to handle webhook: %s", err)
 		}
 
-		reason, retryable := webhookFailureReason(err)
-		notifyWebhookOutcome(ctx, slackClient, outcome.Failed(reason, retryable))
+		if rejected, ok := errors.AsType[*WebhookRejectedError](err); ok {
+			notifyWebhookOutcome(ctx, slackClient, outcome.Rejected(webhookRejectedMessage(rejected, logger)))
+		} else {
+			reason, retryable := webhookFailureReason(err)
+			notifyWebhookOutcome(ctx, slackClient, outcome.Failed(reason, retryable))
+		}
 	} else {
-		notifyWebhookOutcome(ctx, slackClient, outcome.Delivered())
+		message := ""
+		if result != nil {
+			message = result.Message
+		}
+
+		notifyWebhookOutcome(ctx, slackClient, outcome.Delivered(message))
 	}
 
 	if sendResult != nil {

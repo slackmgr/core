@@ -59,6 +59,8 @@ func TestClient_NotifyWebhookOutcome(t *testing.T) {
 
 	delivered := &models.WebhookOutcome{ChannelID: channelID, UserID: userID, ButtonText: "Deploy", Status: models.WebhookOutcomeDelivered}
 	failed := &models.WebhookOutcome{ChannelID: channelID, UserID: userID, ButtonText: "Deploy", Status: models.WebhookOutcomeFailed, Reason: models.WebhookReasonTimeout, Retryable: true}
+	deliveredMsg := &models.WebhookOutcome{ChannelID: channelID, UserID: userID, ButtonText: "Deploy", Status: models.WebhookOutcomeDelivered, Message: "Deploying 3 services"}
+	rejected := &models.WebhookOutcome{ChannelID: channelID, UserID: userID, ButtonText: "Deploy", Status: models.WebhookOutcomeRejected, Message: "Unknown version <!channel>"}
 
 	withView := func(o *models.WebhookOutcome) *models.WebhookOutcome {
 		c := *o
@@ -72,14 +74,18 @@ func TestClient_NotifyWebhookOutcome(t *testing.T) {
 		updateModalErr   error
 		wantModalUpdates int
 		wantEphemerals   int
+		wantText         string
 	}{
 		{name: "nil outcome", outcome: nil},
 		{name: "modal delivered", outcome: withView(delivered), wantModalUpdates: 1},
 		{name: "modal failed", outcome: withView(failed), wantModalUpdates: 1},
 		{name: "closed modal delivered is silent", outcome: withView(delivered), updateModalErr: errors.New("not_found"), wantModalUpdates: 1},
-		{name: "closed modal failed falls back to ephemeral", outcome: withView(failed), updateModalErr: errors.New("not_found"), wantModalUpdates: 1, wantEphemerals: 1},
+		{name: "closed modal failed falls back to ephemeral", outcome: withView(failed), updateModalErr: errors.New("not_found"), wantModalUpdates: 1, wantEphemerals: 1, wantText: models.WebhookReasonTimeout},
+		{name: "closed modal delivered with message falls back to ephemeral", outcome: withView(deliveredMsg), updateModalErr: errors.New("not_found"), wantModalUpdates: 1, wantEphemerals: 1, wantText: "Deploying 3 services"},
 		{name: "no modal delivered is silent", outcome: delivered},
-		{name: "no modal failed posts ephemeral", outcome: failed, wantEphemerals: 1},
+		{name: "no modal failed posts ephemeral", outcome: failed, wantEphemerals: 1, wantText: models.WebhookReasonTimeout},
+		{name: "no modal delivered with message posts ephemeral", outcome: deliveredMsg, wantEphemerals: 1, wantText: "Deploying 3 services"},
+		{name: "no modal rejected posts escaped ephemeral", outcome: rejected, wantEphemerals: 1, wantText: "Unknown version &lt;!channel&gt;"},
 	}
 
 	for _, tt := range tests {
@@ -102,7 +108,7 @@ func TestClient_NotifyWebhookOutcome(t *testing.T) {
 
 			if tt.wantEphemerals > 0 {
 				assert.Contains(t, api.ephemerals[0], userID+":")
-				assert.Contains(t, api.ephemerals[0], models.WebhookReasonTimeout)
+				assert.Contains(t, api.ephemerals[0], tt.wantText)
 			}
 		})
 	}
