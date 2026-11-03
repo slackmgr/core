@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Bump `github.com/slackmgr/types` to v0.10.1
+
 ### Fixed
 - Webhook text inputs with `minLength` 0 are now optional in the Slack modal. Previously Slack always required a value, since the input block was never marked optional
 
