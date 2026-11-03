@@ -73,6 +73,10 @@ type WebhookResultParams struct {
 	// Status is the webhook result, i.e. [WebhookOutcomeDelivered] or [WebhookOutcomeFailed].
 	Status WebhookOutcomeStatus `json:"status"`
 
+	// Clicked is the time of the click, i.e. the timestamp of the webhook command. Together with WebhookID,
+	// it identifies the click.
+	Clicked time.Time `json:"clicked"`
+
 	// Completed is the time when the result was known.
 	Completed time.Time `json:"completed"`
 }
@@ -116,6 +120,7 @@ func NewWebhookResultCommand(webhookCmd *Command, status WebhookOutcomeStatus) *
 	cmd := NewCommand(webhookCmd.SlackChannelID, webhookCmd.SlackPostID, "", webhookCmd.UserID, webhookCmd.UserRealName, CommandActionWebhookResult, nil)
 	cmd.WebhookResult = &WebhookResultParams{
 		Status:    status,
+		Clicked:   webhookCmd.Timestamp,
 		Completed: cmd.Timestamp,
 	}
 

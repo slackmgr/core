@@ -788,6 +788,9 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 
 		openIssues++
 
+		// Expire the post-click state if no alert was received in time. The issue is saved and updated in Slack below.
+		issue.ExpirePostClickState(now)
+
 		// The channel name may have changed since the issue was created. Update it if needed.
 		issue.LastAlert.SlackChannelName = currentChannelName
 
@@ -918,11 +921,21 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 	prevSeverity := issue.LastAlert.Severity
 	wasResolved := issue.IsResolved()
 
+	// Any alert for the issue clears the post-click state, even if the alert is ignored below.
+	postClickCleared, postClickWasVisible := issue.ClearPostClickState()
+
 	updated, ignoreReason := issue.AddAlertWithReason(alert, c.logger)
 
-	// No point in updating db or Slack if the alert was ignored by the existing issue
 	if !updated {
 		c.metrics.CounterInc(alertsIgnoredTotalMetric, c.channelName)
+
+		// The issue is otherwise unchanged, so only the post-click state needs to be saved and removed from Slack.
+		if postClickCleared {
+			if err := c.saveClearedPostClickState(ctx, issue, postClickWasVisible); err != nil {
+				return alertOutcome{}, err
+			}
+		}
+
 		return alertOutcome{eventType: types.InsightsEventAlertIgnored, reason: ignoreReason}, nil
 	}
 
@@ -955,6 +968,23 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 	}
 
 	return alertOutcome{eventType: types.InsightsEventAlertGrouped}, nil
+}
+
+// saveClearedPostClickState updates the Slack post (if the post-click state was visible) and saves the issue,
+// after the post-click state was cleared by an ignored alert.
+func (c *channelManager) saveClearedPostClickState(ctx context.Context, issue *models.Issue, wasVisible bool) error {
+	if wasVisible {
+		// Errors from the Slack client are logged, but not returned.
+		if err := c.slackClient.UpdateSingleIssue(ctx, issue, "webhook post-click state cleared"); err != nil {
+			c.logger.Errorf("Failed to update issue in Slack: %s", err)
+		}
+	}
+
+	if err := c.db.SaveIssue(ctx, issue); err != nil {
+		return fmt.Errorf("failed to save issue to database: %w", err)
+	}
+
+	return nil
 }
 
 // createNewIssue creates a new issue with the specified alert, creates a new Slack post, and finally stores the issue in the database.
@@ -1307,14 +1337,22 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 		event = &e
 	}
 
-	sendResult := func(ctx context.Context, status models.WebhookOutcomeStatus) {
-		c.sendWebhookResult(ctx, cmd, status, logger)
+	// Webhooks with after-click settings register a pending post-click state, which is activated when the result
+	// command is processed. Other webhooks don't need the result, so no result command is sent.
+	var sendResult func(context.Context, models.WebhookOutcomeStatus)
+
+	issueChanged := issue.RegisterWebhookClick(webhook, cmd)
+
+	if issueChanged {
+		sendResult = func(ctx context.Context, status models.WebhookOutcomeStatus) {
+			c.sendWebhookResult(ctx, cmd, status, logger)
+		}
 	}
 
 	go postWebhook(ctx, handler, webhook.URL, data, logger, c.insights, event, c.slackClient, outcome, sendResult)
 
-	// We return false, indicating that the issue does not need to be saved to the database (since we did not modify it).
-	return false, nil
+	// The issue must be saved if a pending post-click state was registered. The Slack post is not changed until delivery.
+	return issueChanged, nil
 }
 
 func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, maxWait time.Duration) (ChannelLock, error) {
@@ -1429,12 +1467,27 @@ func (c *channelManager) sendWebhookResult(ctx context.Context, webhookCmd *mode
 // handleWebhookResult handles a [models.CommandActionWebhookResult] command, i.e. the result of a webhook that was
 // triggered earlier. It runs under the channel lock. Commands for issues that no longer exist (e.g. archived or moved)
 // are skipped before this function is called.
-func (c *channelManager) handleWebhookResult(_ context.Context, _ *models.Issue, cmd *models.Command, logger types.Logger) (bool, error) {
+func (c *channelManager) handleWebhookResult(ctx context.Context, issue *models.Issue, cmd *models.Command, logger types.Logger) (bool, error) {
 	if cmd.WebhookResult == nil {
 		return false, errors.New("missing webhook result parameters in webhook result command")
 	}
 
-	logger.Debug("Handle webhook result")
+	changed, slackUpdateNeeded := issue.ApplyWebhookResult(cmd.WebhookResult)
 
-	return false, nil
+	if !changed {
+		// Typically because an alert was received, or the button was clicked again, before the result arrived.
+		logger.Debug("Ignoring webhook result without matching pending post-click state")
+		return false, nil
+	}
+
+	if slackUpdateNeeded {
+		logger.Info("Webhook delivered, applying post-click state")
+
+		// Errors from the Slack client are logged, but not returned.
+		if err := c.slackClient.UpdateSingleIssue(ctx, issue, "webhook post-click state"); err != nil {
+			logger.Errorf("Failed to update issue in Slack: %s", err)
+		}
+	}
+
+	return true, nil
 }

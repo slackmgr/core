@@ -816,6 +816,35 @@ func handlePermanentPostError(logger types.Logger, issue *models.Issue, action m
 }
 
 func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.SlackAction, method postUpdateMethod) []slack.MsgOption {
+	blocks := c.getMessageBlocks(issue, action, method)
+
+	options := []slack.MsgOption{slack.MsgOptionBlocks(blocks...), slack.MsgOptionUsername(issue.LastAlert.Username), slack.MsgOptionAsUser(false)}
+
+	params := slack.NewPostMessageParameters()
+
+	if strings.HasPrefix(issue.LastAlert.IconEmoji, "http") {
+		params.IconURL = issue.LastAlert.IconEmoji
+	} else if issue.LastAlert.IconEmoji != "" {
+		params.IconEmoji = issue.LastAlert.IconEmoji
+	}
+
+	options = append(options, slack.MsgOptionPostMessageParameters(params), slack.MsgOptionMetadata(postMetadata(issue, method)))
+
+	if method == postUpdateMethodUpdate || method == postUpdateMethodUpdateDeleted {
+		options = append(options, slack.MsgOptionUpdate(issue.SlackPostID))
+	} else {
+		options = append(options, slack.MsgOptionPost())
+	}
+
+	if issue.LastAlert.FallbackText != "" {
+		options = append(options, slack.MsgOptionText(issue.LastAlert.FallbackText, false))
+	}
+
+	return options
+}
+
+// getMessageBlocks returns the Slack blocks for the issue post.
+func (c *Client) getMessageBlocks(issue *models.Issue, action models.SlackAction, method postUpdateMethod) []slack.Block {
 	blocks := []slack.Block{}
 	statusEmoji := c.getStatusEmoji(issue, action, method)
 
@@ -861,6 +890,10 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 
 		if len(webhookButtons) > 0 {
 			blocks = append(blocks, slack.NewActionBlock("issue_actions", webhookButtons...))
+		}
+
+		if text := c.postClickStatusText(issue); text != "" {
+			blocks = append(blocks, slack.NewContextBlock("", newMrkdwnTextBlock(text)))
 		}
 
 		if c.managerSettings.GetSettings().AlwaysShowOptionButtons || issue.IsEmojiButtonsActivated {
@@ -915,29 +948,7 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 		blocks = append(blocks, slack.NewContextBlock("", text))
 	}
 
-	options := []slack.MsgOption{slack.MsgOptionBlocks(blocks...), slack.MsgOptionUsername(issue.LastAlert.Username), slack.MsgOptionAsUser(false)}
-
-	params := slack.NewPostMessageParameters()
-
-	if strings.HasPrefix(issue.LastAlert.IconEmoji, "http") {
-		params.IconURL = issue.LastAlert.IconEmoji
-	} else if issue.LastAlert.IconEmoji != "" {
-		params.IconEmoji = issue.LastAlert.IconEmoji
-	}
-
-	options = append(options, slack.MsgOptionPostMessageParameters(params), slack.MsgOptionMetadata(postMetadata(issue, method)))
-
-	if method == postUpdateMethodUpdate || method == postUpdateMethodUpdateDeleted {
-		options = append(options, slack.MsgOptionUpdate(issue.SlackPostID))
-	} else {
-		options = append(options, slack.MsgOptionPost())
-	}
-
-	if issue.LastAlert.FallbackText != "" {
-		options = append(options, slack.MsgOptionText(issue.LastAlert.FallbackText, false))
-	}
-
-	return options
+	return blocks
 }
 
 func newMrkdwnTextBlock(text string) *slack.TextBlockObject {
@@ -998,6 +1009,10 @@ func getWebhookButtons(issue *models.Issue) []slack.BlockElement {
 		}
 
 		if !issue.IsResolved() && hook.DisplayMode == types.WebhookDisplayModeResolvedIssue {
+			continue
+		}
+
+		if issue.IsWebhookHidden(hook.ID) {
 			continue
 		}
 
@@ -1258,4 +1273,30 @@ func postFailureReason(err error) string {
 func isIgnorableDeleteError(err error) bool {
 	class := internal.ClassifySlackError(err)
 	return class == internal.SlackErrorClassChannelUnavailable || class == internal.SlackErrorClassMessageUnavailable
+}
+
+// postClickStatusText returns the status text shown on the Slack post for the issue's post-click state, or an empty
+// string if there is none.
+func (c *Client) postClickStatusText(issue *models.Issue) string {
+	state := issue.PostClick
+	if state == nil {
+		return ""
+	}
+
+	user := state.UserRealName
+	if user == "" {
+		user = state.UserID
+	}
+
+	clicked := fmt.Sprintf("*%s* was clicked by *%s* at %s", state.ButtonText, user, state.Clicked.In(c.cfg.GetLocation()).Format("2006-01-02 15:04:05"))
+
+	if state.Expired {
+		return fmt.Sprintf(":warning: %s, but no update was received. Retry if needed.", clicked)
+	}
+
+	if state.AfterClick.StatusText != "" {
+		return fmt.Sprintf(":hourglass_flowing_sand: %s (%s)", state.AfterClick.StatusText, clicked)
+	}
+
+	return fmt.Sprintf(":hourglass_flowing_sand: %s, waiting for an update.", clicked)
 }

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,6 +26,11 @@ type stubSlackClient struct {
 
 	// webhookOutcomes receives all webhook outcomes, if non-nil.
 	webhookOutcomes chan *models.WebhookOutcome
+
+	mu sync.Mutex
+
+	// singleIssueUpdates records the reasons of all UpdateSingleIssue calls.
+	singleIssueUpdates []string
 }
 
 func (s *stubSlackClient) NotifyWebhookOutcome(_ context.Context, outcome *models.WebhookOutcome) {
@@ -48,7 +55,12 @@ func (s *stubSlackClient) UpdateSingleIssueWithThrottling(_ context.Context, _ *
 	return nil
 }
 
-func (s *stubSlackClient) UpdateSingleIssue(_ context.Context, _ *models.Issue, _ string) error {
+func (s *stubSlackClient) UpdateSingleIssue(_ context.Context, _ *models.Issue, reason string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.singleIssueUpdates = append(s.singleIssueUpdates, reason)
+
 	return nil
 }
 
@@ -57,6 +69,13 @@ func (s *stubSlackClient) Delete(_ context.Context, _ *models.Issue, _ string, _
 }
 
 func (s *stubSlackClient) DeletePost(_ context.Context, _, _ string) error { return nil }
+
+func (s *stubSlackClient) singleIssueUpdateReasons() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return slices.Clone(s.singleIssueUpdates)
+}
 
 // alwaysFailLocker is a ChannelLocker that immediately returns an error, simulating a lock that can never be obtained.
 type alwaysFailLocker struct{}

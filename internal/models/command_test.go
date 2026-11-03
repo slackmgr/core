@@ -590,7 +590,9 @@ func TestNewWebhookResultCommand(t *testing.T) {
 	defer cleanup()
 
 	t.Run("copies user and post from webhook command", func(t *testing.T) {
+		clicked := fixedTime.Add(-time.Minute)
 		webhookCmd := NewCommand("C12345", "1234567890.123456", "", "U12345", "Test User", CommandActionWebhook, nil)
+		webhookCmd.Timestamp = clicked
 		webhookCmd.WebhookParameters = &WebhookCommandParams{WebhookID: "hook1", ViewID: "V123", PlainTextInput: map[string]string{"a": "b"}}
 
 		cmd := NewWebhookResultCommand(webhookCmd, WebhookOutcomeDelivered)
@@ -605,7 +607,7 @@ func TestNewWebhookResultCommand(t *testing.T) {
 		assert.Nil(t, cmd.WebhookParameters, "user input must not be copied")
 		assert.False(t, cmd.ExecuteWhenNoIssueFound)
 		assert.False(t, cmd.IncludeArchivedIssues)
-		assert.Equal(t, &WebhookResultParams{WebhookID: "hook1", Status: WebhookOutcomeDelivered, Completed: fixedTime}, cmd.WebhookResult)
+		assert.Equal(t, &WebhookResultParams{WebhookID: "hook1", Status: WebhookOutcomeDelivered, Clicked: clicked, Completed: fixedTime}, cmd.WebhookResult)
 	})
 
 	t.Run("missing webhook parameters", func(t *testing.T) {

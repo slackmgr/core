@@ -134,6 +134,7 @@ func TestChannelManager_HandleWebhook_Outcome(t *testing.T) {
 		wantReason    string
 		wantRetryable bool
 		wantButton    string
+		afterClick    *types.WebhookAfterClick
 		wantResult    models.WebhookOutcomeStatus // Empty if no result command is expected
 	}{
 		{
@@ -142,7 +143,15 @@ func TestChannelManager_HandleWebhook_Outcome(t *testing.T) {
 			handler:    &funcWebhookHandler{shouldHandle: true, handle: func() error { return nil }},
 			wantStatus: models.WebhookOutcomeDelivered,
 			wantButton: "Go",
+			afterClick: &types.WebhookAfterClick{HideButtons: types.WebhookHideButtonsClicked},
 			wantResult: models.WebhookOutcomeDelivered,
+		},
+		{
+			name:       "delivered without after-click settings",
+			webhookID:  "hook1",
+			handler:    &funcWebhookHandler{shouldHandle: true, handle: func() error { return nil }},
+			wantStatus: models.WebhookOutcomeDelivered,
+			wantButton: "Go",
 		},
 		{
 			name:      "handler error",
@@ -153,6 +162,7 @@ func TestChannelManager_HandleWebhook_Outcome(t *testing.T) {
 			wantStatus: models.WebhookOutcomeFailed,
 			wantReason: "the request was rejected by the receiving system (HTTP 400)",
 			wantButton: "Go",
+			afterClick: &types.WebhookAfterClick{HideButtons: types.WebhookHideButtonsClicked},
 			wantResult: models.WebhookOutcomeFailed,
 		},
 		{
@@ -198,7 +208,7 @@ func TestChannelManager_HandleWebhook_Outcome(t *testing.T) {
 			alert, _, _ := newTestAlertFromData(t, types.Alert{
 				SlackChannelID: channelID,
 				Header:         "Test Alert",
-				Webhooks:       []*types.Webhook{{ID: "hook1", URL: "https://example.com/hook", ButtonText: "Go", Payload: tt.payload}},
+				Webhooks:       []*types.Webhook{{ID: "hook1", URL: "https://example.com/hook", ButtonText: "Go", Payload: tt.payload, AfterClick: tt.afterClick}},
 			})
 
 			issue := models.NewIssue(alert, &mockLogger{})
@@ -210,12 +220,16 @@ func TestChannelManager_HandleWebhook_Outcome(t *testing.T) {
 				WebhookParameters: &models.WebhookCommandParams{WebhookID: tt.webhookID, ViewID: viewID},
 			}
 
-			_, err := cm.handleWebhook(t.Context(), issue, cmd, &mockLogger{})
+			saveNeeded, err := cm.handleWebhook(t.Context(), issue, cmd, &mockLogger{})
 			if tt.wantErr {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
 			}
+
+			// A pending post-click state is registered (and must be saved) only when a result command is expected
+			assert.Equal(t, tt.wantResult != "", saveNeeded)
+			assert.Equal(t, tt.wantResult != "", issue.PendingPostClick != nil)
 
 			select {
 			case outcome := <-slackClient.webhookOutcomes:

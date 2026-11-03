@@ -84,7 +84,15 @@ The user who clicked the button gets feedback on whether the webhook was deliver
 
 Failure reasons are user-friendly categories (e.g. timed out, receiving system unreachable, rejected with HTTP 422) and never include the target URL. The status reflects delivery only: any change to the alert itself is up to the receiving system, which typically updates the alert via the API. Custom handlers can return (wrap) a `manager.WebhookHTTPError` to include an HTTP status code in the failure reason.
 
-Once the result is known, the manager sends an internal `webhook_result` command to the command queue, so the result is processed under the channel lock like any user command. Each webhook click therefore produces two command queue messages. Webhook result commands are not recorded as insights command events.
+Receiving systems often take a while before they update the alert. A webhook can define an optional post-click state (`types.Webhook.AfterClick`), so everyone in the channel sees that the action is in progress, and duplicate clicks are avoided:
+
+- When the webhook is **delivered**, the post hides the clicked button, all webhook buttons, or the listed webhooks (`HideButtons`, `HideWebhookIDs`), and shows a status line below the buttons: the optional `StatusText`, the button, the user who clicked it and the time. Slack mentions in `StatusText` are removed.
+- **Any alert** for the issue clears the state and restores the normal post, even if the alert is otherwise unchanged or ignored (e.g. not newer, or the issue is already resolved).
+- If no alert arrives within `ResetAfterSeconds` (default 5 minutes, max 24 hours), the buttons are shown again with a note that no update was received.
+- If delivery **fails**, the post is unchanged; the clicking user is informed as described above.
+- If the button is clicked again (e.g. another visible button with after-click settings), the latest click wins.
+
+To apply the state under the channel lock, the manager sends an internal `webhook_result` command to the command queue when the result is known. This only happens for webhooks with `AfterClick`, so such clicks produce two command queue messages. Webhook result commands are not recorded as insights command events.
 
 Webhook payloads are AES-256 encrypted in transit between the API server and the Manager, so both components must share a common `EncryptionKey`. When no key is configured, the API rejects alerts that include webhooks with HTTP 400, preventing unencrypted payloads from reaching the queue.
 

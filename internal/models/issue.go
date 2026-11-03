@@ -97,6 +97,13 @@ type Issue struct {
 	MovedByUser             string          `json:"movedByUser"`
 	IsEscalated             bool            `json:"isEscalated"`
 
+	// PendingPostClick is the post-click state of a clicked webhook button that is not yet delivered.
+	// See [PostClickState].
+	PendingPostClick *PostClickState `json:"pendingPostClick,omitempty"`
+
+	// PostClick is the active or expired post-click state of a delivered webhook. See [PostClickState].
+	PostClick *PostClickState `json:"postClick,omitempty"`
+
 	// FirstInvestigatedAt is when the issue was first marked as investigated. Unlike InvestigatedSince,
 	// it is never reset, so it can be used to compute the time to first investigation.
 	FirstInvestigatedAt time.Time `json:"firstInvestigatedAt"`

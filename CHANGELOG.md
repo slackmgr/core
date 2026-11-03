@@ -8,10 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Internal `webhook_result` command: when a webhook result is known, the manager sends it back through the command queue, so it is processed under the channel lock. No visible change yet; groundwork for post-click alert state. Each webhook click now produces two command queue messages
+- Webhook post-click state (`types.Webhook.AfterClick`): when a webhook is delivered, the Slack post hides the configured buttons and shows a status line (optional status text, button, user, time). Any alert for the issue clears it, even an ignored one. If no alert arrives within `ResetAfterSeconds` (default 5 minutes), the buttons are shown again with a note that no update was received. Failed deliveries don't change the post
+- Internal `webhook_result` command: for webhooks with `AfterClick`, the manager sends the webhook result back through the command queue, so the post-click state is applied under the channel lock. Such clicks produce two command queue messages
+- Issue fields `pendingPostClick` and `postClick` (omitted when empty)
 - Grafana dashboard: color for the `webhook_result` action in "Commands Processed by Action"
 
 ### Changed
+- Bumped `github.com/slackmgr/types` to v0.9.0
 - Webhook failures caused by the target (non-2xx response, timeout, network error) are logged at info level instead of error. The user is already informed in Slack. Other webhook failures (e.g. custom handler errors) are still logged at error level
 
 ### Fixed
