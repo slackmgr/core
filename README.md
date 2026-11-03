@@ -87,12 +87,13 @@ Failure reasons are user-friendly categories (e.g. timed out, receiving system u
 **Feedback from the receiving system:** a synchronous receiver can respond with a result body (`types.WebhookResponse`) to give the clicking user a message, e.g. a validation error or "3 pods will be restarted, the alert is updated in about 2 minutes":
 
 ```json
-{"slackManagerResult": {"message": "3 pods will be restarted"}}
+{"slackManagerResult": {"message": "3 pods will be restarted", "afterClick": {"hideButtons": "all", "statusText": "Restart in progress"}}}
 ```
 
 - The body is only read if the content type is `application/json`, it is at most 16 KiB, and it has the top-level `slackManagerResult` key. Other bodies (including other JSON) are ignored, so existing receivers are unaffected. Invalid results are ignored and logged at info level.
 - The HTTP status code decides the outcome: **2xx** means the request was accepted (the message is shown with *sent*); **4xx** with a result body means it was rejected (the message is shown with *rejected*, instead of the generic failure reason). 4xx without a result body, 429 and 5xx are failures as before. When requests are retried (429, 5xx), only the final response counts.
 - Messages are shown as plain text (no mentions or links), max 1000 characters.
+- On 2xx, the optional `afterClick` (same fields as `types.Webhook.AfterClick`, see below) sets the post-click state for this click, overriding the webhook's own `AfterClick` (if any). It is ignored on 4xx. `hideWebhookIds` that don't match a webhook on the alert are ignored.
 - The receiver must respond within the HTTP handler timeout (default 3 seconds, see `HTTPWebhookHandler.WithRequestTimeout`), which limits how much validation it can do synchronously.
 - Only synchronous handlers can give feedback. Custom handlers opt in by implementing `manager.WebhookResultHandler` (`HandleWebhookWithResult`, returning a `*types.WebhookResult`), and reject a request by returning (wrapping) a `manager.WebhookRejectedError`. The built-in HTTP handler implements it; the `sqs` and `pubsub` handlers have no response, so those receivers use the alert API instead.
 
@@ -103,8 +104,9 @@ Receiving systems often take a while before they update the alert. A webhook can
 - If no alert arrives within `ResetAfterSeconds` (default 5 minutes, max 24 hours), the buttons are shown again with a note that no update was received.
 - If delivery **fails**, the post is unchanged; the clicking user is informed as described above.
 - If the button is clicked again (e.g. another visible button with after-click settings), the latest click wins.
+- The receiving system can return its own `afterClick` (see above), also for webhooks without `AfterClick`. For such webhooks, the state is only applied if no alert was received since the click (or within 5 seconds before it, to allow for clock differences between manager instances) and no newer click is pending or shown.
 
-To apply the state under the channel lock, the manager sends an internal `webhook_result` command to the command queue when the result is known. This only happens for webhooks with `AfterClick`, so such clicks produce two command queue messages. Webhook result commands are not recorded as insights command events.
+To apply the state under the channel lock, the manager sends an internal `webhook_result` command to the command queue when the result is known. This only happens for webhooks with `AfterClick`, or when the receiving system returned `afterClick`, so such clicks produce two command queue messages. Webhook result commands are not recorded as insights command events.
 
 Webhook payloads are AES-256 encrypted in transit between the API server and the Manager, so both components must share a common `EncryptionKey`. When no key is configured, the API rejects alerts that include webhooks with HTTP 400, preventing unencrypted payloads from reaching the queue.
 

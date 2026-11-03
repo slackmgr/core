@@ -328,11 +328,12 @@ func TestPostWebhook_ResultOutcome(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		handler     WebhookHandler
-		wantStatus  models.WebhookOutcomeStatus
-		wantMessage string
-		wantResult  models.WebhookOutcomeStatus
+		name           string
+		handler        WebhookHandler
+		wantStatus     models.WebhookOutcomeStatus
+		wantMessage    string
+		wantResult     models.WebhookOutcomeStatus
+		wantAfterClick bool
 	}{
 		{
 			name:        "delivered with message",
@@ -340,6 +341,13 @@ func TestPostWebhook_ResultOutcome(t *testing.T) {
 			wantStatus:  models.WebhookOutcomeDelivered,
 			wantMessage: "Restarting",
 			wantResult:  models.WebhookOutcomeDelivered,
+		},
+		{
+			name:           "delivered with after-click",
+			handler:        &resultWebhookHandler{result: &types.WebhookResult{AfterClick: &types.WebhookAfterClick{StatusText: "Working"}}},
+			wantStatus:     models.WebhookOutcomeDelivered,
+			wantResult:     models.WebhookOutcomeDelivered,
+			wantAfterClick: true,
 		},
 		{
 			name:       "delivered without result",
@@ -368,9 +376,15 @@ func TestPostWebhook_ResultOutcome(t *testing.T) {
 
 			slackClient := &stubSlackClient{webhookOutcomes: make(chan *models.WebhookOutcome, 1)}
 
-			var resultStatus models.WebhookOutcomeStatus
+			var (
+				resultStatus     models.WebhookOutcomeStatus
+				resultAfterClick *types.WebhookAfterClick
+			)
 
-			sendResult := func(_ context.Context, status models.WebhookOutcomeStatus) { resultStatus = status }
+			sendResult := func(_ context.Context, status models.WebhookOutcomeStatus, afterClick *types.WebhookAfterClick) {
+				resultStatus = status
+				resultAfterClick = afterClick
+			}
 
 			postWebhook(t.Context(), tt.handler, "https://example.com", &types.WebhookCallback{}, &mockLogger{}, nil, nil, slackClient, &models.WebhookOutcome{}, sendResult)
 
@@ -378,6 +392,7 @@ func TestPostWebhook_ResultOutcome(t *testing.T) {
 			assert.Equal(t, tt.wantStatus, outcome.Status)
 			assert.Equal(t, tt.wantMessage, outcome.Message)
 			assert.Equal(t, tt.wantResult, resultStatus)
+			assert.Equal(t, tt.wantAfterClick, resultAfterClick != nil)
 		})
 	}
 }

@@ -1338,15 +1338,16 @@ func (c *channelManager) handleWebhook(ctx context.Context, issue *models.Issue,
 	}
 
 	// Webhooks with after-click settings register a pending post-click state, which is activated when the result
-	// command is processed. Other webhooks don't need the result, so no result command is sent.
-	var sendResult func(context.Context, models.WebhookOutcomeStatus)
-
+	// command is processed. The receiving system may also return after-click settings, which are applied the same way.
+	// Otherwise the result isn't needed, so no result command is sent.
 	issueChanged := issue.RegisterWebhookClick(webhook, cmd)
 
-	if issueChanged {
-		sendResult = func(ctx context.Context, status models.WebhookOutcomeStatus) {
-			c.sendWebhookResult(ctx, cmd, status, logger)
+	sendResult := func(ctx context.Context, status models.WebhookOutcomeStatus, afterClick *types.WebhookAfterClick) {
+		if !issueChanged && afterClick == nil {
+			return
 		}
+
+		c.sendWebhookResult(ctx, cmd, status, afterClick, logger)
 	}
 
 	go postWebhook(ctx, handler, webhook.URL, data, logger, c.insights, event, c.slackClient, outcome, sendResult)
@@ -1400,14 +1401,14 @@ func (c *channelManager) releaseLock(lock ChannelLock) {
 }
 
 // postWebhook calls the webhook handler. If event is non-nil, it is recorded as a webhook succeeded or failed event.
-// The user who clicked the webhook button is informed about the outcome, and the result is passed to sendResult
-// (if non-nil), to report it back to the channel manager.
+// The user who clicked the webhook button is informed about the outcome, and the result (with the after-click settings
+// from the receiving system, if any) is passed to sendResult (if non-nil), to report it back to the channel manager.
 //
 // Handlers implementing [WebhookResultHandler] may return a result message (shown to the user on delivery) or a
 // [WebhookRejectedError] (shown to the user as a rejection). Rejections are reported as failed webhooks.
 func postWebhook(ctx context.Context, handler WebhookHandler, target string, data *types.WebhookCallback, logger types.Logger,
 	recorder *insights.Recorder, event *types.InsightsEvent, slackClient SlackClient, outcome *models.WebhookOutcome,
-	sendResult func(context.Context, models.WebhookOutcomeStatus),
+	sendResult func(context.Context, models.WebhookOutcomeStatus, *types.WebhookAfterClick),
 ) {
 	result, err := callWebhookHandler(ctx, handler, target, data, logger)
 
@@ -1440,7 +1441,12 @@ func postWebhook(ctx context.Context, handler WebhookHandler, target string, dat
 			status = models.WebhookOutcomeFailed
 		}
 
-		sendResult(ctx, status)
+		var afterClick *types.WebhookAfterClick
+		if result != nil {
+			afterClick = result.AfterClick
+		}
+
+		sendResult(ctx, status, afterClick)
 	}
 
 	if event != nil {
@@ -1456,7 +1462,7 @@ func postWebhook(ctx context.Context, handler WebhookHandler, target string, dat
 // sendWebhookResult sends a [models.CommandActionWebhookResult] command for the given webhook command to the command
 // queue, so that the result is processed under the channel lock. It is not cancelled with ctx, so that the result is
 // sent also during shutdown, but it is bounded by [webhookResultSendTimeout]. Errors are logged, not returned.
-func (c *channelManager) sendWebhookResult(ctx context.Context, webhookCmd *models.Command, status models.WebhookOutcomeStatus, logger types.Logger) {
+func (c *channelManager) sendWebhookResult(ctx context.Context, webhookCmd *models.Command, status models.WebhookOutcomeStatus, afterClick *types.WebhookAfterClick, logger types.Logger) {
 	if c.commandQueue == nil {
 		return
 	}
@@ -1465,6 +1471,7 @@ func (c *channelManager) sendWebhookResult(ctx context.Context, webhookCmd *mode
 	defer cancel()
 
 	cmd := models.NewWebhookResultCommand(webhookCmd, status)
+	cmd.WebhookResult.AfterClick = afterClick
 
 	body, err := json.Marshal(cmd)
 	if err != nil {
@@ -1485,7 +1492,7 @@ func (c *channelManager) handleWebhookResult(ctx context.Context, issue *models.
 		return false, errors.New("missing webhook result parameters in webhook result command")
 	}
 
-	changed, slackUpdateNeeded := issue.ApplyWebhookResult(cmd.WebhookResult)
+	changed, slackUpdateNeeded := issue.ApplyWebhookResult(cmd)
 
 	if !changed {
 		// Typically because an alert was received, or the button was clicked again, before the result arrived.

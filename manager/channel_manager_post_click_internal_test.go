@@ -82,7 +82,7 @@ func withPendingClick(cmd *models.Command) func(issue *models.Issue) {
 func withActiveClick(cmd *models.Command) func(issue *models.Issue) {
 	return func(issue *models.Issue) {
 		issue.RegisterWebhookClick(issue.FindWebhook("restart"), cmd)
-		issue.ApplyWebhookResult(models.NewWebhookResultCommand(cmd, models.WebhookOutcomeDelivered).WebhookResult)
+		issue.ApplyWebhookResult(models.NewWebhookResultCommand(cmd, models.WebhookOutcomeDelivered))
 		issue.SlackPostNeedsUpdate = false
 	}
 }
@@ -286,4 +286,113 @@ func TestChannelManager_ProcessActiveIssues_ExpiresPostClickState(t *testing.T) 
 	require.NotNil(t, saved[0].PostClick)
 	assert.True(t, saved[0].PostClick.Expired)
 	assert.True(t, saved[0].SlackPostNeedsUpdate)
+}
+
+// receiverAfterClickIssueJSON returns the JSON of an existing issue (Slack post "1234.5678") with a "deploy" webhook
+// without after-click settings, and the last alert received a minute before now.
+func receiverAfterClickIssueJSON(t *testing.T, now time.Time) json.RawMessage {
+	t.Helper()
+
+	return existingIssueJSON(t, types.AlertError, now.Add(-time.Minute), func(issue *models.Issue) {
+		issue.ID = "issue-1"
+		issue.LastAlert.Webhooks = []*types.Webhook{{ID: "deploy", URL: "https://example.com", ButtonText: "Deploy"}}
+		issue.LastAlertReceived = now.Add(-time.Minute)
+	})
+}
+
+// deployClickCommand returns a webhook command for the "deploy" webhook, clicked at the given time.
+func deployClickCommand(clicked time.Time) *models.Command {
+	cmd := models.NewCommand(insightsTestChannel, "1234.5678", "", "U1", "Jane", models.CommandActionWebhook, nil)
+	cmd.Timestamp = clicked
+	cmd.WebhookParameters = &models.WebhookCommandParams{WebhookID: "deploy"}
+
+	return cmd
+}
+
+func TestChannelManager_HandleWebhook_ReceiverAfterClick(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		result         *types.WebhookResult
+		wantResultSent bool
+	}{
+		{
+			name:           "receiver after-click sends a result command",
+			result:         &types.WebhookResult{AfterClick: &types.WebhookAfterClick{StatusText: "Deploying"}},
+			wantResultSent: true,
+		},
+		{
+			name:   "message only sends no result command",
+			result: &types.WebhookResult{Message: "Deploying"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			now := time.Now().UTC()
+
+			db := &postClickStubDB{insightsStubDB: insightsStubDB{postIssue: receiverAfterClickIssueJSON(t, now)}}
+			slackClient := &stubSlackClient{webhookOutcomes: make(chan *models.WebhookOutcome, 1)}
+			queue := &recordingCommandSender{sent: make(chan sentCommand, 1)}
+
+			cm := newTestChannelManager(t, insightsTestChannel, db, slackClient, &NoopChannelLocker{})
+			cm.cfg.EncryptionKey = "abcdefghijklmnopqrstuvwxyz123456"
+			cm.webhookHandlers = []WebhookHandler{&resultWebhookHandler{funcWebhookHandler: funcWebhookHandler{shouldHandle: true}, result: tt.result}}
+			cm.commandQueue = queue
+
+			click := deployClickCommand(now)
+			require.NoError(t, cm.processCmd(t.Context(), click))
+
+			assert.Empty(t, db.savedIssues(), "no pending state is registered for webhooks without after-click settings")
+
+			if !tt.wantResultSent {
+				select {
+				case <-queue.sent:
+					t.Fatal("unexpected webhook result command")
+				case <-time.After(200 * time.Millisecond):
+				}
+
+				return
+			}
+
+			select {
+			case sent := <-queue.sent:
+				result := decodeCommand(t, sent.body).WebhookResult
+				require.NotNil(t, result)
+				assert.Equal(t, "deploy", result.WebhookID)
+				assert.Equal(t, models.WebhookOutcomeDelivered, result.Status)
+				require.NotNil(t, result.AfterClick)
+				assert.Equal(t, "Deploying", result.AfterClick.StatusText)
+			case <-time.After(time.Second):
+				t.Fatal("webhook result command was not sent")
+			}
+		})
+	}
+}
+
+func TestChannelManager_WebhookResult_ReceiverAfterClick(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+
+	db := &postClickStubDB{insightsStubDB: insightsStubDB{postIssue: receiverAfterClickIssueJSON(t, now)}}
+	slackClient := &stubSlackClient{}
+	cm := newTestChannelManager(t, insightsTestChannel, db, slackClient, &NoopChannelLocker{})
+
+	result := models.NewWebhookResultCommand(deployClickCommand(now), models.WebhookOutcomeDelivered)
+	result.WebhookResult.AfterClick = &types.WebhookAfterClick{HideButtons: types.WebhookHideButtonsClicked, StatusText: "Deploying"}
+
+	require.NoError(t, cm.processCmd(t.Context(), result))
+
+	saved := db.savedIssues()
+	require.Len(t, saved, 1)
+	require.NotNil(t, saved[0].PostClick)
+	assert.Equal(t, "deploy", saved[0].PostClick.WebhookID)
+	assert.Equal(t, "Deploy", saved[0].PostClick.ButtonText)
+	assert.Equal(t, "Jane", saved[0].PostClick.UserRealName)
+	assert.True(t, saved[0].IsWebhookHidden("deploy"))
+	assert.Equal(t, []string{"webhook post-click state"}, slackClient.singleIssueUpdateReasons())
 }

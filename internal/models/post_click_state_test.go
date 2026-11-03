@@ -45,8 +45,15 @@ func newPostClickTestCommand(webhookID string, clicked time.Time) *Command {
 	return cmd
 }
 
-func deliveredResult(cmd *Command) *WebhookResultParams {
-	return NewWebhookResultCommand(cmd, WebhookOutcomeDelivered).WebhookResult
+func deliveredResult(cmd *Command) *Command {
+	return NewWebhookResultCommand(cmd, WebhookOutcomeDelivered)
+}
+
+func deliveredResultWithAfterClick(cmd *Command, afterClick *types.WebhookAfterClick) *Command {
+	result := NewWebhookResultCommand(cmd, WebhookOutcomeDelivered)
+	result.WebhookResult.AfterClick = afterClick
+
+	return result
 }
 
 func TestIssue_RegisterWebhookClick(t *testing.T) {
@@ -143,7 +150,7 @@ func TestIssue_ApplyWebhookResult(t *testing.T) {
 		cmd := newPostClickTestCommand("restart", clicked)
 		issue.RegisterWebhookClick(issue.FindWebhook("restart"), cmd)
 
-		changed, slackUpdate := issue.ApplyWebhookResult(NewWebhookResultCommand(cmd, WebhookOutcomeFailed).WebhookResult)
+		changed, slackUpdate := issue.ApplyWebhookResult(NewWebhookResultCommand(cmd, WebhookOutcomeFailed))
 
 		assert.True(t, changed)
 		assert.False(t, slackUpdate)
@@ -154,17 +161,33 @@ func TestIssue_ApplyWebhookResult(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		result func(cmd *Command) *WebhookResultParams
+		result func(cmd *Command) *Command
 	}{
-		{name: "nil result", result: func(_ *Command) *WebhookResultParams { return nil }},
-		{name: "other webhook", result: func(cmd *Command) *WebhookResultParams {
+		{name: "nil command", result: func(_ *Command) *Command { return nil }},
+		{name: "nil result", result: func(cmd *Command) *Command {
 			r := deliveredResult(cmd)
-			r.WebhookID = "ack"
+			r.WebhookResult = nil
 			return r
 		}},
-		{name: "other click", result: func(cmd *Command) *WebhookResultParams {
+		{name: "other webhook", result: func(cmd *Command) *Command {
 			r := deliveredResult(cmd)
-			r.Clicked = r.Clicked.Add(-time.Second)
+			r.WebhookResult.WebhookID = "ack"
+			return r
+		}},
+		{name: "other click", result: func(cmd *Command) *Command {
+			r := deliveredResult(cmd)
+			r.WebhookResult.Clicked = r.WebhookResult.Clicked.Add(-time.Second)
+			return r
+		}},
+		{name: "failed other click", result: func(cmd *Command) *Command {
+			r := NewWebhookResultCommand(cmd, WebhookOutcomeFailed)
+			r.WebhookResult.Clicked = r.WebhookResult.Clicked.Add(-time.Second)
+			return r
+		}},
+		{name: "older click with after-click", result: func(cmd *Command) *Command {
+			r := deliveredResultWithAfterClick(cmd, &types.WebhookAfterClick{StatusText: "older"})
+			r.WebhookResult.WebhookID = "ack"
+			r.WebhookResult.Clicked = r.WebhookResult.Clicked.Add(-time.Second)
 			return r
 		}},
 	}
@@ -195,6 +218,160 @@ func TestIssue_ApplyWebhookResult(t *testing.T) {
 
 		assert.False(t, changed)
 		assert.False(t, slackUpdate)
+	})
+}
+
+func TestIssue_ApplyWebhookResult_ReceiverAfterClick(t *testing.T) {
+	t.Parallel()
+
+	override := &types.WebhookAfterClick{
+		HideButtons:       types.WebhookHideButtonsAll,
+		StatusText:        "Restarting 3 pods <!channel>",
+		ResetAfterSeconds: 120,
+	}
+
+	// newIssue returns an issue whose last alert was received well before clicks at time.Now().
+	newIssue := func() *Issue {
+		issue := newPostClickTestIssue()
+		issue.LastAlertReceived = time.Now().UTC().Add(-time.Minute)
+
+		return issue
+	}
+
+	t.Run("overrides the pending state settings", func(t *testing.T) {
+		t.Parallel()
+
+		issue := newIssue()
+		cmd := newPostClickTestCommand("restart", time.Now().UTC())
+		issue.RegisterWebhookClick(issue.FindWebhook("restart"), cmd)
+
+		before := time.Now().UTC()
+		changed, slackUpdate := issue.ApplyWebhookResult(deliveredResultWithAfterClick(cmd, override))
+
+		assert.True(t, changed)
+		assert.True(t, slackUpdate)
+		assert.Nil(t, issue.PendingPostClick)
+		require.NotNil(t, issue.PostClick)
+		assert.Equal(t, "restart", issue.PostClick.WebhookID)
+		assert.Equal(t, types.WebhookHideButtonsAll, issue.PostClick.AfterClick.HideButtons)
+		assert.Equal(t, "Restarting 3 pods *channel*", issue.PostClick.AfterClick.StatusText)
+		assert.Equal(t, "Restarting 3 pods <!channel>", override.StatusText, "the override must not be modified")
+		assert.WithinRange(t, issue.PostClick.ExpiresAt, before.Add(2*time.Minute), time.Now().UTC().Add(2*time.Minute))
+	})
+
+	t.Run("applied without pending state", func(t *testing.T) {
+		t.Parallel()
+
+		issue := newIssue()
+		cmd := newPostClickTestCommand("ack", time.Now().UTC())
+
+		changed, slackUpdate := issue.ApplyWebhookResult(deliveredResultWithAfterClick(cmd, override))
+
+		assert.True(t, changed)
+		assert.True(t, slackUpdate)
+		assert.True(t, issue.SlackPostNeedsUpdate)
+
+		state := issue.PostClick
+		require.NotNil(t, state)
+		assert.Equal(t, "ack", state.WebhookID)
+		assert.Equal(t, "Ack", state.ButtonText)
+		assert.Equal(t, "U123", state.UserID)
+		assert.Equal(t, "Jane", state.UserRealName)
+		assert.Equal(t, cmd.Timestamp, state.Clicked)
+		assert.Equal(t, "Restarting 3 pods *channel*", state.AfterClick.StatusText)
+		assert.False(t, state.Expired)
+		assert.True(t, issue.IsWebhookHidden("rollback"))
+	})
+
+	t.Run("replaces an older pending and active state", func(t *testing.T) {
+		t.Parallel()
+
+		issue := newIssue()
+		now := time.Now().UTC()
+
+		first := newPostClickTestCommand("restart", now.Add(-2*time.Second))
+		issue.RegisterWebhookClick(issue.FindWebhook("restart"), first)
+		issue.ApplyWebhookResult(deliveredResult(first))
+
+		second := newPostClickTestCommand("restart", now.Add(-time.Second))
+		issue.RegisterWebhookClick(issue.FindWebhook("restart"), second)
+
+		cmd := newPostClickTestCommand("ack", now)
+		changed, _ := issue.ApplyWebhookResult(deliveredResultWithAfterClick(cmd, override))
+
+		assert.True(t, changed)
+		assert.Nil(t, issue.PendingPostClick, "the older pending state is discarded")
+		require.NotNil(t, issue.PostClick)
+		assert.Equal(t, "ack", issue.PostClick.WebhookID)
+
+		// The result of the older click is now ignored
+		changed, _ = issue.ApplyWebhookResult(deliveredResult(second))
+		assert.False(t, changed)
+	})
+
+	tests := []struct {
+		name  string
+		setup func(issue *Issue, clicked time.Time) *Command
+	}{
+		{name: "unknown webhook", setup: func(_ *Issue, clicked time.Time) *Command {
+			return newPostClickTestCommand("unknown", clicked)
+		}},
+		{name: "newer pending click", setup: func(issue *Issue, clicked time.Time) *Command {
+			issue.RegisterWebhookClick(issue.FindWebhook("restart"), newPostClickTestCommand("restart", clicked.Add(time.Second)))
+			return newPostClickTestCommand("ack", clicked)
+		}},
+		{name: "same time pending click", setup: func(issue *Issue, clicked time.Time) *Command {
+			issue.RegisterWebhookClick(issue.FindWebhook("restart"), newPostClickTestCommand("restart", clicked))
+			return newPostClickTestCommand("ack", clicked)
+		}},
+		{name: "newer active click", setup: func(issue *Issue, clicked time.Time) *Command {
+			newer := newPostClickTestCommand("restart", clicked.Add(time.Second))
+			issue.RegisterWebhookClick(issue.FindWebhook("restart"), newer)
+			issue.ApplyWebhookResult(deliveredResult(newer))
+			issue.SlackPostNeedsUpdate = false
+			return newPostClickTestCommand("ack", clicked)
+		}},
+		{name: "alert received after click", setup: func(issue *Issue, clicked time.Time) *Command {
+			issue.LastAlertReceived = clicked.Add(time.Second)
+			return newPostClickTestCommand("ack", clicked)
+		}},
+		{name: "alert received within clock skew margin", setup: func(issue *Issue, clicked time.Time) *Command {
+			issue.LastAlertReceived = clicked.Add(-unregisteredClickAlertMargin)
+			return newPostClickTestCommand("ack", clicked)
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run("ignored: "+tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			issue := newIssue()
+			cmd := tt.setup(issue, time.Now().UTC())
+			pendingBefore := issue.PendingPostClick
+			activeBefore := issue.PostClick
+
+			changed, slackUpdate := issue.ApplyWebhookResult(deliveredResultWithAfterClick(cmd, override))
+
+			assert.False(t, changed)
+			assert.False(t, slackUpdate)
+			assert.Same(t, pendingBefore, issue.PendingPostClick)
+			assert.Same(t, activeBefore, issue.PostClick)
+			assert.False(t, issue.SlackPostNeedsUpdate)
+		})
+	}
+
+	t.Run("ignored: failed with after-click", func(t *testing.T) {
+		t.Parallel()
+
+		issue := newIssue()
+		result := NewWebhookResultCommand(newPostClickTestCommand("ack", time.Now().UTC()), WebhookOutcomeFailed)
+		result.WebhookResult.AfterClick = override
+
+		changed, slackUpdate := issue.ApplyWebhookResult(result)
+
+		assert.False(t, changed)
+		assert.False(t, slackUpdate)
+		assert.Nil(t, issue.PostClick)
 	})
 }
 

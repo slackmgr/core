@@ -7,6 +7,11 @@ import (
 	"github.com/slackmgr/types"
 )
 
+// unregisteredClickAlertMargin is the minimum time between the last alert and a click, for a post-click state from the
+// receiving system to be applied without a pending state (see [Issue.ApplyWebhookResult]). It allows for clock skew
+// between manager instances: applying the state after a newer alert would hide buttons that the alert just updated.
+const unregisteredClickAlertMargin = 5 * time.Second
+
 // pendingPostClickGrace is added to the reset delay before a pending post-click state is considered stale, so that
 // slow deliveries (timeouts, retries) are not discarded with short reset delays.
 const pendingPostClickGrace = time.Minute
@@ -54,46 +59,108 @@ func (issue *Issue) RegisterWebhookClick(webhook *types.Webhook, cmd *Command) b
 		return false
 	}
 
-	afterClick := *webhook.AfterClick
-	afterClick.HideWebhookIDs = slices.Clone(afterClick.HideWebhookIDs)
-	afterClick.StatusText = slackMentionRegex.ReplaceAllString(afterClick.StatusText, "*$1*")
-
 	issue.PendingPostClick = &PostClickState{
 		WebhookID:    webhook.ID,
 		ButtonText:   webhook.ButtonText,
 		UserID:       cmd.UserID,
 		UserRealName: cmd.UserRealName,
 		Clicked:      cmd.Timestamp,
-		AfterClick:   afterClick,
+		AfterClick:   sanitizeAfterClick(webhook.AfterClick),
 	}
 
 	return true
 }
 
-// ApplyWebhookResult applies a webhook result to the pending post-click state with the same webhook ID and click
-// time. A delivered webhook activates the state, a failed webhook discards it. Results without a matching pending
-// state are ignored, e.g. when an alert was received in the meantime, or the button was clicked again.
+// ApplyWebhookResult applies a webhook result command (see [CommandActionWebhookResult]) to the post-click state.
 //
+// A result matches the pending post-click state if it has the same webhook ID and click time. A delivered webhook
+// activates the matching pending state, with the after-click settings from the receiving system (if any) replacing the
+// webhook's own. A failed webhook discards the matching pending state.
+//
+// A delivered webhook with after-click settings from the receiving system is also applied without a pending state
+// (e.g. when the webhook itself has no after-click settings), but only if the click is still the latest: the webhook
+// still exists, no newer click is pending or active, and no alert was received since the click (with a margin for
+// clock skew). An older pending state is then discarded, since the latest click wins.
+//
+// Other results are ignored, e.g. when an alert was received in the meantime, or the button was clicked again.
 // It returns whether the issue was changed, and whether the Slack post must be updated.
-func (issue *Issue) ApplyWebhookResult(result *WebhookResultParams) (bool, bool) {
-	pending := issue.PendingPostClick
-
-	if result == nil || pending == nil || pending.WebhookID != result.WebhookID || !pending.Clicked.Equal(result.Clicked) {
+func (issue *Issue) ApplyWebhookResult(cmd *Command) (bool, bool) {
+	if cmd == nil || cmd.WebhookResult == nil {
 		return false, false
 	}
 
-	issue.PendingPostClick = nil
+	result := cmd.WebhookResult
+	pending := issue.PendingPostClick
+	matches := pending != nil && pending.WebhookID == result.WebhookID && pending.Clicked.Equal(result.Clicked)
 
 	if result.Status != WebhookOutcomeDelivered {
+		if !matches {
+			return false, false
+		}
+
+		issue.PendingPostClick = nil
+
 		return true, false
 	}
 
-	pending.ExpiresAt = nowFunc().UTC().Add(pending.AfterClick.ResetAfter())
-	pending.Expired = false
-	issue.PostClick = pending
+	var state *PostClickState
+
+	switch {
+	case matches:
+		state = pending
+
+		if result.AfterClick != nil {
+			state.AfterClick = sanitizeAfterClick(result.AfterClick)
+		}
+	case result.AfterClick != nil && issue.isLatestClick(result):
+		webhook := issue.FindWebhook(result.WebhookID)
+
+		state = &PostClickState{
+			WebhookID:    webhook.ID,
+			ButtonText:   webhook.ButtonText,
+			UserID:       cmd.UserID,
+			UserRealName: cmd.UserRealName,
+			Clicked:      result.Clicked,
+			AfterClick:   sanitizeAfterClick(result.AfterClick),
+		}
+	default:
+		return false, false
+	}
+
+	state.ExpiresAt = nowFunc().UTC().Add(state.AfterClick.ResetAfter())
+	state.Expired = false
+	issue.PendingPostClick = nil
+	issue.PostClick = state
 	issue.SlackPostNeedsUpdate = true
 
 	return true, true
+}
+
+// isLatestClick returns true if a result without a matching pending state may be applied: the webhook still exists,
+// no newer click is pending or active, and no alert was received since the click (see [unregisteredClickAlertMargin]).
+func (issue *Issue) isLatestClick(result *WebhookResultParams) bool {
+	if issue.FindWebhook(result.WebhookID) == nil {
+		return false
+	}
+
+	if pending := issue.PendingPostClick; pending != nil && !pending.Clicked.Before(result.Clicked) {
+		return false
+	}
+
+	if state := issue.PostClick; state != nil && !state.Clicked.Before(result.Clicked) {
+		return false
+	}
+
+	return issue.LastAlertReceived.Before(result.Clicked.Add(-unregisteredClickAlertMargin))
+}
+
+// sanitizeAfterClick returns a copy of the after-click settings, with Slack mentions in the status text neutralised.
+func sanitizeAfterClick(afterClick *types.WebhookAfterClick) types.WebhookAfterClick {
+	c := *afterClick
+	c.HideWebhookIDs = slices.Clone(c.HideWebhookIDs)
+	c.StatusText = slackMentionRegex.ReplaceAllString(c.StatusText, "*$1*")
+
+	return c
 }
 
 // ClearPostClickState clears the pending and active/expired post-click state, typically because an alert was

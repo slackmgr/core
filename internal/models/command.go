@@ -79,6 +79,11 @@ type WebhookResultParams struct {
 
 	// Completed is the time when the result was known.
 	Completed time.Time `json:"completed"`
+
+	// AfterClick is the post-click state returned by the receiving system (see types.WebhookResult), if any.
+	// It overrides the webhook's own after-click settings for this click. Only set when Status is
+	// [WebhookOutcomeDelivered].
+	AfterClick *types.WebhookAfterClick `json:"afterClick,omitempty"`
 }
 
 // NewCommandFromQueueItem creates a Command instance from a FIFO queue item.

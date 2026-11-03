@@ -35,7 +35,7 @@ func newPostClickTestIssue(t *testing.T, clicked time.Time, statusText string, a
 		cmd.WebhookParameters = &models.WebhookCommandParams{WebhookID: "restart"}
 
 		require.True(t, issue.RegisterWebhookClick(issue.FindWebhook("restart"), cmd))
-		_, visible := issue.ApplyWebhookResult(models.NewWebhookResultCommand(cmd, models.WebhookOutcomeDelivered).WebhookResult)
+		_, visible := issue.ApplyWebhookResult(models.NewWebhookResultCommand(cmd, models.WebhookOutcomeDelivered))
 		require.True(t, visible)
 	}
 

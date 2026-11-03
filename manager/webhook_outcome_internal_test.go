@@ -501,7 +501,7 @@ func TestChannelManager_SendWebhookResult(t *testing.T) {
 		cm := newTestChannelManager(t, "C123456", &stubDB{}, &stubSlackClient{}, &NoopChannelLocker{})
 		logger := &levelRecordingLogger{}
 
-		cm.sendWebhookResult(t.Context(), webhookCmd, models.WebhookOutcomeDelivered, logger)
+		cm.sendWebhookResult(t.Context(), webhookCmd, models.WebhookOutcomeDelivered, nil, logger)
 
 		assert.Empty(t, logger.levels)
 	})
@@ -516,11 +516,15 @@ func TestChannelManager_SendWebhookResult(t *testing.T) {
 		cm := newTestChannelManager(t, "C123456", &stubDB{}, &stubSlackClient{}, &NoopChannelLocker{})
 		cm.commandQueue = queue
 
-		cm.sendWebhookResult(ctx, webhookCmd, models.WebhookOutcomeDelivered, &levelRecordingLogger{})
+		cm.sendWebhookResult(ctx, webhookCmd, models.WebhookOutcomeDelivered, &types.WebhookAfterClick{StatusText: "Working"}, &levelRecordingLogger{})
 
 		sent := <-queue.sent
 		require.NoError(t, sent.ctxErr)
-		assert.Equal(t, models.WebhookOutcomeDelivered, decodeCommand(t, sent.body).WebhookResult.Status)
+
+		result := decodeCommand(t, sent.body).WebhookResult
+		assert.Equal(t, models.WebhookOutcomeDelivered, result.Status)
+		require.NotNil(t, result.AfterClick)
+		assert.Equal(t, "Working", result.AfterClick.StatusText)
 	})
 
 	t.Run("send error is logged", func(t *testing.T) {
@@ -531,7 +535,7 @@ func TestChannelManager_SendWebhookResult(t *testing.T) {
 		cm.commandQueue = queue
 		logger := &levelRecordingLogger{}
 
-		cm.sendWebhookResult(t.Context(), webhookCmd, models.WebhookOutcomeFailed, logger)
+		cm.sendWebhookResult(t.Context(), webhookCmd, models.WebhookOutcomeFailed, nil, logger)
 
 		<-queue.sent
 		assert.Equal(t, []string{"error"}, logger.levels)
@@ -559,7 +563,7 @@ func TestPostWebhook_SendResult(t *testing.T) {
 
 			var got []models.WebhookOutcomeStatus
 
-			sendResult := func(_ context.Context, status models.WebhookOutcomeStatus) {
+			sendResult := func(_ context.Context, status models.WebhookOutcomeStatus, _ *types.WebhookAfterClick) {
 				got = append(got, status)
 			}
 
