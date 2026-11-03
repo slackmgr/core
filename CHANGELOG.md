@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-03
+
 ### Added
 - `ManagerConfig.WebhookTimeoutSeconds`: per-request timeout of the built-in HTTP webhook handler (default 5, range 1–15; zero or negative is set to the default). Registered with `SetManagerConfigDefaults`
 
@@ -494,7 +496,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/slackmgr/core/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/slackmgr/core/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/slackmgr/core/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/slackmgr/core/compare/v0.17.0...v0.18.0
