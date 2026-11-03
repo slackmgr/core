@@ -384,12 +384,14 @@ func TestIssue_ClearPostClickState(t *testing.T) {
 		t.Parallel()
 
 		issue := newPostClickTestIssue()
+		issue.SlackPostFingerprint = SlackPostFingerprint{Significant: "s", Content: "c"}
 
 		changed, visible := issue.ClearPostClickState()
 
 		assert.False(t, changed)
 		assert.False(t, visible)
 		assert.False(t, issue.SlackPostNeedsUpdate)
+		assert.Equal(t, SlackPostFingerprint{Significant: "s", Content: "c"}, issue.SlackPostFingerprint)
 	})
 
 	t.Run("pending only", func(t *testing.T) {
@@ -397,6 +399,7 @@ func TestIssue_ClearPostClickState(t *testing.T) {
 
 		issue := newPostClickTestIssue()
 		issue.RegisterWebhookClick(issue.FindWebhook("restart"), newPostClickTestCommand("restart", clicked))
+		issue.SlackPostFingerprint = SlackPostFingerprint{Significant: "s", Content: "c"}
 
 		changed, visible := issue.ClearPostClickState()
 
@@ -404,6 +407,7 @@ func TestIssue_ClearPostClickState(t *testing.T) {
 		assert.False(t, visible)
 		assert.Nil(t, issue.PendingPostClick)
 		assert.False(t, issue.SlackPostNeedsUpdate)
+		assert.True(t, issue.SlackPostFingerprint.IsZero(), "the next post update must not be throttled")
 	})
 
 	t.Run("active and pending", func(t *testing.T) {
@@ -415,6 +419,7 @@ func TestIssue_ClearPostClickState(t *testing.T) {
 		issue.ApplyWebhookResult(deliveredResult(cmd))
 		issue.RegisterWebhookClick(issue.FindWebhook("restart"), newPostClickTestCommand("restart", clicked.Add(time.Second)))
 		issue.SlackPostNeedsUpdate = false
+		issue.SlackPostFingerprint = SlackPostFingerprint{Significant: "s", Content: "c"}
 
 		changed, visible := issue.ClearPostClickState()
 
@@ -423,6 +428,7 @@ func TestIssue_ClearPostClickState(t *testing.T) {
 		assert.Nil(t, issue.PendingPostClick)
 		assert.Nil(t, issue.PostClick)
 		assert.True(t, issue.SlackPostNeedsUpdate)
+		assert.True(t, issue.SlackPostFingerprint.IsZero(), "the next post update must not be throttled")
 	})
 }
 

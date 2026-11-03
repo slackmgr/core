@@ -169,7 +169,6 @@ func newUpdateTestIssue(name, slackPostID string) *models.Issue {
 
 	if slackPostID != "" {
 		issue.SlackPostID = slackPostID
-		issue.SlackPostHeader = alert.Header
 	}
 
 	return issue
@@ -419,63 +418,6 @@ func TestUpdateSingleIssue_SlackErrorHandling(t *testing.T) {
 
 			assert.Equal(t, tc.wantPostID, issue.SlackPostID)
 			assert.Equal(t, tc.wantNeedsUpdate, issue.SlackPostNeedsUpdate)
-		})
-	}
-}
-
-func TestUpdateSingleIssue_Throttling(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		throttled  bool
-		openIssues int
-		mutate     func(issue *models.Issue)
-		wantUpdate bool
-	}{
-		{name: "throttled: busy issue with a recent post update", throttled: true, openIssues: 10, wantUpdate: false},
-		{name: "throttled: few open issues in the channel", throttled: true, openIssues: 1, wantUpdate: true},
-		{name: "throttled: header changed", throttled: true, openIssues: 10, mutate: func(issue *models.Issue) { issue.SlackPostHeader = "old" }, wantUpdate: true},
-		{name: "throttled: action changed", throttled: true, openIssues: 10, mutate: func(issue *models.Issue) { issue.SlackPostLastAction = models.ActionResolve }, wantUpdate: true},
-		{name: "throttled: throttle window passed", throttled: true, openIssues: 10, mutate: func(issue *models.Issue) { issue.SlackPostUpdated = time.Now().Add(-time.Minute) }, wantUpdate: true},
-		{name: "unthrottled: busy issue with a recent post update", openIssues: 10, wantUpdate: true},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			api := &fakeSlackAPI{}
-			c := newUpdateTestClient(t, api)
-
-			// An issue fed by a periodic monitor: many alerts, and a post updated a few seconds ago.
-			issue := newUpdateTestIssue("a", "ts-a")
-			issue.AlertCount = 50
-			issue.SlackPostLastAction = models.ActionAlert
-			issue.SlackPostText = issue.LastAlert.Text
-			issue.SlackPostUpdated = time.Now().Add(-5 * time.Second)
-
-			if tc.mutate != nil {
-				tc.mutate(issue)
-			}
-
-			var err error
-
-			if tc.throttled {
-				err = c.UpdateSingleIssueWithThrottling(context.Background(), issue, "test", tc.openIssues)
-			} else {
-				err = c.UpdateSingleIssue(context.Background(), issue, "test")
-			}
-
-			require.NoError(t, err)
-
-			if tc.wantUpdate {
-				assert.Equal(t, []string{"ts-a"}, api.updates)
-				assert.False(t, issue.SlackPostNeedsUpdate)
-			} else {
-				assert.Empty(t, api.updates)
-				assert.True(t, issue.SlackPostNeedsUpdate)
-			}
 		})
 	}
 }

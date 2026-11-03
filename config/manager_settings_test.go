@@ -24,7 +24,7 @@ func TestManagerSettings_InitAndValidate_Defaults(t *testing.T) {
 	assert.Equal(t, config.DefaultIssueArchivingDelaySeconds, settings.DefaultIssueArchivingDelaySeconds)
 	assert.Equal(t, config.DefaultIssueReorderingLimit, settings.IssueReorderingLimit)
 	assert.Equal(t, config.DefaultIssueProcessingIntervalSeconds, settings.IssueProcessingIntervalSeconds)
-	assert.Equal(t, config.DefaultMinIssueCountForThrottle, settings.MinIssueCountForThrottle)
+	assert.Equal(t, config.DefaultMinThrottleDurationSeconds, settings.MinThrottleDurationSeconds)
 	assert.Equal(t, config.DefaultMaxThrottleDurationSeconds, settings.MaxThrottleDurationSeconds)
 
 	require.NotNil(t, settings.IssueReactions)
@@ -645,25 +645,37 @@ func TestManagerSettings_InitAndValidate_ThrottleSettings(t *testing.T) {
 	tests := []struct {
 		name                       string
 		minIssueCountForThrottle   int
+		minThrottleDurationSeconds int
 		maxThrottleDurationSeconds int
 		expectError                string
 	}{
 		{
 			name:                       "valid at lower bounds",
-			minIssueCountForThrottle:   config.MinMinIssueCountForThrottle,
+			minThrottleDurationSeconds: config.MinMinThrottleDurationSeconds,
 			maxThrottleDurationSeconds: config.MinMaxThrottleDurationSeconds,
 			expectError:                "",
 		},
 		{
 			name:                       "valid at upper bounds",
-			minIssueCountForThrottle:   config.MaxMinIssueCountForThrottle,
+			minThrottleDurationSeconds: config.MaxMinThrottleDurationSeconds,
 			maxThrottleDurationSeconds: config.MaxMaxThrottleDurationSeconds,
 			expectError:                "",
 		},
 		{
-			name:                     "min issue count above maximum",
+			name:                       "min throttle duration above max throttle duration is allowed",
+			minThrottleDurationSeconds: 120,
+			maxThrottleDurationSeconds: 60,
+			expectError:                "",
+		},
+		{
+			name:                     "deprecated min issue count is ignored",
 			minIssueCountForThrottle: config.MaxMinIssueCountForThrottle + 1,
-			expectError:              "min issue count for throttle must be between 1 and 100",
+			expectError:              "",
+		},
+		{
+			name:                       "min throttle duration above maximum",
+			minThrottleDurationSeconds: config.MaxMinThrottleDurationSeconds + 1,
+			expectError:                "min throttle duration must be between 1 and 600 seconds",
 		},
 		{
 			name:                       "max throttle duration above maximum",
@@ -678,6 +690,7 @@ func TestManagerSettings_InitAndValidate_ThrottleSettings(t *testing.T) {
 
 			settings := &config.ManagerSettings{
 				MinIssueCountForThrottle:   tt.minIssueCountForThrottle,
+				MinThrottleDurationSeconds: tt.minThrottleDurationSeconds,
 				MaxThrottleDurationSeconds: tt.maxThrottleDurationSeconds,
 			}
 
@@ -699,17 +712,17 @@ func TestManagerSettings_InitAndValidate_ThrottleSettingsDefaults(t *testing.T) 
 	// Zero and negative values should use defaults instead of erroring
 	tests := []struct {
 		name                       string
-		minIssueCountForThrottle   int
+		minThrottleDurationSeconds int
 		maxThrottleDurationSeconds int
 	}{
 		{
 			name:                       "zero values use defaults",
-			minIssueCountForThrottle:   0,
+			minThrottleDurationSeconds: 0,
 			maxThrottleDurationSeconds: 0,
 		},
 		{
 			name:                       "negative values use defaults",
-			minIssueCountForThrottle:   -5,
+			minThrottleDurationSeconds: -5,
 			maxThrottleDurationSeconds: -10,
 		},
 	}
@@ -719,14 +732,14 @@ func TestManagerSettings_InitAndValidate_ThrottleSettingsDefaults(t *testing.T) 
 			t.Parallel()
 
 			settings := &config.ManagerSettings{
-				MinIssueCountForThrottle:   tt.minIssueCountForThrottle,
+				MinThrottleDurationSeconds: tt.minThrottleDurationSeconds,
 				MaxThrottleDurationSeconds: tt.maxThrottleDurationSeconds,
 			}
 
 			err := settings.InitAndValidate()
 
 			require.NoError(t, err)
-			assert.Equal(t, config.DefaultMinIssueCountForThrottle, settings.MinIssueCountForThrottle)
+			assert.Equal(t, config.DefaultMinThrottleDurationSeconds, settings.MinThrottleDurationSeconds)
 			assert.Equal(t, config.DefaultMaxThrottleDurationSeconds, settings.MaxThrottleDurationSeconds)
 		})
 	}
@@ -802,7 +815,7 @@ func TestManagerSettings_Clone(t *testing.T) {
 			DefaultIssueArchivingDelaySeconds: 7200,
 			IssueReorderingLimit:              25,
 			IssueProcessingIntervalSeconds:    15,
-			MinIssueCountForThrottle:          10,
+			MinThrottleDurationSeconds:        20,
 			MaxThrottleDurationSeconds:        120,
 			IssueReactions: &config.IssueReactionSettings{
 				TerminateEmojis:   []string{":boom:"},
@@ -833,7 +846,8 @@ func TestManagerSettings_Clone(t *testing.T) {
 		assert.Equal(t, original.DefaultPostIconEmoji, clone.DefaultPostIconEmoji)
 		assert.Equal(t, original.DefaultIssueArchivingDelaySeconds, clone.DefaultIssueArchivingDelaySeconds)
 		assert.Equal(t, original.IssueReorderingLimit, clone.IssueReorderingLimit)
-		assert.Equal(t, original.MinIssueCountForThrottle, clone.MinIssueCountForThrottle)
+		assert.Equal(t, original.MinThrottleDurationSeconds, clone.MinThrottleDurationSeconds)
+		assert.Equal(t, original.MaxThrottleDurationSeconds, clone.MaxThrottleDurationSeconds)
 
 		// Verify nested structs are cloned
 		require.NotNil(t, clone.IssueReactions)

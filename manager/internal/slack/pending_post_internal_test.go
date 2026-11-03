@@ -295,6 +295,7 @@ func TestPostMetadata(t *testing.T) {
 
 	require.NoError(t, c.UpdateSingleIssue(context.Background(), issue, "test"))
 	issue.SlackPostNeedsUpdate = true
+	issue.SlackPostUpdated = time.Now().Add(-time.Hour) // Avoid throttling of the unchanged post
 	require.NoError(t, c.UpdateSingleIssue(context.Background(), issue, "test"))
 
 	// Soft delete, since the post has replies

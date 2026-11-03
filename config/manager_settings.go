@@ -112,43 +112,54 @@ const (
 	MaxIssueProcessingIntervalSeconds = 600 // 10 minutes
 )
 
-// Throttle constants control rate limiting of Slack post updates during high-activity periods.
+// Throttle constants control the throttling of Slack post updates for existing issues.
 //
-// Throttling prevents excessive API calls when many issues are being updated simultaneously,
-// which can occur during incident storms or when a monitoring system sends many alerts at once.
-// The throttle algorithm delays updates to individual issue posts based on:
-//   - The number of open issues in the channel (throttling only activates above a threshold)
-//   - The number of alerts already received for each issue (more alerts = longer delays)
-//   - Whether the alert text has changed (text changes reduce the delay)
+// Slack allows about 50 post updates per minute per workspace, shared by all channels. Monitoring systems that send
+// the same alert repeatedly would otherwise update the post on every alert. Each post update is classified by what
+// changed since the post was last updated:
+//   - Significant changes (status, severity, header, buttons, user actions) are always shown immediately.
+//   - Content changes (text, fields, links etc.) are shown immediately for an issue that has not been updated
+//     recently. Otherwise they wait for a window that starts at the min throttle duration, and doubles while updates
+//     keep arriving, up to the max throttle duration.
+//   - Updates where only the footer statistics (last alert time and alert count) changed wait for the max throttle duration.
 //
-// This allows critical first alerts to post immediately while batching rapid updates to
-// the same issue, reducing visual noise and API usage.
+// Throttled updates are not lost. They are posted by the next channel processing run after the window has passed.
 const (
-	// DefaultMinIssueCountForThrottle is the minimum number of open issues in a channel
-	// before throttling is considered. With fewer than 5 issues, API usage is manageable
-	// and immediate updates provide better user experience.
+	// DefaultMinIssueCountForThrottle is no longer used.
+	//
+	// Deprecated: throttling no longer depends on the number of open issues in the channel.
 	DefaultMinIssueCountForThrottle = 5
 
-	// MinMinIssueCountForThrottle is the minimum allowed threshold for throttling.
-	// Setting this to 1 means throttling can activate with just one open issue, which
-	// may be useful for channels with very strict API limits.
+	// MinMinIssueCountForThrottle is no longer used.
+	//
+	// Deprecated: throttling no longer depends on the number of open issues in the channel.
 	MinMinIssueCountForThrottle = 1
 
-	// MaxMinIssueCountForThrottle is the maximum allowed threshold for throttling.
-	// Setting this above 100 effectively disables throttling in most scenarios, which
-	// may be appropriate for low-volume channels with generous API limits.
+	// MaxMinIssueCountForThrottle is no longer used.
+	//
+	// Deprecated: throttling no longer depends on the number of open issues in the channel.
 	MaxMinIssueCountForThrottle = 100
 
-	// DefaultMaxThrottleDurationSeconds is the maximum delay between updates to a single issue.
-	// 60 seconds provides meaningful batching during storms while ensuring updates are
-	// eventually delivered within a reasonable timeframe.
+	// DefaultMinThrottleDurationSeconds is the default initial throttle window for content changes. 10 seconds
+	// matches the default issue processing interval, so a throttled content change is shown within about 20 seconds.
+	DefaultMinThrottleDurationSeconds = 10
+
+	// MinMinThrottleDurationSeconds is the minimum allowed min throttle duration.
+	MinMinThrottleDurationSeconds = 1
+
+	// MaxMinThrottleDurationSeconds is the maximum allowed min throttle duration.
+	MaxMinThrottleDurationSeconds = 600 // 10 minutes
+
+	// DefaultMaxThrottleDurationSeconds is the default throttle window for footer-only updates, and the upper limit
+	// of the content change window. 60 seconds limits a busy issue to about one update per minute, while ensuring
+	// that updates are eventually delivered within a reasonable timeframe.
 	DefaultMaxThrottleDurationSeconds = 60
 
-	// MinMaxThrottleDurationSeconds is the minimum allowed maximum throttle duration.
+	// MinMaxThrottleDurationSeconds is the minimum allowed max throttle duration.
 	// At least 1 second is required for throttling to have any effect.
 	MinMaxThrottleDurationSeconds = 1
 
-	// MaxMaxThrottleDurationSeconds is the maximum allowed throttle duration.
+	// MaxMaxThrottleDurationSeconds is the maximum allowed max throttle duration.
 	// Delays longer than 10 minutes make the system feel unresponsive and may cause
 	// users to miss important updates about ongoing issues.
 	MaxMaxThrottleDurationSeconds = 600 // 10 minutes
@@ -321,16 +332,22 @@ type ManagerSettings struct {
 	// If nil, a default IssueStatusSettings is created during InitAndValidate().
 	IssueStatus *IssueStatusSettings `json:"issueStatus" mapstructure:"issueStatus" yaml:"issueStatus"`
 
-	// MinIssueCountForThrottle is the minimum number of open issues in a channel before
-	// update throttling is considered. Below this threshold, all updates are immediate.
-	// Above it, rapid updates to the same issue may be delayed to reduce API usage.
-	// Default: 5. Must be between 1 and 100.
+	// MinIssueCountForThrottle is no longer used, and is ignored. It is kept so that existing settings files still load.
+	//
+	// Deprecated: throttling no longer depends on the number of open issues in the channel.
 	MinIssueCountForThrottle int `json:"minIssueCountForThrottle" mapstructure:"minIssueCountForThrottle" yaml:"minIssueCountForThrottle"`
 
-	// MaxThrottleDurationSeconds is the maximum delay (in seconds) between updates to
-	// a single issue when throttling is active. The actual delay scales with alert count
-	// but never exceeds this value. After this duration, updates are always allowed.
-	// Alerts that clear a webhook post-click state (pending or shown) are never throttled.
+	// MinThrottleDurationSeconds is the initial throttle window (in seconds) for content changes (text, fields, links
+	// etc.) of an issue post that was updated recently. The window doubles while updates keep arriving, up to
+	// [ManagerSettings.MaxThrottleDurationSeconds]. Significant changes (status, severity, header, buttons, user
+	// actions) are never throttled. See the throttle constants for details.
+	// Values above [ManagerSettings.MaxThrottleDurationSeconds] are capped to it.
+	// Default: 10. Must be between 1 and 600 seconds.
+	MinThrottleDurationSeconds int `json:"minThrottleDurationSeconds" mapstructure:"minThrottleDurationSeconds" yaml:"minThrottleDurationSeconds"`
+
+	// MaxThrottleDurationSeconds is the throttle window (in seconds) for issue post updates where only the footer
+	// statistics (last alert time and alert count) changed, and the upper limit of the content change window
+	// (see [ManagerSettings.MinThrottleDurationSeconds]).
 	// Default: 60. Must be between 1 and 600 seconds.
 	MaxThrottleDurationSeconds int `json:"maxThrottleDurationSeconds" mapstructure:"maxThrottleDurationSeconds" yaml:"maxThrottleDurationSeconds"`
 
@@ -674,10 +691,10 @@ func (s *ManagerSettings) InitAndValidate() error {
 	s.IssueStatus.InconclusiveEmoji = initStatusEmoji(s.IssueStatus.InconclusiveEmoji, DefaultInconclusiveEmoji)
 	s.IssueStatus.ResolvedEmoji = initStatusEmoji(s.IssueStatus.ResolvedEmoji, DefaultResolvedEmoji)
 
-	if s.MinIssueCountForThrottle <= 0 {
-		s.MinIssueCountForThrottle = DefaultMinIssueCountForThrottle
-	} else if s.MinIssueCountForThrottle < MinMinIssueCountForThrottle || s.MinIssueCountForThrottle > MaxMinIssueCountForThrottle {
-		return fmt.Errorf("min issue count for throttle must be between %d and %d", MinMinIssueCountForThrottle, MaxMinIssueCountForThrottle)
+	if s.MinThrottleDurationSeconds <= 0 {
+		s.MinThrottleDurationSeconds = DefaultMinThrottleDurationSeconds
+	} else if s.MinThrottleDurationSeconds < MinMinThrottleDurationSeconds || s.MinThrottleDurationSeconds > MaxMinThrottleDurationSeconds {
+		return fmt.Errorf("min throttle duration must be between %d and %d seconds", MinMinThrottleDurationSeconds, MaxMinThrottleDurationSeconds)
 	}
 
 	if s.MaxThrottleDurationSeconds <= 0 {

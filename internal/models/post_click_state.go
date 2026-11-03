@@ -165,12 +165,20 @@ func sanitizeAfterClick(afterClick *types.WebhookAfterClick) types.WebhookAfterC
 
 // ClearPostClickState clears the pending and active/expired post-click state, typically because an alert was
 // received for the issue. It returns whether the issue was changed, and whether the Slack post must be updated.
+//
+// The fingerprint of the current post is reset when a state is cleared, so that the next post update is not
+// throttled. The alert that clears the state is typically the receiving system's response to the click, and the
+// user who clicked should see it immediately, also when the state was pending (i.e. not shown in the post).
 func (issue *Issue) ClearPostClickState() (bool, bool) {
 	changed := issue.PendingPostClick != nil || issue.PostClick != nil
 	visible := issue.PostClick != nil
 
 	issue.PendingPostClick = nil
 	issue.PostClick = nil
+
+	if changed {
+		issue.SlackPostFingerprint = SlackPostFingerprint{}
+	}
 
 	if visible {
 		issue.SlackPostNeedsUpdate = true

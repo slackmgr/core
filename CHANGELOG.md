@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `MinThrottleDurationSeconds` manager setting (default 10): the initial throttle window for content changes of a Slack post (see "Post Update Throttling" in the README)
+
+### Changed
+- Slack post update throttling is based on what changed in the post, rather than on the number of open issues in the channel and the issue alert count. Significant changes (status, severity, header, buttons, user actions) are never throttled. Content changes (text, fields, links etc.) are shown immediately unless the content changed recently, and then back off from `MinThrottleDurationSeconds` up to `MaxThrottleDurationSeconds` while the content keeps changing. Updates that only refresh the footer statistics (last alert time and alert count) are sent at most once per `MaxThrottleDurationSeconds`. Throttling now also applies in channels with few open issues, where a single noisy issue could previously exceed the Slack rate limit for post updates
+- The "Throttle Slack post" log message is logged at debug level, with the throttle tier as `throttle_tier`
+
+### Deprecated
+- `MinIssueCountForThrottle` manager setting. It is ignored, and no longer validated
+
+### Fixed
+- Severity changes (e.g. warning to error) with an unchanged header and text are no longer throttled
+
 ## [0.21.2] - 2026-11-03
 
 ### Fixed

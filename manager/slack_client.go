@@ -22,12 +22,9 @@ type SlackClient interface {
 	// issues in the given channel.
 	Update(ctx context.Context, channelID string, allChannelIssues []*models.Issue) error
 
-	// UpdateSingleIssueWithThrottling updates the Slack message for one issue, applying
-	// per-channel throttling when many issues are active to avoid flooding the API.
-	UpdateSingleIssueWithThrottling(ctx context.Context, issue *models.Issue, reason string, issuesInChannel int) error
-
-	// UpdateSingleIssue updates the Slack message for one issue without throttling.
-	// Use [SlackClient.UpdateSingleIssueWithThrottling] when processing incoming alerts.
+	// UpdateSingleIssue creates or updates the Slack message for one issue, if needed. Frequent updates of the same
+	// message are throttled, unless the update has a significant change (e.g. status, severity, header or buttons).
+	// A throttled update is posted by a later [SlackClient.Update] call.
 	UpdateSingleIssue(ctx context.Context, issue *models.Issue, reason string) error
 
 	// Delete removes an issue's Slack message. When updateIfMessageHasReplies is true

@@ -423,10 +423,8 @@ func (c *Client) Update(ctx context.Context, channelID string, allChannelIssues 
 			continue
 		}
 
-		// We may temporarily ignore issues with too much activity (to reduce risk of rate limit trouble)
-		if c.throttleIssue(issue, action, openIssueCount) {
-			c.logger.WithFields(issue.LogFields()).Info("Throttle Slack post")
-			c.recordPost(slackPostResultThrottled, types.InsightsEventSlackPostThrottled, string(action), issue)
+		// Frequent updates of the same post are throttled (to reduce risk of rate limit trouble)
+		if c.throttled(issue, action) {
 			continue
 		}
 
@@ -473,8 +471,9 @@ func abortsChannelUpdate(ctx context.Context, err error) bool {
 }
 
 // UpdateSingleIssue creates or updates the Slack post for the issue, if the issue requires it (see
-// [models.Issue.GetSlackAction]). A pending post is looked up first (see [Client.resolvePendingPost]), and an error is
-// returned if the lookup fails. Before a new post is created, the issue is saved to the database (see [Client.SetIssueSaver]).
+// [models.Issue.GetSlackAction]), unless the update is throttled (see [Client.throttleUpdate]). A pending post is
+// looked up first (see [Client.resolvePendingPost]), and an error is returned if the lookup fails. Before a new post
+// is created, the issue is saved to the database (see [Client.SetIssueSaver]).
 func (c *Client) UpdateSingleIssue(ctx context.Context, issue *models.Issue, reason string) error {
 	if err := c.resolvePendingPost(ctx, issue); err != nil {
 		return err
@@ -486,26 +485,8 @@ func (c *Client) UpdateSingleIssue(ctx context.Context, issue *models.Issue, rea
 		return nil
 	}
 
-	return c.createOrUpdate(ctx, issue, reason, action)
-}
-
-// UpdateSingleIssueWithThrottling is [Client.UpdateSingleIssue], except that the post is not created or updated if
-// the issue is throttled, based on its activity and the number of open issues in the channel.
-func (c *Client) UpdateSingleIssueWithThrottling(ctx context.Context, issue *models.Issue, reason string, issuesInChannel int) error {
-	if err := c.resolvePendingPost(ctx, issue); err != nil {
-		return err
-	}
-
-	action := issue.GetSlackAction()
-
-	if action == models.ActionNone {
-		return nil
-	}
-
-	// We may temporarily ignore issues with too much activity (to reduce risk of rate limit trouble)
-	if c.throttleIssue(issue, action, issuesInChannel) {
-		c.logger.WithFields(issue.LogFields()).Info("Throttle Slack post")
-		c.recordPost(slackPostResultThrottled, types.InsightsEventSlackPostThrottled, string(action), issue)
+	// Frequent updates of the same post are throttled (to reduce risk of rate limit trouble)
+	if c.throttled(issue, action) {
 		return nil
 	}
 
@@ -556,7 +537,7 @@ func (c *Client) Delete(ctx context.Context, issue *models.Issue, reason string,
 	if hardDelete {
 		deleteOrUpdateErr = c.api.ChatDeleteMessage(ctx, issue.LastAlert.SlackChannelID, issue.SlackPostID)
 	} else {
-		options := c.getMessageOptionsBlocks(issue, models.ActionNone, postUpdateMethodUpdateDeleted)
+		options, _ := c.getMessageOptionsBlocks(issue, models.ActionNone, postUpdateMethodUpdateDeleted)
 		_, err := c.api.ChatUpdateMessage(ctx, issue.LastAlert.SlackChannelID, options...)
 		deleteOrUpdateErr = err
 	}
@@ -669,7 +650,7 @@ func (c *Client) GetChannelName(ctx context.Context, channelID string) string {
 
 func (c *Client) createOrUpdate(ctx context.Context, issue *models.Issue, reason string, action models.SlackAction) error {
 	if issue.SlackPostID == PostIDInvalidChannel {
-		issue.RegisterSlackPostCreatedOrUpdated(PostIDInvalidChannel, action)
+		issue.RegisterSlackPostCreatedOrUpdated(PostIDInvalidChannel, action, models.SlackPostFingerprint{})
 		return nil
 	}
 
@@ -689,7 +670,7 @@ func (c *Client) createOrUpdate(ctx context.Context, issue *models.Issue, reason
 }
 
 func (c *Client) create(ctx context.Context, issue *models.Issue, reason string, action models.SlackAction) error {
-	options := c.getMessageOptionsBlocks(issue, action, postUpdateMethodNew)
+	options, fingerprint := c.getMessageOptionsBlocks(issue, action, postUpdateMethodNew)
 
 	logger := c.logger.WithFields(issue.LogFields()).WithField("post_update_reason", reason)
 
@@ -728,7 +709,7 @@ func (c *Client) create(ctx context.Context, issue *models.Issue, reason string,
 		return fmt.Errorf("failed to create Slack post for issue %s in channel %s: Slack returned empty timestamp", issue.CorrelationID, issue.LastAlert.SlackChannelID)
 	}
 
-	issue.RegisterSlackPostCreatedOrUpdated(postID, action)
+	issue.RegisterSlackPostCreatedOrUpdated(postID, action, fingerprint)
 
 	logger.Info("Create Slack post")
 	c.recordPost(slackPostResultCreated, types.InsightsEventSlackPostCreated, string(action), issue)
@@ -753,7 +734,7 @@ func (c *Client) savePendingPost(ctx context.Context, issue *models.Issue) error
 }
 
 func (c *Client) update(ctx context.Context, issue *models.Issue, reason string, action models.SlackAction) error {
-	options := c.getMessageOptionsBlocks(issue, action, postUpdateMethodUpdate)
+	options, fingerprint := c.getMessageOptionsBlocks(issue, action, postUpdateMethodUpdate)
 
 	logger := c.logger.WithFields(issue.LogFields()).WithField("post_update_reason", reason)
 
@@ -772,7 +753,7 @@ func (c *Client) update(ctx context.Context, issue *models.Issue, reason string,
 		return fmt.Errorf("failed to update Slack post for issue %s: Slack returned empty timestamp", issue.CorrelationID)
 	}
 
-	issue.RegisterSlackPostCreatedOrUpdated(postID, action)
+	issue.RegisterSlackPostCreatedOrUpdated(postID, action, fingerprint)
 
 	logger.Info("Update Slack post")
 	c.recordPost(slackPostResultUpdated, types.InsightsEventSlackPostUpdated, string(action), issue)
@@ -790,7 +771,7 @@ func handlePermanentPostError(logger types.Logger, issue *models.Issue, action m
 		// Channel not found, archived, inactive or otherwise not accepting posts.
 		// Log error and use dummy post ID to avoid further updates on this issue.
 		logger.Errorf("Failed to %s Slack post (channel unavailable): %s", op, err)
-		issue.RegisterSlackPostCreatedOrUpdated(PostIDInvalidChannel, action)
+		issue.RegisterSlackPostCreatedOrUpdated(PostIDInvalidChannel, action, models.SlackPostFingerprint{})
 	case internal.SlackErrorClassMessageUnavailable:
 		// Message not found or can no longer be edited (update only).
 		// Log info and reset post ID, so that a new post is created.
@@ -813,10 +794,12 @@ func handlePermanentPostError(logger types.Logger, issue *models.Issue, action m
 	return true
 }
 
-func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.SlackAction, method postUpdateMethod) []slack.MsgOption {
-	blocks := c.getMessageBlocks(issue, action, method)
+// getMessageOptionsBlocks returns the message options for the issue post, and the fingerprint of the post content
+// (see [models.SlackPostFingerprint]).
+func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.SlackAction, method postUpdateMethod) ([]slack.MsgOption, models.SlackPostFingerprint) {
+	blocks := c.getPostBlocks(issue, action, method)
 
-	options := []slack.MsgOption{slack.MsgOptionBlocks(blocks...), slack.MsgOptionUsername(issue.LastAlert.Username), slack.MsgOptionAsUser(false)}
+	options := []slack.MsgOption{slack.MsgOptionBlocks(blocks.blocks()...), slack.MsgOptionUsername(issue.LastAlert.Username), slack.MsgOptionAsUser(false)}
 
 	params := slack.NewPostMessageParameters()
 
@@ -838,26 +821,31 @@ func (c *Client) getMessageOptionsBlocks(issue *models.Issue, action models.Slac
 		options = append(options, slack.MsgOptionText(issue.LastAlert.FallbackText, false))
 	}
 
-	return options
+	return options, postFingerprint(issue, action, blocks)
 }
 
 // getMessageBlocks returns the Slack blocks for the issue post.
 func (c *Client) getMessageBlocks(issue *models.Issue, action models.SlackAction, method postUpdateMethod) []slack.Block {
-	blocks := []slack.Block{}
+	return c.getPostBlocks(issue, action, method).blocks()
+}
+
+// getPostBlocks returns the Slack blocks for the issue post, classified by kind (see [postBlocks]).
+func (c *Client) getPostBlocks(issue *models.Issue, action models.SlackAction, method postUpdateMethod) *postBlocks {
+	blocks := &postBlocks{}
 	statusEmoji := c.getStatusEmoji(issue, action, method)
 
 	if issue.IsInfoOrResolved() && issue.LastAlert.HeaderWhenResolved != "" {
 		text := newPlainTextTextBlock(setStatusEmoji(issue.LastAlert.HeaderWhenResolved, statusEmoji))
-		blocks = append(blocks, slack.NewHeaderBlock(text))
+		blocks.add(postBlockSignificant, slack.NewHeaderBlock(text))
 	} else if issue.LastAlert.Header != "" {
 		text := newPlainTextTextBlock(setStatusEmoji(issue.LastAlert.Header, statusEmoji))
-		blocks = append(blocks, slack.NewHeaderBlock(text))
+		blocks.add(postBlockSignificant, slack.NewHeaderBlock(text))
 	}
 
 	if issue.IsInfoOrResolved() && issue.LastAlert.TextWhenResolved != "" {
-		blocks = append(blocks, getTextBlocks(issue.LastAlert.TextWhenResolved, statusEmoji, method)...)
+		blocks.add(postBlockContent, getTextBlocks(issue.LastAlert.TextWhenResolved, statusEmoji, method)...)
 	} else if issue.LastAlert.Text != "" {
-		blocks = append(blocks, getTextBlocks(issue.LastAlert.Text, statusEmoji, method)...)
+		blocks.add(postBlockContent, getTextBlocks(issue.LastAlert.Text, statusEmoji, method)...)
 	}
 
 	if len(issue.LastAlert.Fields) > 0 {
@@ -865,47 +853,47 @@ func (c *Client) getMessageBlocks(issue *models.Issue, action models.SlackAction
 		for _, f := range issue.LastAlert.Fields {
 			fields = append(fields, newMrkdwnTextBlock(fmt.Sprintf("*%s:*\n%s", f.Title, f.Value)))
 		}
-		blocks = append(blocks, slack.NewSectionBlock(nil, fields, nil))
+		blocks.add(postBlockContent, slack.NewSectionBlock(nil, fields, nil))
 	}
 
 	if issue.LastAlert.Author != "" {
 		text := newMrkdwnTextBlock(fmt.Sprintf("*%s*", issue.LastAlert.Author))
-		blocks = append(blocks, slack.NewContextBlock("", text))
+		blocks.add(postBlockContent, slack.NewContextBlock("", text))
 	}
 
 	if issue.LastAlert.Host != "" {
 		text := newMrkdwnTextBlock(fmt.Sprintf("*%s*", issue.LastAlert.Host))
-		blocks = append(blocks, slack.NewContextBlock("", text))
+		blocks.add(postBlockContent, slack.NewContextBlock("", text))
 	}
 
 	if issue.LastAlert.Link != "" {
 		text := newMrkdwnTextBlock(issue.LastAlert.Link)
-		blocks = append(blocks, slack.NewContextBlock("", text))
+		blocks.add(postBlockContent, slack.NewContextBlock("", text))
 	}
 
 	if method != postUpdateMethodUpdateDeleted {
 		webhookButtons := getWebhookButtons(issue)
 
 		if len(webhookButtons) > 0 {
-			blocks = append(blocks, slack.NewActionBlock("issue_actions", webhookButtons...))
+			blocks.add(postBlockSignificant, slack.NewActionBlock("issue_actions", webhookButtons...))
 		}
 
 		if text := c.postClickStatusText(issue); text != "" {
-			blocks = append(blocks, slack.NewContextBlock("", newMrkdwnTextBlock(text)))
+			blocks.add(postBlockSignificant, slack.NewContextBlock("", newMrkdwnTextBlock(text)))
 		}
 
 		if c.managerSettings.GetSettings().AlwaysShowOptionButtons || issue.IsEmojiButtonsActivated {
 			optionButtons := getIssueOptionButtons(issue)
 
 			if len(optionButtons) > 0 {
-				blocks = append(blocks, slack.NewActionBlock("issue_options", optionButtons...))
+				blocks.add(postBlockSignificant, slack.NewActionBlock("issue_options", optionButtons...))
 			}
 		}
 	}
 
 	if issue.LastAlert.Footer != "" {
 		text := newMrkdwnTextBlock(issue.LastAlert.Footer)
-		blocks = append(blocks, slack.NewContextBlock("", text))
+		blocks.add(postBlockContent, slack.NewContextBlock("", text))
 	}
 
 	if c.managerSettings.GetSettings().ShowIssueCorrelationIDInSlackPost {
@@ -913,7 +901,7 @@ func (c *Client) getMessageBlocks(issue *models.Issue, action models.SlackAction
 		fields := []slack.MixedElement{
 			slack.NewTextBlockObject("plain_text", text, false, false),
 		}
-		blocks = append(blocks, slack.NewContextBlock("", fields...))
+		blocks.add(postBlockSignificant, slack.NewContextBlock("", fields...))
 	}
 
 	if issue.FollowUpEnabled() {
@@ -925,25 +913,25 @@ func (c *Client) getMessageBlocks(issue *models.Issue, action models.SlackAction
 		fields = append(fields, slack.NewTextBlockObject("plain_text", first, false, false))
 		fields = append(fields, slack.NewTextBlockObject("plain_text", last, false, false))
 		fields = append(fields, slack.NewTextBlockObject("plain_text", alertCount, false, false))
-		blocks = append(blocks, slack.NewContextBlock("", fields...))
+		blocks.add(postBlockStats, slack.NewContextBlock("", fields...))
 	}
 
 	// Issue is manually resolved by user
 	if method != postUpdateMethodUpdateDeleted && issue.IsInfoOrResolved() && issue.IsEmojiResolved {
 		text := newMrkdwnTextBlock(fmt.Sprintf(":raising_hand: The issue was resolved by *%s* at %s", issue.ResolvedByUser, issue.ResolveTime.In(c.cfg.GetLocation()).Format("2006-01-02 15:04:05")))
-		blocks = append(blocks, slack.NewContextBlock("", text))
+		blocks.add(postBlockSignificant, slack.NewContextBlock("", text))
 	}
 
 	// Issue is not resolved AND being investigated by user
 	if method != postUpdateMethodUpdateDeleted && !issue.IsInfoOrResolved() && issue.IsEmojiInvestigated {
 		text := newMrkdwnTextBlock(fmt.Sprintf(":cop: The issue is investigated by *%s* since %s", issue.InvestigatedByUser, issue.InvestigatedSince.In(c.cfg.GetLocation()).Format("2006-01-02 15:04:05")))
-		blocks = append(blocks, slack.NewContextBlock("", text))
+		blocks.add(postBlockSignificant, slack.NewContextBlock("", text))
 	}
 
 	// Issue is not resolved AND muted by user
 	if method != postUpdateMethodUpdateDeleted && !issue.IsInfoOrResolved() && issue.IsEmojiMuted {
 		text := newMrkdwnTextBlock(fmt.Sprintf(":mask: The issue was muted by *%s* at %s", issue.MutedByUser, issue.MutedSince.In(c.cfg.GetLocation()).Format("2006-01-02 15:04:05")))
-		blocks = append(blocks, slack.NewContextBlock("", text))
+		blocks.add(postBlockSignificant, slack.NewContextBlock("", text))
 	}
 
 	return blocks
@@ -1181,57 +1169,6 @@ func findCutPoint(s string) int {
 		cut--
 	}
 	return cut
-}
-
-func (c *Client) throttleIssue(issue *models.Issue, action models.SlackAction, issuesInChannel int) bool {
-	// Don't throttle if the number of active (non-info, non-resolved) issues in the channel
-	// is less than the configured minimum
-	if issuesInChannel < c.managerSettings.GetSettings().MinIssueCountForThrottle {
-		return false
-	}
-
-	// Don't throttle issues where the planned Slack action differs from the last posted action
-	if action != issue.SlackPostLastAction {
-		return false
-	}
-
-	// Don't throttle issues with no current Slack posts
-	if !issue.HasSlackPost() {
-		return false
-	}
-
-	// Don't throttle if the last alert has active mentions
-	if issue.LastAlertHasActiveMentions() {
-		return false
-	}
-
-	// Don't throttle if the alert header has changed
-	if issue.SlackPostHeader != issue.LastAlert.Header {
-		return false
-	}
-
-	// Find the duration since the last Slack post for this issue
-	timeSinceLastPost := time.Since(issue.SlackPostUpdated)
-
-	// Calculate throttle limit as [alert count] seconds
-	// This means that issues with more alerts are throttled for longer periods
-	limit := time.Duration(issue.AlertCount) * time.Second
-
-	// Find the upper limit for throttling from the manager settings
-	upperLimitInSettings := time.Second * time.Duration(c.managerSettings.GetSettings().MaxThrottleDurationSeconds)
-
-	// Limit should not be higher than the upper limit defined in the manager settings
-	if limit > upperLimitInSettings {
-		limit = upperLimitInSettings
-	}
-
-	// Reduce the upper limit if the alert text has changed
-	if issue.SlackPostText != issue.LastAlert.Text {
-		limit /= 2
-	}
-
-	// Throttle if the time since the last Slack post is smaller than the calculated limit
-	return timeSinceLastPost < limit
 }
 
 // recordPost counts a Slack post operation, and records an insights event for it if insights are enabled.

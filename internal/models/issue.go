@@ -51,26 +51,35 @@ type Issue struct {
 
 	// LastAlert is the most recent alert for this issue. All issue state is derived from this alert.
 	// This field must never be nil after issue creation or deserialization.
-	LastAlert                 *Alert        `json:"lastAlert"`
-	AlertCount                int           `json:"alertCount"`
-	LastAlertReceived         time.Time     `json:"lastAlertReceived"`
-	LastSlackMention          string        `json:"lastSlackMention"`
-	LastSlackMentionTime      time.Time     `json:"lastSlackMentionTime"`
-	AutoResolvePeriod         time.Duration `json:"autoResolvePeriod"`
-	ArchiveDelay              time.Duration `json:"archiveDelay"`
-	ArchiveTime               time.Time     `json:"archiveTime"`
-	Archived                  bool          `json:"archived"`
-	ResolveTime               time.Time     `json:"resolveTime"`
-	SlackPostID               string        `json:"slackPostId"`
-	SlackPostCreated          time.Time     `json:"slackPostCreated"`
-	SlackPostUpdated          time.Time     `json:"slackPostUpdated"`
-	SlackPostHeader           string        `json:"slackPostHeader"`
-	SlackPostText             string        `json:"slackPostText"`
-	SlackPostLastAction       SlackAction   `json:"slackPostLastAction"`
-	SlackPostNeedsUpdate      bool          `json:"slackPostNeedsUpdate"`
-	SlackPostNeedsDelete      bool          `json:"slackPostNeedsDelete"`
-	SlackAlertSentAtLeastOnce bool          `json:"slackAlertSentAtLeastOnce"`
-	SlackPostDelayedUntil     time.Time     `json:"slackPostDelayedUntil"`
+	LastAlert            *Alert        `json:"lastAlert"`
+	AlertCount           int           `json:"alertCount"`
+	LastAlertReceived    time.Time     `json:"lastAlertReceived"`
+	LastSlackMention     string        `json:"lastSlackMention"`
+	LastSlackMentionTime time.Time     `json:"lastSlackMentionTime"`
+	AutoResolvePeriod    time.Duration `json:"autoResolvePeriod"`
+	ArchiveDelay         time.Duration `json:"archiveDelay"`
+	ArchiveTime          time.Time     `json:"archiveTime"`
+	Archived             bool          `json:"archived"`
+	ResolveTime          time.Time     `json:"resolveTime"`
+	SlackPostID          string        `json:"slackPostId"`
+	SlackPostCreated     time.Time     `json:"slackPostCreated"`
+	SlackPostUpdated     time.Time     `json:"slackPostUpdated"`
+
+	// SlackPostContentUpdated is the time the alert content of the post (see [SlackPostFingerprint.Content]) was last
+	// changed, and SlackPostPrevContentUpdated the time of the change before it (zero if there is none). The gap between
+	// the two is used to back off content updates for issues where the content changes frequently.
+	SlackPostContentUpdated     time.Time `json:"slackPostContentUpdated"`
+	SlackPostPrevContentUpdated time.Time `json:"slackPostPrevContentUpdated"`
+
+	// SlackPostFingerprint identifies the content of the current Slack post, used to classify the next update
+	// (see [SlackPostFingerprint]).
+	SlackPostFingerprint SlackPostFingerprint `json:"slackPostFingerprint"`
+
+	SlackPostLastAction       SlackAction `json:"slackPostLastAction"`
+	SlackPostNeedsUpdate      bool        `json:"slackPostNeedsUpdate"`
+	SlackPostNeedsDelete      bool        `json:"slackPostNeedsDelete"`
+	SlackAlertSentAtLeastOnce bool        `json:"slackAlertSentAtLeastOnce"`
+	SlackPostDelayedUntil     time.Time   `json:"slackPostDelayedUntil"`
 
 	// SlackPostPendingSince is set when creating the Slack post failed in a way where the post may still exist,
 	// e.g. after a timeout, or before the post is created (write-ahead). The post is then looked up in the channel
@@ -303,20 +312,25 @@ func (issue *Issue) GetSlackAction() SlackAction {
 	return ActionNone
 }
 
-// RegisterSlackPostCreatedOrUpdated registers that a Slack post has been created or updated for this issue
-func (issue *Issue) RegisterSlackPostCreatedOrUpdated(slackPostID string, action SlackAction) {
+// RegisterSlackPostCreatedOrUpdated registers that a Slack post has been created or updated for this issue,
+// with the given fingerprint of the posted content.
+func (issue *Issue) RegisterSlackPostCreatedOrUpdated(slackPostID string, action SlackAction, fingerprint SlackPostFingerprint) {
 	now := nowFunc().UTC()
 
 	if issue.SlackPostID != slackPostID {
 		issue.SlackPostID = slackPostID
 		issue.SlackPostCreated = now
+		issue.SlackPostContentUpdated = now
+		issue.SlackPostPrevContentUpdated = time.Time{}
+	} else if fingerprint.Content != issue.SlackPostFingerprint.Content {
+		issue.SlackPostPrevContentUpdated = issue.SlackPostContentUpdated
+		issue.SlackPostContentUpdated = now
 	}
 
 	issue.SlackPostUpdated = now
 	issue.SlackPostNeedsUpdate = false
 	issue.SlackPostLastAction = action
-	issue.SlackPostHeader = issue.LastAlert.Header
-	issue.SlackPostText = issue.LastAlert.Text
+	issue.SlackPostFingerprint = fingerprint
 
 	if action == ActionAlert {
 		issue.SlackAlertSentAtLeastOnce = true
@@ -364,8 +378,9 @@ func (issue *Issue) RegisterSlackPostAdopted(slackPostID string) {
 	issue.SlackPostID = slackPostID
 	issue.SlackPostCreated = slackTimestampToTime(slackPostID)
 	issue.SlackPostUpdated = issue.SlackPostCreated
-	issue.SlackPostHeader = ""
-	issue.SlackPostText = ""
+	issue.SlackPostContentUpdated = time.Time{}
+	issue.SlackPostPrevContentUpdated = time.Time{}
+	issue.SlackPostFingerprint = SlackPostFingerprint{}
 	issue.SlackPostNeedsUpdate = true
 	issue.SlackAlertSentAtLeastOnce = true
 	issue.ClearSlackPostPending()
@@ -389,8 +404,9 @@ func (issue *Issue) RegisterSlackPostDeleted() {
 	issue.SlackPostID = ""
 	issue.SlackPostCreated = time.Time{}
 	issue.SlackPostUpdated = time.Time{}
-	issue.SlackPostHeader = ""
-	issue.SlackPostText = ""
+	issue.SlackPostContentUpdated = time.Time{}
+	issue.SlackPostPrevContentUpdated = time.Time{}
+	issue.SlackPostFingerprint = SlackPostFingerprint{}
 }
 
 // RegisterSlackPostInvalidBlocks registers that a Slack post could not be created due to invalid blocks (i.e. bad message formatting).
@@ -401,8 +417,9 @@ func (issue *Issue) RegisterSlackPostInvalidBlocks() {
 	issue.SlackPostID = ""
 	issue.SlackPostCreated = time.Time{}
 	issue.SlackPostUpdated = time.Time{}
-	issue.SlackPostHeader = ""
-	issue.SlackPostText = ""
+	issue.SlackPostContentUpdated = time.Time{}
+	issue.SlackPostPrevContentUpdated = time.Time{}
+	issue.SlackPostFingerprint = SlackPostFingerprint{}
 }
 
 // RegisterTerminationRequest registers that the Slack post connected to this issue has been marked for termination via Slack reaction/emoji

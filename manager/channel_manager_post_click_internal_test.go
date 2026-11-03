@@ -55,12 +55,16 @@ func postClickIssueJSON(t *testing.T, alertTime time.Time, mutate func(issue *mo
 	return existingIssueJSON(t, types.AlertError, alertTime, func(issue *models.Issue) {
 		issue.ID = "issue-1"
 		issue.LastAlert.Webhooks = []*types.Webhook{{ID: "restart", URL: "https://example.com", ButtonText: "Restart", AfterClick: postClickAfterClick}}
+		issue.SlackPostFingerprint = postClickTestFingerprint
 
 		if mutate != nil {
 			mutate(issue)
 		}
 	})
 }
+
+// postClickTestFingerprint is the Slack post fingerprint of issues returned by postClickIssueJSON.
+var postClickTestFingerprint = models.SlackPostFingerprint{Significant: "s", Content: "c"}
 
 // postClickCommand returns a webhook command for the "restart" webhook, clicked at the given time.
 func postClickCommand(clicked time.Time) *models.Command {
@@ -204,8 +208,8 @@ func TestChannelManager_Alert_ClearsPostClickState(t *testing.T) {
 		issue           json.RawMessage
 		alertTime       time.Time
 		wantSaved       bool
-		wantSlackUpdate []string // Reasons of unthrottled Slack updates
-		wantThrottled   []string // Reasons of throttled Slack updates
+		wantSlackUpdate []string // Reasons of Slack updates
+		wantUnthrottled bool     // Whether the post fingerprint is reset, so that the next Slack update is not throttled
 	}{
 		{
 			name:            "ignored (not newer) alert clears the active state",
@@ -213,12 +217,14 @@ func TestChannelManager_Alert_ClearsPostClickState(t *testing.T) {
 			alertTime:       lastAlertTime,
 			wantSaved:       true,
 			wantSlackUpdate: []string{"webhook post-click state cleared"},
+			wantUnthrottled: true,
 		},
 		{
-			name:      "ignored alert clears the pending state without a Slack update",
-			issue:     postClickIssueJSON(t, lastAlertTime, withPendingClick(click)),
-			alertTime: lastAlertTime,
-			wantSaved: true,
+			name:            "ignored alert clears the pending state without a Slack update",
+			issue:           postClickIssueJSON(t, lastAlertTime, withPendingClick(click)),
+			alertTime:       lastAlertTime,
+			wantSaved:       true,
+			wantUnthrottled: true,
 		},
 		{
 			name:      "ignored alert without state changes nothing",
@@ -230,21 +236,23 @@ func TestChannelManager_Alert_ClearsPostClickState(t *testing.T) {
 			issue:           postClickIssueJSON(t, lastAlertTime, withActiveClick(click)),
 			alertTime:       now,
 			wantSaved:       true,
-			wantSlackUpdate: []string{"alert added to existing issue after webhook click"},
+			wantSlackUpdate: []string{"alert added to existing issue"},
+			wantUnthrottled: true,
 		},
 		{
 			name:            "accepted alert clears the pending state and updates Slack without throttling",
 			issue:           postClickIssueJSON(t, lastAlertTime, withPendingClick(click)),
 			alertTime:       now,
 			wantSaved:       true,
-			wantSlackUpdate: []string{"alert added to existing issue after webhook click"},
+			wantSlackUpdate: []string{"alert added to existing issue"},
+			wantUnthrottled: true,
 		},
 		{
-			name:          "accepted alert without state updates Slack with throttling",
-			issue:         postClickIssueJSON(t, lastAlertTime, nil),
-			alertTime:     now,
-			wantSaved:     true,
-			wantThrottled: []string{"alert added to existing issue"},
+			name:            "accepted alert without state updates Slack with throttling",
+			issue:           postClickIssueJSON(t, lastAlertTime, nil),
+			alertTime:       now,
+			wantSaved:       true,
+			wantSlackUpdate: []string{"alert added to existing issue"},
 		},
 	}
 
@@ -273,7 +281,12 @@ func TestChannelManager_Alert_ClearsPostClickState(t *testing.T) {
 			assert.Nil(t, saved[0].PendingPostClick)
 			assert.Nil(t, saved[0].PostClick)
 			assert.Equal(t, tt.wantSlackUpdate, slackClient.singleIssueUpdateReasons())
-			assert.Equal(t, tt.wantThrottled, slackClient.throttledIssueUpdateReasons())
+
+			if tt.wantUnthrottled {
+				assert.True(t, saved[0].SlackPostFingerprint.IsZero())
+			} else {
+				assert.Equal(t, postClickTestFingerprint, saved[0].SlackPostFingerprint)
+			}
 		})
 	}
 }

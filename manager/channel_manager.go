@@ -934,30 +934,12 @@ func (c *channelManager) addAlertToExistingIssue(ctx context.Context, issue *mod
 		return alertOutcome{eventType: types.InsightsEventAlertIgnored, reason: ignoreReason}, nil
 	}
 
-	openIssues := 0
-
-	processingState, err := c.db.FindChannelProcessingState(ctx, c.channelID)
-	if err != nil {
-		c.logger.Errorf("Failed to find channel processing state: %s", err)
-	} else if processingState != nil {
-		openIssues = processingState.OpenIssues
-	}
-
-	// Update the issue in Slack.
-	// An alert that clears a post-click state is typically the receiving system's response to a button click, so the
-	// post is updated without throttling. Such updates are bounded by the click frequency, and the user who clicked
-	// gets immediate feedback, rather than waiting for the throttle window to pass.
+	// Update the issue in Slack. Frequent updates are throttled, unless the update has a significant change. An alert
+	// that clears a post-click state (typically the receiving system's response to a button click) changes the
+	// buttons, so the user who clicked gets immediate feedback.
 	// Errors from the Slack client are logged, but not returned.
-	var slackErr error
-
-	if postClickCleared {
-		slackErr = c.slackClient.UpdateSingleIssue(ctx, issue, "alert added to existing issue after webhook click")
-	} else {
-		slackErr = c.slackClient.UpdateSingleIssueWithThrottling(ctx, issue, "alert added to existing issue", openIssues)
-	}
-
-	if slackErr != nil {
-		c.logger.Errorf("Failed to update issue in Slack: %s", slackErr)
+	if err := c.slackClient.UpdateSingleIssue(ctx, issue, "alert added to existing issue"); err != nil {
+		c.logger.Errorf("Failed to update issue in Slack: %s", err)
 	}
 
 	if err := c.db.SaveIssue(ctx, issue); err != nil {

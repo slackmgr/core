@@ -444,24 +444,71 @@ func TestIssue_RegisterMethods(t *testing.T) {
 			LastAlert:            &Alert{Alert: types.Alert{Header: "Test", Text: "Body"}},
 		}
 
-		issue.RegisterSlackPostCreatedOrUpdated("12345.67890", ActionAlert)
+		fingerprint := SlackPostFingerprint{Significant: "s1", Content: "c1"}
+
+		issue.RegisterSlackPostCreatedOrUpdated("12345.67890", ActionAlert, fingerprint)
 
 		assert.Equal(t, "12345.67890", issue.SlackPostID)
 		assert.Equal(t, fixedTime, issue.SlackPostCreated)
 		assert.Equal(t, fixedTime, issue.SlackPostUpdated)
+		assert.Equal(t, fixedTime, issue.SlackPostContentUpdated)
+		assert.True(t, issue.SlackPostPrevContentUpdated.IsZero())
+		assert.Equal(t, fingerprint, issue.SlackPostFingerprint)
 		assert.False(t, issue.SlackPostNeedsUpdate)
 		assert.Equal(t, ActionAlert, issue.SlackPostLastAction)
 		assert.True(t, issue.SlackAlertSentAtLeastOnce)
 	})
 
+	t.Run("RegisterSlackPostCreatedOrUpdated tracks content changes", func(t *testing.T) {
+		created := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+		contentChanged := created.Add(time.Minute)
+
+		issue := &Issue{
+			SlackPostID:             "12345.67890",
+			SlackPostCreated:        created,
+			SlackPostContentUpdated: created,
+			SlackPostFingerprint:    SlackPostFingerprint{Significant: "s1", Content: "c1"},
+			LastAlert:               &Alert{Alert: types.Alert{Header: "Test", Text: "Body"}},
+		}
+
+		// Only the significant part changed: the content times are unchanged
+		cleanup := setTestTime(created.Add(30 * time.Second))
+		issue.RegisterSlackPostCreatedOrUpdated("12345.67890", ActionAlert, SlackPostFingerprint{Significant: "s2", Content: "c1"})
+		cleanup()
+
+		assert.Equal(t, created, issue.SlackPostContentUpdated)
+		assert.True(t, issue.SlackPostPrevContentUpdated.IsZero())
+		assert.Equal(t, created.Add(30*time.Second), issue.SlackPostUpdated)
+
+		// The content changed
+		cleanup = setTestTime(contentChanged)
+		issue.RegisterSlackPostCreatedOrUpdated("12345.67890", ActionAlert, SlackPostFingerprint{Significant: "s2", Content: "c2"})
+		cleanup()
+
+		assert.Equal(t, contentChanged, issue.SlackPostContentUpdated)
+		assert.Equal(t, created, issue.SlackPostPrevContentUpdated)
+		assert.Equal(t, created, issue.SlackPostCreated)
+
+		// A new post resets the content times
+		newPost := contentChanged.Add(time.Minute)
+		cleanup = setTestTime(newPost)
+		issue.RegisterSlackPostCreatedOrUpdated("22345.67890", ActionAlert, SlackPostFingerprint{Significant: "s2", Content: "c2"})
+		cleanup()
+
+		assert.Equal(t, newPost, issue.SlackPostCreated)
+		assert.Equal(t, newPost, issue.SlackPostContentUpdated)
+		assert.True(t, issue.SlackPostPrevContentUpdated.IsZero())
+	})
+
 	t.Run("RegisterSlackPostDeleted", func(t *testing.T) {
 		issue := &Issue{
-			SlackPostID:          "12345.67890",
-			SlackPostNeedsDelete: true,
-			SlackPostCreated:     time.Now(),
-			SlackPostUpdated:     time.Now(),
-			SlackPostHeader:      "Header",
-			SlackPostText:        "Text",
+			SlackPostID:                 "12345.67890",
+			SlackPostNeedsDelete:        true,
+			SlackPostCreated:            time.Now(),
+			SlackPostUpdated:            time.Now(),
+			SlackPostContentUpdated:     time.Now(),
+			SlackPostPrevContentUpdated: time.Now(),
+			SlackPostFingerprint:        SlackPostFingerprint{Significant: "s", Content: "c"},
 		}
 
 		issue.RegisterSlackPostDeleted()
@@ -471,8 +518,9 @@ func TestIssue_RegisterMethods(t *testing.T) {
 		assert.False(t, issue.SlackPostNeedsDelete)
 		assert.True(t, issue.SlackPostCreated.IsZero())
 		assert.True(t, issue.SlackPostUpdated.IsZero())
-		assert.Empty(t, issue.SlackPostHeader)
-		assert.Empty(t, issue.SlackPostText)
+		assert.True(t, issue.SlackPostContentUpdated.IsZero())
+		assert.True(t, issue.SlackPostPrevContentUpdated.IsZero())
+		assert.True(t, issue.SlackPostFingerprint.IsZero())
 	})
 
 	t.Run("RegisterTerminationRequest", func(t *testing.T) {
@@ -930,13 +978,14 @@ func TestIssue_RegisterSlackPostInvalidBlocks(t *testing.T) {
 	t.Parallel()
 
 	issue := &Issue{
-		SlackPostID:          "12345.67890",
-		SlackPostNeedsUpdate: true,
-		SlackPostNeedsDelete: true,
-		SlackPostCreated:     time.Now(),
-		SlackPostUpdated:     time.Now(),
-		SlackPostHeader:      "Header",
-		SlackPostText:        "Text",
+		SlackPostID:                 "12345.67890",
+		SlackPostNeedsUpdate:        true,
+		SlackPostNeedsDelete:        true,
+		SlackPostCreated:            time.Now(),
+		SlackPostUpdated:            time.Now(),
+		SlackPostContentUpdated:     time.Now(),
+		SlackPostPrevContentUpdated: time.Now(),
+		SlackPostFingerprint:        SlackPostFingerprint{Significant: "s", Content: "c"},
 	}
 
 	issue.RegisterSlackPostInvalidBlocks()
@@ -946,8 +995,9 @@ func TestIssue_RegisterSlackPostInvalidBlocks(t *testing.T) {
 	assert.False(t, issue.SlackPostNeedsDelete)
 	assert.True(t, issue.SlackPostCreated.IsZero())
 	assert.True(t, issue.SlackPostUpdated.IsZero())
-	assert.Empty(t, issue.SlackPostHeader)
-	assert.Empty(t, issue.SlackPostText)
+	assert.True(t, issue.SlackPostContentUpdated.IsZero())
+	assert.True(t, issue.SlackPostPrevContentUpdated.IsZero())
+	assert.True(t, issue.SlackPostFingerprint.IsZero())
 }
 
 func TestIssue_RegisterUnresolveRequest(t *testing.T) {
@@ -1558,6 +1608,7 @@ func TestIssue_SlackPostPending(t *testing.T) {
 
 		issue := NewIssue(createTestAlert(), &mockLogger{})
 		issue.SlackPostNeedsUpdate = false
+		issue.SlackPostFingerprint = SlackPostFingerprint{Significant: "s", Content: "c"}
 		issue.RegisterSlackPostPending()
 
 		issue.RegisterSlackPostAdopted("1700000000.123456")
@@ -1567,7 +1618,7 @@ func TestIssue_SlackPostPending(t *testing.T) {
 		assert.Equal(t, time.Unix(1700000000, 123456000).UTC(), issue.SlackPostCreated)
 		assert.True(t, issue.SlackPostNeedsUpdate)
 		assert.True(t, issue.SlackAlertSentAtLeastOnce)
-		assert.Empty(t, issue.SlackPostHeader)
+		assert.True(t, issue.SlackPostFingerprint.IsZero())
 	})
 
 	t.Run("pending blocks archiving until expired", func(t *testing.T) {

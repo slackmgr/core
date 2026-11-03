@@ -101,7 +101,7 @@ Receiving systems often take a while before they update the alert. A webhook can
 
 - When the webhook is **delivered**, the post hides the clicked button, all webhook buttons, or the listed webhooks (`HideButtons`, `HideWebhookIDs`), and shows a status line below the buttons: the optional `StatusText`, the button, the user who clicked it and the time. Slack mentions in `StatusText` are removed.
 - **Any alert** for the issue clears the state and restores the normal post, even if the alert is otherwise unchanged or ignored (e.g. not newer, or the issue is already resolved).
-- An alert that clears a pending or shown state updates the post immediately, bypassing the update throttling for busy issues (`MinIssueCountForThrottle`, `MaxThrottleDurationSeconds`). Receiving systems often re-send the alert right after the click, so the user sees the result without delay.
+- An alert that clears a pending or shown state updates the post immediately, bypassing the [post update throttling](#post-update-throttling). Receiving systems often re-send the alert right after the click, so the user sees the result without delay.
 - If no alert arrives within `ResetAfterSeconds` (default 5 minutes, max 24 hours), the buttons are shown again with a note that no update was received.
 - If delivery **fails**, the post is unchanged; the clicking user is informed as described above.
 - If the button is clicked again (e.g. another visible button with after-click settings), the latest click wins.
@@ -120,6 +120,22 @@ Alerts can specify a notification delay: the Slack post will not be created unti
 ### Alert Deduplication and Noise Filtering
 
 Beyond grouping alerts by correlation ID, individual alerts can carry a list of text patterns to filter out. If an incoming alert's text matches any of those patterns, the alert is silently discarded without updating or reopening the issue. This is useful for suppressing known-noisy variants of an alert — log noise at the tail end of a deployment, repeated low-signal warnings from a chatty dependency — while still allowing the main alert to flow through normally.
+
+### Post Update Throttling
+
+Slack allows about 50 post updates per minute per workspace, shared by all channels. Monitoring systems that send the same alert repeatedly (e.g. every few seconds) would otherwise update the issue post on every alert, and a single noisy issue could exhaust the budget. When Slack responds with a rate limit error, all channels pause until the rate limit window has passed, which delays new alerts as well.
+
+Updates of an existing post are therefore classified by what changed since the post was last updated:
+
+| Change | Examples | Throttling |
+|---|---|---|
+| Significant | Status (alert or resolved), severity, header, buttons, webhook post-click state, user actions (resolved, investigated, muted), active mentions, sender name and icon | Never throttled |
+| Content | Text, fields, author, host, link, footer, fallback text | Shown immediately if the content has not changed recently. Otherwise at most once per window: the window starts at `minThrottleDurationSeconds` (default 10), doubles while the content keeps changing, and is capped at `maxThrottleDurationSeconds` (default 60). It is reset once the content has been stable for twice the max duration |
+| Footer only | Last alert time and alert count | At most once per `maxThrottleDurationSeconds` (default 60) |
+
+New posts are never throttled. A throttled update is not lost: the issue keeps its update flag, and the post is updated by the next alert or channel processing run (every `issueProcessingIntervalSeconds`, default 10) after the window has passed. With the defaults, a stream of alerts with changing text updates the post after about 0, 10, 30 and 70 seconds, and then about once per minute.
+
+`minIssueCountForThrottle` is deprecated and ignored, since throttling no longer depends on the number of open issues in the channel.
 
 ### Duplicate Post Prevention
 
