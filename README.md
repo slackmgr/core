@@ -327,6 +327,7 @@ import (
     "context"
     "log"
 
+    redisstore "github.com/eko/gocache/store/rediscluster/v4"
     redis "github.com/redis/go-redis/v9"
     "github.com/slackmgr/core/config"
     "github.com/slackmgr/core/manager"
@@ -344,30 +345,45 @@ func main() {
 
     redisClient := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
 
+    // Shared by the API and the manager: Slack lookup cache and rate limit backoffs
+    cacheStore := redisstore.NewRedisCluster(redisClient)
+
     locker := manager.NewRedisChannelLocker(redisClient)
-    alertQueue, _ := manager.NewRedisFifoQueue(redisClient, locker, "alerts", logger).Init()
-    commandQueue, _ := manager.NewRedisFifoQueue(redisClient, locker, "commands", logger).Init()
 
-    apiCfg := &config.APIConfig{
-        RestPort:      "8080",
-        EncryptionKey: "your-32-char-key-here-0000000000", // optional; required for webhook support
-        SlackClient:   &config.SlackClientConfig{BotToken: "xoxb-...", AppToken: "xapp-..."},
+    alertQueue, err := manager.NewRedisFifoQueue(redisClient, locker, "alerts", logger).Init()
+    if err != nil {
+        log.Fatal(err)
     }
 
-    managerCfg := &config.ManagerConfig{
-        EncryptionKey: "your-32-char-key-here-0000000000", // must match APIConfig.EncryptionKey
-        SlackClient:   &config.SlackClientConfig{BotToken: "xoxb-...", AppToken: "xapp-..."},
+    commandQueue, err := manager.NewRedisFifoQueue(redisClient, locker, "commands", logger).Init()
+    if err != nil {
+        log.Fatal(err)
     }
 
-    server := restapi.New(alertProducer, logger, apiCfg).
+    encryptionKey := "your-32-char-key-here-0000000000" // optional; required for webhook support
+
+    // Start from the defaults, which fill in all required fields
+    apiCfg := config.NewDefaultAPIConfig()
+    apiCfg.EncryptionKey = encryptionKey
+    apiCfg.SlackClient.BotToken = "xoxb-..."
+    apiCfg.SlackClient.AppToken = "xapp-..."
+
+    managerCfg := config.NewDefaultManagerConfig()
+    managerCfg.EncryptionKey = encryptionKey // must match the API encryption key
+    managerCfg.SlackClient.BotToken = "xoxb-..."
+    managerCfg.SlackClient.AppToken = "xapp-..."
+
+    server := restapi.New(alertQueue, logger, apiCfg).
+        WithCacheStore(cacheStore).
         WithMetrics(metrics)
-    
+
     mgr := manager.New(db, alertQueue, commandQueue, logger, managerCfg).
         WithLocker(locker).
+        WithCacheStore(cacheStore).
         WithMetrics(metrics)
 
     g, ctx := errgroup.WithContext(ctx)
-    
+
     g.Go(func() error { return server.Run(ctx) })
     g.Go(func() error { return mgr.Run(ctx) })
 
