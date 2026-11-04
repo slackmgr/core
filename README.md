@@ -310,6 +310,13 @@ Activity methods return `types.ErrInsightsNotSupported` when no reader is availa
 
 Both `restapi` and `manager` emit metrics through the injected `types.Metrics` implementation, with all names prefixed by `MetricsPrefix` (default `slackmgr_`). A ready-made Grafana dashboard for a Prometheus data source is available in [`dashboards/slackmgr.json`](dashboards/slackmgr.json). It covers every metric emitted by the library: alert and issue flow, open issues, Slack API health, Slack posts (including pending posts), queue processing, lock contention and DB cache, the REST API, alert intake and the insights recorder. If you use a custom prefix, set the dashboard's "Metrics prefix" variable (default `slackmgr_`) to match, either in the dashboard settings or with the `var-prefix` URL parameter.
 
+Per-channel metrics (`alerts_processed_total`, `channel_open_issues`, `issues_created_total`, `process_active_issues_duration_seconds` and the other metrics with a `channel` label) are labelled by Slack channel name. A channel manager looks up the name when it starts, in its own goroutine, so a slow lookup never delays alert routing for other channels. If the name cannot be resolved yet (e.g. while `conversations.info` is rate limited after a cold start), the channel ID is used as label until the first successful name lookup, and the label then switches to the name:
+
+- Counters and histograms continue under the name; the series under the channel ID keep their last value until the next restart. Queries that sum over channels (e.g. `sum(rate(...))`) are not affected
+- `channel_open_issues` is set to 0 under the channel ID (`types.Metrics` cannot delete a series) and carried over to the name
+- A later rename of the channel does not change the label, to keep series stable
+- Insights `channel_stats` events carry the last known channel name (or the channel ID if it was never resolved)
+
 ## Installation
 
 ```bash

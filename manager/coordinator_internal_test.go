@@ -119,10 +119,6 @@ func TestCoordinator_CreateChannelManager(t *testing.T) {
 	require.NotNil(t, cm)
 
 	assert.Equal(t, "C1", cm.channelID)
-	assert.Equal(t, "alerts", cm.slackChannelName, "the looked up name is passed to the channel manager")
-	assert.Equal(t, int32(1), slackClient.lookups.Load())
-	assert.True(t, slackClient.lookupHasDeadline.Load(), "the name lookup is bounded")
-
 	assert.Same(t, recorder, cm.insights)
 	assert.Same(t, commandQueue, cm.commandQueue)
 	assert.Equal(t, 42*time.Second, cm.channelStatsInterval)
@@ -132,6 +128,12 @@ func TestCoordinator_CreateChannelManager(t *testing.T) {
 
 	// The channel manager goroutine is running, and exits when the context is cancelled.
 	stopChannelManagers(t, cancel, c)
+
+	// The channel manager goroutine looked up the name when it started.
+	assert.Equal(t, "alerts", cm.slackChannelName)
+	assert.Equal(t, "alerts", cm.channelName)
+	assert.Equal(t, int32(1), slackClient.lookups.Load())
+	assert.True(t, slackClient.lookupHasDeadline.Load(), "the name lookup is bounded")
 }
 
 func TestCoordinator_CreateChannelManager_UnknownName(t *testing.T) {
@@ -146,10 +148,41 @@ func TestCoordinator_CreateChannelManager_UnknownName(t *testing.T) {
 	cm, err := c.createChannelManager(ctx, "C1")
 	require.NoError(t, err)
 
-	assert.Empty(t, cm.slackChannelName)
-	assert.Equal(t, "C1", cm.channelName, "the channel ID is the metrics label when the name is unknown")
-
 	stopChannelManagers(t, cancel, c)
+
+	assert.Empty(t, cm.slackChannelName)
+	assert.Equal(t, "C1", cm.channelName, "the channel ID is the metrics label while the name is unknown")
+	assert.True(t, cm.channelNameIsFallback)
+}
+
+// TestCoordinator_CreateChannelManager_DoesNotWaitForLookup verifies that a slow channel name lookup (e.g. during a
+// conversations.info backoff) does not block the coordinator, which routes alerts to all channels.
+func TestCoordinator_CreateChannelManager_DoesNotWaitForLookup(t *testing.T) {
+	t.Parallel()
+
+	slackClient := newNamingSlackClient("alerts")
+	slackClient.block = make(chan struct{})
+	c := newTestCoordinator(t, &stubDB{}, slackClient, &types.NoopMetrics{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	start := time.Now()
+
+	for _, channelID := range []string{"C1", "C2", "C3"} {
+		_, err := c.createChannelManager(ctx, channelID)
+		require.NoError(t, err)
+	}
+
+	assert.Less(t, time.Since(start), time.Second, "channel managers are created without waiting for the name lookups")
+
+	close(slackClient.block)
+	require.Eventually(t, func() bool { return slackClient.returned.Load() == 3 }, 2*time.Second, time.Millisecond)
+	stopChannelManagers(t, cancel, c)
+
+	for _, channelID := range []string{"C1", "C2", "C3"} {
+		assert.Equal(t, "alerts", c.channelManagers[channelID].channelName)
+	}
 }
 
 func TestCoordinator_FindOrCreateChannelManager(t *testing.T) {
@@ -174,10 +207,11 @@ func TestCoordinator_FindOrCreateChannelManager(t *testing.T) {
 	assert.Same(t, first, second, "an existing channel manager is reused")
 	assert.NotSame(t, first, other)
 	assert.Len(t, c.channelManagers, 2)
-	assert.Equal(t, int32(2), slackClient.lookups.Load(), "the name is looked up once per new channel manager")
 	assert.InDelta(t, 2, metrics.gauge(activeChannelManagersMetric), 0)
 
 	stopChannelManagers(t, cancel, c)
+
+	assert.Equal(t, int32(2), slackClient.lookups.Load(), "the name is looked up once per new channel manager")
 }
 
 func TestCoordinator_RefreshChannelManagers(t *testing.T) {

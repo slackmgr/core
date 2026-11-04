@@ -11,14 +11,15 @@ import (
 	"github.com/slackmgr/types"
 )
 
-// recordingMetrics is a thread-safe types.Metrics implementation that records counter values for assertions.
+// recordingMetrics is a thread-safe types.Metrics implementation that records counter and gauge values for assertions.
 type recordingMetrics struct {
 	mu       sync.Mutex
 	counters map[string]float64
+	gauges   map[string]float64
 }
 
 func newRecordingMetrics() *recordingMetrics {
-	return &recordingMetrics{counters: make(map[string]float64)}
+	return &recordingMetrics{counters: make(map[string]float64), gauges: make(map[string]float64)}
 }
 
 func metricKey(name string, labelValues ...string) string {
@@ -28,9 +29,21 @@ func metricKey(name string, labelValues ...string) string {
 func (r *recordingMetrics) RegisterCounter(_, _ string, _ ...string)                {}
 func (r *recordingMetrics) RegisterGauge(_, _ string, _ ...string)                  {}
 func (r *recordingMetrics) RegisterHistogram(_, _ string, _ []float64, _ ...string) {}
-func (r *recordingMetrics) GaugeSet(_ string, _ float64, _ ...string)               {}
-func (r *recordingMetrics) GaugeAdd(_ string, _ float64, _ ...string)               {}
 func (r *recordingMetrics) Observe(_ string, _ float64, _ ...string)                {}
+func (r *recordingMetrics) GaugeSet(name string, value float64, labelValues ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.gauges[metricKey(name, labelValues...)] = value
+}
+
+func (r *recordingMetrics) GaugeAdd(name string, value float64, labelValues ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.gauges[metricKey(name, labelValues...)] += value
+}
+
 func (r *recordingMetrics) CounterInc(name string, labelValues ...string) {
 	r.CounterAdd(name, 1, labelValues...)
 }
@@ -40,6 +53,27 @@ func (r *recordingMetrics) CounterAdd(name string, value float64, labelValues ..
 	defer r.mu.Unlock()
 
 	r.counters[metricKey(name, labelValues...)] += value
+}
+
+// openIssuesGauge returns the current value of the channel open issues gauge with the given channel label, and
+// whether the series exists.
+func (r *recordingMetrics) openIssuesGauge(channel string) (float64, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	v, ok := r.gauges[metricKey(channelOpenIssuesMetric, channel)]
+
+	return v, ok
+}
+
+// hasCounter reports whether the counter series with the given name and label values exists.
+func (r *recordingMetrics) hasCounter(name string, labelValues ...string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	_, ok := r.counters[metricKey(name, labelValues...)]
+
+	return ok
 }
 
 // counter returns the current value of the counter with the given name and label values.

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Per-channel metrics no longer keep the channel ID as their `channel` label until the next restart when the channel name could not be resolved at startup (e.g. while `conversations.info` was rate limited). The label switches from the channel ID to the name at the first successful name lookup (at the latest one minute after a failed lookup); `channel_open_issues` is set to 0 under the channel ID and carried over to the name. Counters and histograms split into two series (ID and name) in that case
+- Insights `channel_stats` events carry the channel name once it is known, instead of the channel ID for channel managers created before the name was resolved
+
+### Changed
+- The channel name is looked up by the channel manager goroutine when it starts, instead of by the coordinator when the channel manager is created, so a slow lookup (up to 5 seconds) no longer delays alert routing for all channels
+
 ## [0.23.0] - 2026-11-04
 
 ### Added

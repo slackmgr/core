@@ -325,13 +325,9 @@ func (c *coordinator) findOrCreateChannelManager(ctx context.Context, channelID 
 }
 
 func (c *coordinator) createChannelManager(ctx context.Context, channelID string) (*channelManager, error) {
-	// The lookup is bounded, since the coordinator routes alerts to all channels and must not stall on one lookup.
-	// An unknown name is looked up again by the channel manager.
-	lookupCtx, cancel := context.WithTimeout(ctx, channelNameLookupTimeout)
-	channelName := c.slack.GetChannelName(lookupCtx, channelID)
-	cancel()
-
-	channelManager := newChannelManager(channelID, channelName, c.slack, c.db, c.locker, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings, c.gate)
+	// The channel name is looked up by the channel manager goroutine, not here, since the coordinator routes alerts
+	// to all channels and must not wait for a Slack lookup.
+	channelManager := newChannelManager(channelID, c.slack, c.db, c.locker, c.logger, c.metrics, c.webhookHandlers, c.cfg, c.managerSettings, c.gate)
 	channelManager.insights = c.insights
 	channelManager.commandQueue = c.commandQueue
 	channelManager.channelStatsInterval = c.channelStatsInterval

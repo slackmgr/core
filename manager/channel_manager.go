@@ -71,8 +71,7 @@ func registerQueueMetrics(metrics types.Metrics) {
 type cmdFunc func(ctx context.Context, issue *models.Issue, cmd *models.Command, logger types.Logger) (bool, error)
 
 // channelNameLookupTimeout bounds a Slack channel name lookup, so that a slow Slack API or a rate limit backoff
-// on conversations.info never stalls channel processing (or the coordinator) for long. The last known name is
-// used if a lookup fails.
+// on conversations.info never stalls channel processing for long. The last known name is used if a lookup fails.
 const channelNameLookupTimeout = 5 * time.Second
 
 // channelNameRetryInterval is the minimum time between channel name lookups after a failed lookup.
@@ -81,9 +80,18 @@ const channelNameRetryInterval = time.Minute
 type channelManager struct {
 	channelID string
 
-	// channelName is the metrics label of the channel: the Slack channel name when the channel manager was
-	// created, or the channel ID if the name was unknown. It never changes, to keep metric series stable.
+	// channelName is the metrics label of the channel (the "channel" label of all per-channel metrics). It is the
+	// channel ID until the Slack channel name is first resolved (see channelNameIsFallback), and the name after that.
+	// It is not changed when the channel is renamed later, to keep metric series stable.
+	// Must only be accessed from the channel manager goroutine.
 	channelName string
+
+	// channelNameIsFallback is true while channelName is the channel ID, because the Slack channel name has not been
+	// resolved yet. The first successful name lookup switches channelName to the name, see switchMetricsLabel.
+	channelNameIsFallback bool
+
+	// openIssues is the last value of the open issues gauge, carried over to the new label by switchMetricsLabel.
+	openIssues float64
 
 	// slackChannelName is the last known Slack channel name, or empty if it was never resolved. It is refreshed
 	// at most once per channel info cache TTL by currentSlackChannelName, and kept when a refresh fails.
@@ -123,40 +131,30 @@ type alertOutcome struct {
 	reason    string
 }
 
-// newChannelManager creates a channel manager. slackChannelName is the Slack channel name, or empty if it is unknown.
-func newChannelManager(channelID string, slackChannelName string, slackClient SlackClient, db types.DB, locker ChannelLocker, logger types.Logger, metrics types.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
+// newChannelManager creates a channel manager. The Slack channel name is looked up when the channel manager starts
+// running, see initChannelName.
+func newChannelManager(channelID string, slackClient SlackClient, db types.DB, locker ChannelLocker, logger types.Logger, metrics types.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
 	managerSettings *models.ManagerSettingsWrapper, gate RateLimitGate,
 ) *channelManager {
 	logger = logger.WithField("channel_id", channelID)
 
-	channelName := slackChannelName
-	if channelName == "" {
-		channelName = channelID
-	}
-
-	// An unknown name is looked up on first use.
-	var channelNameNextRefresh time.Time
-	if slackChannelName != "" {
-		channelNameNextRefresh = time.Now().Add(channelNameRefreshInterval(cfg))
-	}
-
+	// The name is unknown until initChannelName (or the first use) looks it up. Until then, the channel ID is the label.
 	c := &channelManager{
-		channelID:              channelID,
-		channelName:            channelName,
-		slackChannelName:       slackChannelName,
-		channelNameNextRefresh: channelNameNextRefresh,
-		slackClient:            slackClient,
-		db:                     db,
-		locker:                 locker,
-		logger:                 logger,
-		metrics:                metrics,
-		webhookHandlers:        webhookHandlers,
-		cfg:                    cfg,
-		managerSettings:        managerSettings,
-		gate:                   gate,
-		alertCh:                make(chan *models.Alert, 10),
-		commandCh:              make(chan *models.Command, 10),
-		keepAliveCh:            make(chan struct{}, 10),
+		channelID:             channelID,
+		channelName:           channelID,
+		channelNameIsFallback: true,
+		slackClient:           slackClient,
+		db:                    db,
+		locker:                locker,
+		logger:                logger,
+		metrics:               metrics,
+		webhookHandlers:       webhookHandlers,
+		cfg:                   cfg,
+		managerSettings:       managerSettings,
+		gate:                  gate,
+		alertCh:               make(chan *models.Alert, 10),
+		commandCh:             make(chan *models.Command, 10),
+		keepAliveCh:           make(chan struct{}, 10),
 	}
 
 	c.cmdFuncs = map[models.CommandAction]cmdFunc{
@@ -208,17 +206,7 @@ func newChannelManager(channelID string, slackChannelName string, slackClient Sl
 	// Command processing by type
 	metrics.RegisterCounter(commandsProcessedTotalMetric, "Total commands processed by action type", "action")
 
-	// Pre-warm per-channel label combinations so they appear at /metrics from start.
-	metrics.CounterAdd(alertsTotal, 0, channelName)
-	metrics.GaugeSet(channelOpenIssuesMetric, 0, channelName)
-	metrics.CounterAdd(processActiveIssuesSkippedMetric, 0, channelName)
-	metrics.CounterAdd(issuesArchivedTotalMetric, 0, channelName)
-	metrics.CounterAdd(issuesEscalatedTotalMetric, 0, channelName)
-	metrics.CounterAdd(issuesCreatedTotalMetric, 0, channelName)
-	metrics.CounterAdd(channelLockAcquireFailuresTotalMetric, 0, channelName)
-	metrics.CounterAdd(alertsGroupedTotalMetric, 0, channelName)
-	metrics.CounterAdd(alertsIgnoredTotalMetric, 0, channelName)
-	metrics.CounterAdd(alertsResolvedWithoutIssueTotalMetric, 0, channelName)
+	// Per-channel label combinations are pre-warmed by initChannelName, once the label is known.
 
 	// Pre-warm fixed-enum label combinations.
 	for _, event := range []string{"terminated", "resolved", "unresolved", "investigated", "uninvestigated", "muted", "unmuted"} {
@@ -250,7 +238,9 @@ func newChannelManager(channelID string, slackChannelName string, slackClient Sl
 // This method blocks until the context is cancelled.
 // All errors are logged and not returned.
 func (c *channelManager) run(ctx context.Context) {
-	c.logger.Info("Channel manager started")
+	c.initChannelName(ctx)
+
+	c.logger.WithField("channel_name", c.slackChannelName).Info("Channel manager started")
 	defer c.logger.Info("Channel manager exited")
 
 	processorTimeout := time.After(time.Second)
@@ -463,6 +453,10 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	}
 
 	defer c.releaseLock(lock)
+
+	// Resolved before any metric is recorded, so that a first successful lookup switches the label first.
+	slackChannelName := c.currentSlackChannelName(ctx)
+
 	c.metrics.CounterInc(alertsTotal, c.channelName)
 
 	if c.cfg.EnableLegacyFeatures {
@@ -470,7 +464,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	}
 
 	alert.SetDefaultValues(c.managerSettings.GetSettings())
-	alert.SlackChannelName = c.currentSlackChannelName(ctx)
+	alert.SlackChannelName = slackChannelName
 
 	if err := alert.Validate(); err != nil {
 		// Non-retryable: the alert data is malformed and will never become valid.
@@ -767,7 +761,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 
 	// Stop here if there are no open issues in the channel.
 	if processingState.OpenIssues == 0 {
-		c.recordChannelStats(now, prevRun, nil, "")
+		c.recordChannelStats(now, prevRun, nil)
 		return 0, nil
 	}
 
@@ -889,13 +883,14 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		c.insights.Record(e)
 	}
 
-	c.recordChannelStats(now, prevRun, issuesToUpdate, currentChannelName)
+	c.recordChannelStats(now, prevRun, issuesToUpdate)
 
 	elapsed := time.Since(started)
 	c.logger.WithField("count", len(issuesToUpdate)).WithField("moved_count", len(movedIssues)).WithField("elapsed", elapsed).Debug("Issue processing completed")
 
 	c.metrics.Observe(processActiveIssuesDurationMetric, elapsed.Seconds(), c.channelName)
-	c.metrics.GaugeSet(channelOpenIssuesMetric, float64(openIssues), c.channelName)
+	c.openIssues = float64(openIssues)
+	c.metrics.GaugeSet(channelOpenIssuesMetric, c.openIssues, c.channelName)
 
 	return processingState.OpenIssues, nil
 }
@@ -1414,11 +1409,76 @@ func (c *channelManager) currentSlackChannelName(ctx context.Context) string {
 	if name := c.slackClient.GetChannelName(lookupCtx, c.channelID); name != "" {
 		c.slackChannelName = name
 		c.channelNameNextRefresh = now.Add(interval)
+
+		if c.channelNameIsFallback {
+			c.switchMetricsLabel(name)
+		}
 	} else {
 		c.channelNameNextRefresh = now.Add(min(channelNameRetryInterval, interval))
 	}
 
 	return c.slackChannelName
+}
+
+// initChannelName looks up the Slack channel name when the channel manager starts, and pre-warms the per-channel
+// metric series with the resulting label, so that they appear at /metrics from start. The lookup runs in the channel
+// manager goroutine, not in the coordinator, so that a slow lookup or a conversations.info backoff never delays the
+// routing of alerts to other channels. If the lookup fails, the channel ID is the label until the name is resolved,
+// and the name is looked up again on first use. Must only be called from the channel manager goroutine.
+func (c *channelManager) initChannelName(ctx context.Context) {
+	if c.channelNameIsFallback {
+		lookupCtx, cancel := context.WithTimeout(ctx, channelNameLookupTimeout)
+		name := c.slackClient.GetChannelName(lookupCtx, c.channelID)
+		cancel()
+
+		if name != "" {
+			c.slackChannelName = name
+			c.channelNameNextRefresh = time.Now().Add(channelNameRefreshInterval(c.cfg))
+			c.channelName = name
+			c.channelNameIsFallback = false
+		}
+	}
+
+	c.prewarmChannelMetrics()
+}
+
+// switchMetricsLabel switches the metrics label from the channel ID fallback to the Slack channel name, when the
+// name is resolved for the first time. Counters and histograms continue under the new label; the series under the
+// channel ID keep their last value. The open issues gauge is set to zero under the channel ID ([types.Metrics] cannot
+// delete a series), so that it is not stuck at its last value, and carried over to the new label.
+// Must only be called from the channel manager goroutine.
+func (c *channelManager) switchMetricsLabel(name string) {
+	previous := c.channelName
+
+	c.metrics.GaugeSet(channelOpenIssuesMetric, 0, previous)
+
+	c.channelName = name
+	c.channelNameIsFallback = false
+
+	c.prewarmChannelMetrics()
+	c.metrics.GaugeSet(channelOpenIssuesMetric, c.openIssues, name)
+
+	c.logger.WithField("channel_name", name).Info("Channel metrics label switched from channel ID to channel name")
+}
+
+// prewarmChannelMetrics creates the per-channel metric series for the current label, so that they appear at
+// /metrics before the first event.
+func (c *channelManager) prewarmChannelMetrics() {
+	for _, name := range []string{
+		alertsTotal,
+		processActiveIssuesSkippedMetric,
+		issuesArchivedTotalMetric,
+		issuesEscalatedTotalMetric,
+		issuesCreatedTotalMetric,
+		channelLockAcquireFailuresTotalMetric,
+		alertsGroupedTotalMetric,
+		alertsIgnoredTotalMetric,
+		alertsResolvedWithoutIssueTotalMetric,
+	} {
+		c.metrics.CounterAdd(name, 0, c.channelName)
+	}
+
+	c.metrics.GaugeSet(channelOpenIssuesMetric, c.openIssues, c.channelName)
 }
 
 // channelNameRefreshInterval returns how often a channel manager refreshes the Slack channel name: the channel info

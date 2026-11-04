@@ -88,7 +88,10 @@ type channelStatsPrevRun struct {
 // The decision is based on the persisted state of the previous run, not on in-memory state, because processing
 // runs of a channel alternate between manager instances. Each snapshot is therefore recorded once, by whichever
 // instance runs first in the window.
-func (c *channelManager) recordChannelStats(now time.Time, prev channelStatsPrevRun, issues []*models.Issue, channelName string) {
+//
+// The event carries the last known Slack channel name (refreshed by processActiveIssues), or the channel ID if the
+// name was never resolved. No lookup is done here, since emit sites must not do I/O.
+func (c *channelManager) recordChannelStats(now time.Time, prev channelStatsPrevRun, issues []*models.Issue) {
 	if !c.insights.Enabled() {
 		return
 	}
@@ -137,8 +140,9 @@ func (c *channelManager) recordChannelStats(now time.Time, prev channelStatsPrev
 		return
 	}
 
+	channelName := c.slackChannelName
 	if channelName == "" {
-		channelName = c.channelName
+		channelName = c.channelID
 	}
 
 	c.insights.Record(types.InsightsEvent{

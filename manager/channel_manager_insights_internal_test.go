@@ -405,7 +405,7 @@ func TestChannelManager_RecordChannelStats_Interval(t *testing.T) {
 			cm := newInsightsChannelManager(t, &insightsStubDB{}, &NoopChannelLocker{}, recorder)
 			cm.channelStatsInterval = time.Hour
 
-			cm.recordChannelStats(tt.now, tt.prev, tt.issues, "name")
+			cm.recordChannelStats(tt.now, tt.prev, tt.issues)
 			flush(recorder)
 
 			stats := sink.ofType(types.InsightsEventChannelStats)
@@ -447,7 +447,7 @@ func TestChannelManager_RecordChannelStats_MultipleInstances(t *testing.T) {
 
 	for i := range 120 {
 		now := start.Add(time.Duration(i) * 10 * time.Second)
-		instances[i%2].recordChannelStats(now, prev, issues, "name")
+		instances[i%2].recordChannelStats(now, prev, issues)
 		prev = channelStatsPrevRun{processed: now, openIssues: len(issues)}
 	}
 
