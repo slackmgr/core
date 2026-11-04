@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Per-channel metrics no longer use the channel ID as their `channel` label (until the next restart) when the channel name cannot be resolved at startup, e.g. while `conversations.info` is rate limited. While the name is unknown, the channel's per-channel metrics are held in memory and emitted under the name at the first successful lookup (retried once per minute), so no channel ID series is created. If the name is still unknown after 5 minutes, the channel ID is used as label until the name is resolved; then the label switches to the name and `channel_open_issues` is set to 0 under the channel ID
+- `channel_open_issues` could stay at a stale value with multiple manager instances: an instance whose processing run was skipped (because another instance had just processed the channel) kept its own last value, and an instance that found the channel empty after another instance archived the last issues did not reset it. Since the dashboard takes the max over instances, channels could show open issues after all were archived. Skipped runs now take over the count persisted by the other instance, and an empty channel sets the gauge to 0
 - Insights `channel_stats` events carry the channel name once it is known, instead of the channel ID for channel managers created before the name was resolved
 
 ### Changed

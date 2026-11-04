@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -483,4 +484,93 @@ func TestChannelManager_ChannelStats_ChannelName(t *testing.T) {
 			}
 		})
 	}
+}
+
+// processingStateDB is an insightsStubDB that stores the channel processing state, shared by several instances.
+type processingStateDB struct {
+	insightsStubDB
+
+	mu    sync.Mutex
+	state *types.ChannelProcessingState
+}
+
+func (d *processingStateDB) FindChannelProcessingState(_ context.Context, _ string) (*types.ChannelProcessingState, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.state == nil {
+		return nil, nil //nolint:nilnil // No state stored yet
+	}
+
+	state := *d.state
+
+	return &state, nil
+}
+
+func (d *processingStateDB) SaveChannelProcessingState(_ context.Context, state *types.ChannelProcessingState) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	saved := *state
+	d.state = &saved
+
+	return nil
+}
+
+func (d *processingStateDB) setState(lastProcessed time.Time, openIssues int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.state = &types.ChannelProcessingState{ChannelID: insightsTestChannel, LastProcessed: lastProcessed, OpenIssues: openIssues}
+}
+
+// TestChannelManager_OpenIssuesGauge_OtherInstance verifies that the open issues gauge of an instance follows the
+// processing runs of other instances, instead of being stuck at its own last value.
+func TestChannelManager_OpenIssuesGauge_OtherInstance(t *testing.T) {
+	t.Parallel()
+
+	issues := map[string]json.RawMessage{}
+
+	for _, id := range []string{"i1", "i2"} {
+		issues[id] = existingIssueJSON(t, types.AlertError, time.Now().UTC(), func(issue *models.Issue) {
+			issue.ID = id
+			issue.CorrelationID = "corr-" + id
+		})
+	}
+
+	db := &processingStateDB{insightsStubDB: insightsStubDB{openIssues: issues}}
+	metrics := newRecordingMetrics()
+	cm := newNamingChannelManager(t, db, newNamingSlackClient("alerts"), metrics)
+	cm.initChannelName(context.Background())
+
+	gauge := func() float64 {
+		t.Helper()
+
+		v, ok := metrics.openIssuesGauge("alerts")
+		require.True(t, ok)
+
+		return v
+	}
+
+	// This instance processes the channel.
+	_, err := cm.processActiveIssues(context.Background(), time.Minute)
+	require.NoError(t, err)
+	assert.InDelta(t, 2, gauge(), 0)
+
+	// Another instance processed the channel just now, and found one open issue: this run is skipped.
+	db.setState(time.Now().UTC(), 1)
+
+	openIssues, err := cm.processActiveIssues(context.Background(), time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 1, openIssues)
+	assert.InDelta(t, 1, gauge(), 0, "the skipped run takes over the other instance's count")
+
+	// The other instance archived the last issue: this instance's next run finds the channel empty.
+	db.setState(time.Now().UTC().Add(-time.Hour), 0)
+	db.openIssues = nil
+
+	openIssues, err = cm.processActiveIssues(context.Background(), time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, 0, openIssues)
+	assert.InDelta(t, 0, gauge(), 0, "an empty channel sets the gauge to zero")
 }

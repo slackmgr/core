@@ -736,6 +736,12 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 	if timeSinceLastProcessed < minInterval {
 		c.logger.WithField("last_processed", timeSinceLastProcessed).WithField("min_interval", minInterval).Debug("Skipping issue processing due to recent processing by other manager")
 		c.counterAdd(processActiveIssuesSkippedMetric, 1)
+
+		// Take over the open issue count from the other instance's run, so that this instance's gauge is not stuck
+		// at its own last value (the dashboard takes the max over instances). The persisted count is taken before
+		// archiving, so issues archived by that run are still counted until the next run.
+		c.setOpenIssues(float64(processingState.OpenIssues))
+
 		return processingState.OpenIssues, nil
 	}
 
@@ -769,6 +775,8 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 
 	// Stop here if there are no open issues in the channel.
 	if processingState.OpenIssues == 0 {
+		// The last issues may have been archived by another instance, so the gauge is not necessarily zero yet.
+		c.setOpenIssues(0)
 		c.recordChannelStats(now, prevRun, nil)
 		return 0, nil
 	}
