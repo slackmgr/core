@@ -477,7 +477,7 @@ func TestChannelManager_ProcessAlert_ResolvedWithoutIssue(t *testing.T) {
 		},
 	}
 
-	cm := newTestChannelManager(t, channelID, db, &stubSlackClient{}, &NoopChannelLocker{})
+	cm := newTestChannelManager(t, channelID, db, newNamingSlackClient("alerts"), &NoopChannelLocker{})
 	metrics := newRecordingMetrics()
 	cm.metrics = metrics
 
@@ -495,8 +495,8 @@ func TestChannelManager_ProcessAlert_ResolvedWithoutIssue(t *testing.T) {
 	assert.True(t, *ackCalled)
 	assert.False(t, *nackCalled)
 	assert.Equal(t, int32(1), savedAlerts.Load(), "the alert is still saved to the alerts table")
-	assert.InDelta(t, 1.0, metrics.counter(alertsResolvedWithoutIssueTotalMetric, channelID), 0)
-	assert.InDelta(t, 0.0, metrics.counter(issuesCreatedTotalMetric, channelID), 0)
+	assert.InDelta(t, 1.0, metrics.counter(alertsResolvedWithoutIssueTotalMetric, "alerts"), 0)
+	assert.InDelta(t, 0.0, metrics.counter(issuesCreatedTotalMetric, "alerts"), 0)
 }
 
 // moveRecordingDB records the DB calls made when moving an issue.

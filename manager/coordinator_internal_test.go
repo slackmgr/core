@@ -151,8 +151,7 @@ func TestCoordinator_CreateChannelManager_UnknownName(t *testing.T) {
 	stopChannelManagers(t, cancel, c)
 
 	assert.Empty(t, cm.slackChannelName)
-	assert.Equal(t, "C1", cm.channelName, "the channel ID is the metrics label while the name is unknown")
-	assert.True(t, cm.channelNameIsFallback)
+	assert.Equal(t, channelLabelPending, cm.labelState, "metrics are held while the name is unknown")
 }
 
 // TestCoordinator_CreateChannelManager_DoesNotWaitForLookup verifies that a slow channel name lookup (e.g. during a

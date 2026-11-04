@@ -16,10 +16,11 @@ type recordingMetrics struct {
 	mu       sync.Mutex
 	counters map[string]float64
 	gauges   map[string]float64
+	observed map[string]int
 }
 
 func newRecordingMetrics() *recordingMetrics {
-	return &recordingMetrics{counters: make(map[string]float64), gauges: make(map[string]float64)}
+	return &recordingMetrics{counters: make(map[string]float64), gauges: make(map[string]float64), observed: make(map[string]int)}
 }
 
 func metricKey(name string, labelValues ...string) string {
@@ -29,7 +30,6 @@ func metricKey(name string, labelValues ...string) string {
 func (r *recordingMetrics) RegisterCounter(_, _ string, _ ...string)                {}
 func (r *recordingMetrics) RegisterGauge(_, _ string, _ ...string)                  {}
 func (r *recordingMetrics) RegisterHistogram(_, _ string, _ []float64, _ ...string) {}
-func (r *recordingMetrics) Observe(_ string, _ float64, _ ...string)                {}
 func (r *recordingMetrics) GaugeSet(name string, value float64, labelValues ...string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -42,6 +42,13 @@ func (r *recordingMetrics) GaugeAdd(name string, value float64, labelValues ...s
 	defer r.mu.Unlock()
 
 	r.gauges[metricKey(name, labelValues...)] += value
+}
+
+func (r *recordingMetrics) Observe(name string, _ float64, labelValues ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.observed[metricKey(name, labelValues...)]++
 }
 
 func (r *recordingMetrics) CounterInc(name string, labelValues ...string) {
@@ -64,6 +71,14 @@ func (r *recordingMetrics) openIssuesGauge(channel string) (float64, bool) {
 	v, ok := r.gauges[metricKey(channelOpenIssuesMetric, channel)]
 
 	return v, ok
+}
+
+// observations returns the number of observations of the histogram with the given name and label values.
+func (r *recordingMetrics) observations(name string, labelValues ...string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.observed[metricKey(name, labelValues...)]
 }
 
 // hasCounter reports whether the counter series with the given name and label values exists.

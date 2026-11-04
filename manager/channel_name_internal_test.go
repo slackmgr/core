@@ -83,6 +83,21 @@ func newNamingChannelManager(t *testing.T, db types.DB, slackClient SlackClient,
 	return cm
 }
 
+// assertNoChannelIDSeries asserts that no per-channel series exists with the channel ID as label.
+func assertNoChannelIDSeries(t *testing.T, metrics *recordingMetrics) {
+	t.Helper()
+
+	label := insightsTestChannel
+
+	for _, name := range perChannelCounters {
+		assert.False(t, metrics.hasCounter(name, label), "%s has no series under %s", name, label)
+	}
+
+	_, ok := metrics.openIssuesGauge(label)
+	assert.False(t, ok, "no open issues series under %s", label)
+	assert.Zero(t, metrics.observations(processActiveIssuesDurationMetric, label), "no duration observations under %s", label)
+}
+
 func TestChannelManager_InitChannelName(t *testing.T) {
 	t.Parallel()
 
@@ -93,27 +108,27 @@ func TestChannelManager_InitChannelName(t *testing.T) {
 		metrics := newRecordingMetrics()
 		cm := newNamingChannelManager(t, nil, slackClient, metrics)
 
-		assert.Equal(t, insightsTestChannel, cm.channelName, "the channel ID is the label until the name is resolved")
+		assert.Equal(t, channelLabelPending, cm.labelState)
 
 		cm.initChannelName(context.Background())
 
 		assert.Equal(t, "alerts", cm.channelName)
-		assert.False(t, cm.channelNameIsFallback)
+		assert.Equal(t, channelLabelName, cm.labelState)
 		assert.True(t, slackClient.lookupHasDeadline.Load(), "the lookup is bounded")
 
 		for _, name := range perChannelCounters {
 			assert.True(t, metrics.hasCounter(name, "alerts"), "%s is pre-warmed with the name", name)
-			assert.False(t, metrics.hasCounter(name, insightsTestChannel), "%s has no series under the channel ID", name)
 		}
 
-		_, ok := metrics.openIssuesGauge(insightsTestChannel)
-		assert.False(t, ok, "no open issues series under the channel ID")
+		_, ok := metrics.openIssuesGauge("alerts")
+		assert.True(t, ok, "the open issues gauge is pre-warmed with the name")
+		assertNoChannelIDSeries(t, metrics)
 
 		assert.Equal(t, "alerts", cm.currentSlackChannelName(context.Background()))
 		assert.Equal(t, int32(1), slackClient.lookups.Load(), "a resolved name is not looked up again before the refresh interval")
 	})
 
-	t.Run("unknown name falls back to the channel ID", func(t *testing.T) {
+	t.Run("unknown name holds metrics", func(t *testing.T) {
 		t.Parallel()
 
 		slackClient := newNamingSlackClient("")
@@ -122,20 +137,21 @@ func TestChannelManager_InitChannelName(t *testing.T) {
 
 		cm.initChannelName(context.Background())
 
-		assert.Equal(t, insightsTestChannel, cm.channelName)
-		assert.True(t, cm.channelNameIsFallback)
-		assert.True(t, metrics.hasCounter(alertsTotal, insightsTestChannel), "series are pre-warmed with the channel ID")
+		assert.Equal(t, channelLabelPending, cm.labelState)
+		assertNoChannelIDSeries(t, metrics)
 		assert.True(t, cm.channelNameNextRefresh.IsZero(), "an unknown name is looked up again on first use")
 
 		slackClient.name.Store("alerts")
 
 		assert.Equal(t, "alerts", cm.currentSlackChannelName(context.Background()), "the first use looks up the name")
-		assert.Equal(t, "alerts", cm.channelName, "the label switches at the first successful lookup")
+		assert.Equal(t, "alerts", cm.channelName, "the first successful lookup sets the label")
+		assert.Equal(t, channelLabelName, cm.labelState)
+		assert.True(t, metrics.hasCounter(alertsTotal, "alerts"))
 		assert.Equal(t, int32(2), slackClient.lookups.Load())
 	})
 }
 
-func TestChannelManager_SwitchMetricsLabel(t *testing.T) {
+func TestChannelManager_PendingLabel_HoldsMetrics(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now().UTC()
@@ -143,78 +159,105 @@ func TestChannelManager_SwitchMetricsLabel(t *testing.T) {
 
 	slackClient := newNamingSlackClient("")
 	metrics := newRecordingMetrics()
-	cm := newNamingChannelManager(t, &insightsStubDB{openIssues: map[string]json.RawMessage{"i1": body}}, slackClient, metrics)
+	db := &insightsStubDB{openIssues: map[string]json.RawMessage{"i1": body}}
+	cm := newNamingChannelManager(t, db, slackClient, metrics)
 
 	cm.initChannelName(context.Background())
 
-	// The name lookup fails (e.g. conversations.info is backing off): metrics use the channel ID.
+	// The name lookups fail (e.g. conversations.info is backing off): metrics are held, nothing is emitted.
+	alert, _, _ := newTestAlertFromData(t, validInsightsAlert(types.AlertError, now))
+	require.NoError(t, cm.processAlert(context.Background(), alert))
+
 	_, err := cm.processActiveIssues(context.Background(), time.Second)
 	require.NoError(t, err)
 
-	open, _ := metrics.openIssuesGauge(insightsTestChannel)
-	assert.InDelta(t, 1, open, 0)
+	assertNoChannelIDSeries(t, metrics)
 
-	// The next refresh resolves the name.
+	// The next refresh resolves the name: the held metrics are emitted under the name.
 	slackClient.name.Store("alerts")
-	cm.channelNameNextRefresh = time.Now().Add(-time.Second)
+	cm.channelNameNextRefresh = time.Time{}
 
 	_, err = cm.processActiveIssues(context.Background(), time.Second)
 	require.NoError(t, err)
 
 	assert.Equal(t, "alerts", cm.channelName)
-	assert.False(t, cm.channelNameIsFallback)
+	assert.Equal(t, channelLabelName, cm.labelState)
+	assert.InDelta(t, 1, metrics.counter(alertsTotal, "alerts"), 0)
+	assert.InDelta(t, 1, metrics.counter(issuesCreatedTotalMetric, "alerts"), 0)
+	assert.Equal(t, 2, metrics.observations(processActiveIssuesDurationMetric, "alerts"), "held and new observations")
 
-	open, ok := metrics.openIssuesGauge(insightsTestChannel)
+	open, ok := metrics.openIssuesGauge("alerts")
 	require.True(t, ok)
-	assert.InDelta(t, 0, open, 0, "the open issues gauge under the channel ID is not left at its last value")
+	assert.InDelta(t, 1, open, 0)
 
-	open, ok = metrics.openIssuesGauge("alerts")
-	require.True(t, ok)
-	assert.InDelta(t, 1, open, 0, "the open issues gauge continues under the name")
-
-	for _, name := range perChannelCounters {
-		assert.True(t, metrics.hasCounter(name, "alerts"), "%s is pre-warmed with the name", name)
-	}
+	assertNoChannelIDSeries(t, metrics)
+	assert.Nil(t, cm.pendingCounters)
+	assert.Nil(t, cm.pendingObservations)
 
 	// A later rename does not change the label.
 	slackClient.name.Store("renamed")
-	cm.channelNameNextRefresh = time.Now().Add(-time.Second)
+	cm.channelNameNextRefresh = time.Time{}
 
 	assert.Equal(t, "renamed", cm.currentSlackChannelName(context.Background()))
 	assert.Equal(t, "alerts", cm.channelName, "the label is not changed by a rename")
 }
 
-func TestChannelManager_SwitchMetricsLabel_CarriesOpenIssues(t *testing.T) {
+func TestChannelManager_PendingLabel_ObservationsAreCapped(t *testing.T) {
 	t.Parallel()
 
 	metrics := newRecordingMetrics()
 	cm := newNamingChannelManager(t, nil, newNamingSlackClient(""), metrics)
-	cm.openIssues = 3
 
-	cm.switchMetricsLabel("alerts")
+	for range maxPendingObservations + 10 {
+		cm.observe(processActiveIssuesDurationMetric, 1)
+	}
 
-	open, _ := metrics.openIssuesGauge(insightsTestChannel)
-	assert.InDelta(t, 0, open, 0)
+	assert.Len(t, cm.pendingObservations, maxPendingObservations)
 
-	open, _ = metrics.openIssuesGauge("alerts")
-	assert.InDelta(t, 3, open, 0, "the last open issues value is carried over before the next processing run")
+	cm.nameResolved("alerts")
+
+	assert.Equal(t, maxPendingObservations, metrics.observations(processActiveIssuesDurationMetric, "alerts"))
 }
 
-func TestChannelManager_ProcessAlert_SwitchesLabelFirst(t *testing.T) {
+func TestChannelManager_PendingLabel_MaxWait(t *testing.T) {
 	t.Parallel()
 
-	slackClient := newNamingSlackClient("alerts")
+	slackClient := newNamingSlackClient("")
 	metrics := newRecordingMetrics()
-	cm := newNamingChannelManager(t, &insightsStubDB{}, slackClient, metrics)
+	cm := newNamingChannelManager(t, nil, slackClient, metrics)
 
-	alert, ackCalled, _ := newTestAlertFromData(t, validInsightsAlert(types.AlertError, time.Now()))
-	require.NoError(t, cm.processAlert(context.Background(), alert))
-	assert.True(t, *ackCalled)
+	cm.counterAdd(alertsTotal, 1)
+	cm.setOpenIssues(3)
+	assertNoChannelIDSeries(t, metrics)
 
-	assert.Equal(t, "alerts", alert.SlackChannelName)
-	assert.InDelta(t, 1, metrics.counter(alertsTotal, "alerts"), 0, "the alert that resolves the name is counted under the name")
-	assert.InDelta(t, 1, metrics.counter(issuesCreatedTotalMetric, "alerts"), 0)
-	assert.InDelta(t, 0, metrics.counter(alertsTotal, insightsTestChannel), 0)
+	// The name is not resolved within the max wait: the channel ID becomes the label, with the held metrics.
+	cm.labelDeadline = time.Now().Add(-time.Second)
+	cm.counterAdd(alertsTotal, 1)
+
+	assert.Equal(t, channelLabelID, cm.labelState)
+	assert.Equal(t, insightsTestChannel, cm.channelName)
+	assert.InDelta(t, 2, metrics.counter(alertsTotal, insightsTestChannel), 0)
+
+	open, _ := metrics.openIssuesGauge(insightsTestChannel)
+	assert.InDelta(t, 3, open, 0)
+
+	// The name is resolved later: the label switches, and the gauge is not left at its last value under the ID.
+	slackClient.name.Store("alerts")
+	cm.channelNameNextRefresh = time.Time{}
+	cm.currentSlackChannelName(context.Background())
+
+	assert.Equal(t, channelLabelName, cm.labelState)
+	assert.Equal(t, "alerts", cm.channelName)
+
+	open, _ = metrics.openIssuesGauge(insightsTestChannel)
+	assert.InDelta(t, 0, open, 0, "the open issues gauge under the channel ID is zeroed")
+
+	open, _ = metrics.openIssuesGauge("alerts")
+	assert.InDelta(t, 3, open, 0, "the open issues gauge continues under the name")
+
+	cm.counterAdd(alertsTotal, 1)
+	assert.InDelta(t, 1, metrics.counter(alertsTotal, "alerts"), 0)
+	assert.InDelta(t, 2, metrics.counter(alertsTotal, insightsTestChannel), 0)
 }
 
 // TestChannelManager_ChannelName_NoRace runs a channel manager whose name is resolved while alerts are processed and
