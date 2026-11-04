@@ -19,11 +19,12 @@ const (
 	// [WithRateLimitGate]), which pauses all channel processing until the Retry-After window has passed.
 	RateLimitGroupWrite = "write"
 
-	// RateLimitGroupLookup is the group of all other Slack methods, such as conversations.info,
-	// conversations.members, users.info, usergroups.users.list and conversations.history. A 429 on a lookup
-	// method only backs off that method: later calls to it wait for (or fail fast on) the method's own
-	// deadline, and cached lookups serve a stale value instead. Channel processing is not paused.
-	RateLimitGroupLookup = "lookup"
+	// RateLimitGroupOther is the group of all other Slack methods: lookups such as conversations.info,
+	// conversations.members, users.info, usergroups.users.list and conversations.history, and interactive
+	// replies such as chat.postEphemeral, chat.responseURL and views.update. A 429 on one of these methods only
+	// backs off that method: later calls to it wait for (or fail fast on) the method's own deadline, and cached
+	// lookups serve a stale value instead. Channel processing is not paused.
+	RateLimitGroupOther = "other"
 )
 
 const (
@@ -53,14 +54,14 @@ var writeMethods = map[string]struct{}{
 	"chat.delete": {},
 }
 
-// RateLimitGroup returns the rate limit group ([RateLimitGroupWrite] or [RateLimitGroupLookup]) of a Slack
+// RateLimitGroup returns the rate limit group ([RateLimitGroupWrite] or [RateLimitGroupOther]) of a Slack
 // API action, as used in the slack_action metric label.
 func RateLimitGroup(action string) string {
 	if _, ok := writeMethods[action]; ok {
 		return RateLimitGroupWrite
 	}
 
-	return RateLimitGroupLookup
+	return RateLimitGroupOther
 }
 
 // IsRateLimitError reports whether err is (or wraps) a Slack 429 error, or an [ErrRateLimitBackoff] error.
@@ -126,7 +127,7 @@ func (b *methodBackoff) blockedUntil(ctx context.Context, method string) time.Ti
 	return time.UnixMilli(unixMilli)
 }
 
-// awaitMethodBackoff checks whether a lookup method is backing off after a 429 before it is called. If so, it waits
+// awaitMethodBackoff checks whether a non-write method is backing off after a 429 before it is called. If so, it waits
 // until the deadline has passed, or returns an error wrapping [ErrRateLimitBackoff] without waiting if failFast is
 // true, or if the deadline is beyond the context deadline or the remaining rate limit retry budget.
 // Write methods are never checked here: they are paused by the global rate limit gate before a channel is processed,

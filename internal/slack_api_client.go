@@ -154,7 +154,7 @@ func (c *SlackAPIClient) Connect(ctx context.Context) (*slack.AuthTestResponse, 
 	c.metrics.RegisterCounter(slackAPIErrorsTotalMetric, "Total Slack API call errors by error type", "slack_action", "error_type")
 	c.metrics.RegisterCounter(slackAPIRetriesTotalMetric, "Total Slack API retry attempts after a recoverable error", "slack_action", "error_type")
 	c.metrics.RegisterHistogram(slackAPIRateLimitDurationMetric, "Retry-After duration in seconds from Slack 429 responses", []float64{1, 5, 10, 30, 60, 120, 300}, "slack_action")
-	c.metrics.RegisterCounter(slackAPIRateLimitedTotalMetric, "Total Slack 429 responses by action and rate limit group (write = pauses all channels, lookup = backs off the method only)", "slack_action", "rate_limit_group")
+	c.metrics.RegisterCounter(slackAPIRateLimitedTotalMetric, "Total Slack 429 responses by action and rate limit group (write = pauses all channels, other = backs off the method only)", "slack_action", "rate_limit_group")
 	c.metrics.RegisterCounter(slackAPIBackoffTotalMetric, "Total Slack API calls that found their method backing off after a 429, by outcome (waited or rejected)", "slack_action", "outcome")
 	c.metrics.RegisterHistogram(slackAPICallDurationMetric, "Duration of individual outbound Slack API calls in seconds", []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30}, "slack_action")
 

@@ -124,14 +124,14 @@ func TestRateLimitGroup(t *testing.T) {
 		{"chat.post", RateLimitGroupWrite},
 		{"chat.update", RateLimitGroupWrite},
 		{"chat.delete", RateLimitGroupWrite},
-		{"conversations.info", RateLimitGroupLookup},
-		{"conversations.members", RateLimitGroupLookup},
-		{"conversations.history", RateLimitGroupLookup},
-		{"users.info", RateLimitGroupLookup},
-		{"usergroups.users.list", RateLimitGroupLookup},
-		{"chat.postEphemeral", RateLimitGroupLookup},
-		{"views.update", RateLimitGroupLookup},
-		{"", RateLimitGroupLookup},
+		{"conversations.info", RateLimitGroupOther},
+		{"conversations.members", RateLimitGroupOther},
+		{"conversations.history", RateLimitGroupOther},
+		{"users.info", RateLimitGroupOther},
+		{"usergroups.users.list", RateLimitGroupOther},
+		{"chat.postEphemeral", RateLimitGroupOther},
+		{"views.update", RateLimitGroupOther},
+		{"", RateLimitGroupOther},
 	}
 
 	for _, tc := range tests {
@@ -347,7 +347,7 @@ func TestSignalRateLimit(t *testing.T) {
 
 		assert.Equal(t, int32(0), gate.signals.Load(), "global gate not signalled")
 		assert.True(t, c.backoff.blockedUntil(context.Background(), "conversations.info").After(time.Now().Add(11*time.Second)))
-		assert.Equal(t, 1, metrics.counter(slackAPIRateLimitedTotalMetric, "conversations.info", RateLimitGroupLookup))
+		assert.Equal(t, 1, metrics.counter(slackAPIRateLimitedTotalMetric, "conversations.info", RateLimitGroupOther))
 		assert.Equal(t, 1, metrics.observations(slackAPIRateLimitDurationMetric, "conversations.info"))
 	})
 
@@ -402,7 +402,7 @@ func TestRateLimitGroups_EndToEnd(t *testing.T) {
 		require.Error(t, err)
 		assert.True(t, IsRateLimitError(err))
 		assert.Equal(t, int32(0), gate.signals.Load())
-		assert.Equal(t, 1, metrics.counter(slackAPIRateLimitedTotalMetric, "conversations.info", RateLimitGroupLookup))
+		assert.Equal(t, 1, metrics.counter(slackAPIRateLimitedTotalMetric, "conversations.info", RateLimitGroupOther))
 
 		// The next call fails fast on the method backoff, without calling Slack.
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
