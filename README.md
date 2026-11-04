@@ -254,7 +254,7 @@ Tune or disable recording with `ManagerConfig.Insights` (`config.InsightsConfig`
 | `ShutdownFlushTimeoutMs` | `2000` | Maximum time spent flushing at shutdown |
 | `ChannelStatsIntervalSeconds` | `300` | Interval between channel snapshots: at most one per channel with open issues per interval window, across all manager instances, plus a final zero snapshot when the channel becomes empty |
 
-The API server can also record alert intake events (queued, filtered and rejected alerts) with `Server.WithInsightsSink` and `APIConfig.Insights`. This is optional; without it, rejections are still counted in the `alerts_rejected_total{reason}` and `alerts_filtered_total{reason}` metrics.
+The API server can also record alert intake events (queued, filtered and rejected alerts) with `Server.WithInsightsSink` and `APIConfig.Insights`. This is optional; without it, rejections are still counted in the `alerts_rejected_total{reason}` and `alerts_filtered_total{reason}` metrics. Filtered and rejected alerts whose `slackChannelId` is not a channel ID (e.g. a channel name the API cannot map yet, or a channel Slack does not find) are recorded with the value in `Detail` and an empty `ChannelID`, so that intake insights are only grouped by real channel IDs.
 
 ### Events
 

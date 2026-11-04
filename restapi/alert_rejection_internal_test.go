@@ -353,3 +353,66 @@ func TestServer_HandleAlerts_InsightsEvents(t *testing.T) {
 
 	assert.Equal(t, map[string]int{rejectReasonChannelNotFound: 2, rejectReasonInvalidBody: 1}, reasons)
 }
+
+func TestAlertInsightsEvent_ChannelID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		eventType     types.InsightsEventType
+		reason        string
+		channel       string
+		wantChannelID string
+		wantDetail    string
+	}{
+		{name: "rejected with channel ID", eventType: types.InsightsEventAlertRejected, reason: rejectReasonRateLimited, channel: "C0123456789", wantChannelID: "C0123456789"},
+		{name: "rejected with private channel ID", eventType: types.InsightsEventAlertRejected, reason: rejectReasonNotInChannel, channel: "G0123456789", wantChannelID: "G0123456789"},
+		{name: "rejected with unmapped channel name", eventType: types.InsightsEventAlertRejected, reason: rejectReasonChannelNotFound, channel: "NEW-ALERTS", wantDetail: "NEW-ALERTS"},
+		{name: "not found channel name in ID format", eventType: types.InsightsEventAlertRejected, reason: rejectReasonChannelNotFound, channel: "DEPLOYMENTS", wantDetail: "DEPLOYMENTS"},
+		{name: "not found channel ID", eventType: types.InsightsEventAlertRejected, reason: rejectReasonChannelNotFound, channel: "C0123456789", wantDetail: "C0123456789"},
+		{name: "rejected with invalid value", eventType: types.InsightsEventAlertRejected, reason: rejectReasonValidation, channel: "NOT A CHANNEL!", wantDetail: "NOT A CHANNEL!"},
+		{name: "rejected without channel", eventType: types.InsightsEventAlertRejected, reason: rejectReasonNoRoute},
+		{name: "filtered with unmapped channel name", eventType: types.InsightsEventAlertFiltered, reason: filterReasonIgnoreTerm, channel: "NEW-ALERTS", wantDetail: "NEW-ALERTS"},
+		{name: "filtered with channel ID", eventType: types.InsightsEventAlertFiltered, reason: filterReasonIgnoreTerm, channel: "C0123456789", wantChannelID: "C0123456789"},
+		{name: "queued channel is verified", eventType: types.InsightsEventAlertQueued, channel: "C123", wantChannelID: "C123"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			e := alertInsightsEvent(tt.eventType, tt.reason, &types.Alert{SlackChannelID: tt.channel, CorrelationID: "corr"})
+
+			assert.Equal(t, tt.wantChannelID, e.ChannelID)
+			assert.Equal(t, tt.wantDetail, e.Detail)
+			assert.Equal(t, "corr", e.CorrelationID)
+		})
+	}
+}
+
+// TestServer_HandleAlerts_InsightsEvents_UnmappedChannelName verifies that an alert for a channel name the API cannot
+// map to an ID is rejected with the name in Detail, not in ChannelID.
+func TestServer_HandleAlerts_InsightsEvents_UnmappedChannelName(t *testing.T) {
+	t.Parallel()
+
+	server, _, channelInfo := newTestServer(t)
+	sink := &memorySink{}
+	server.insights = insights.NewRecorder(sink, nil, nil)
+	server.insights.Start()
+
+	// The unmapped name is kept, and upper-cased when the alert is cleaned (after mapping, before the channel lookup).
+	channelInfo.On("MapChannelNameToIDIfNeeded", "new-alerts").Return("new-alerts")
+	channelInfo.On("GetChannelInfo", mock.Anything, "NEW-ALERTS").Return(&ChannelInfo{ChannelExists: false}, nil)
+
+	body, err := json.Marshal(map[string]any{"alerts": []types.Alert{{SlackChannelID: "new-alerts", Header: "a"}}})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, postAlerts(t, server, body))
+
+	server.insights.Shutdown(time.Second)
+
+	rejected := sink.byType()[types.InsightsEventAlertRejected]
+	require.Len(t, rejected, 1)
+	assert.Equal(t, rejectReasonChannelNotFound, rejected[0].Reason)
+	assert.Empty(t, rejected[0].ChannelID)
+	assert.Equal(t, "NEW-ALERTS", rejected[0].Detail)
+}

@@ -3,6 +3,7 @@ package restapi
 import (
 	"errors"
 	"fmt"
+	"regexp"
 
 	"github.com/slackmgr/types"
 )
@@ -117,6 +118,11 @@ func (s *Server) filterAlert(reason string, alert *types.Alert) {
 	}
 }
 
+// slackChannelIDRegex matches values in the format of a Slack channel ID: C (public), G (private) or D (direct
+// message), followed by at least 8 letters and digits. Channel IDs in alerts are upper-cased by [types.Alert.Clean],
+// so a channel name without '-' or '_' (e.g. "deployments") can also match.
+var slackChannelIDRegex = regexp.MustCompile(`^[CGD][A-Z0-9]{8,}$`)
+
 // recordQueued records an insights event for an alert that was put on the alert queue.
 func (s *Server) recordQueued(alert *types.Alert) {
 	if s.insights.Enabled() {
@@ -125,11 +131,26 @@ func (s *Server) recordQueued(alert *types.Alert) {
 }
 
 // alertInsightsEvent returns an insights event of the given type and reason describing the alert.
+//
+// Filtered and rejected alerts may not have a valid channel ID: a channel name that the API cannot map to an ID (e.g.
+// a new or renamed channel, before the managed channel list is refreshed) is kept as is. Such a value is recorded in
+// Detail instead of ChannelID, so that insights are not grouped by channel names or invalid values. A value is treated
+// as a channel ID if it has the format of one, unless Slack reported that the channel does not exist: conversations.info
+// only accepts IDs, so an unmapped channel name is always rejected as not found. Queued alerts always have a verified
+// channel ID.
 func alertInsightsEvent(eventType types.InsightsEventType, reason string, alert *types.Alert) types.InsightsEvent {
+	channelID, detail := alert.SlackChannelID, ""
+
+	if eventType != types.InsightsEventAlertQueued && channelID != "" &&
+		(reason == rejectReasonChannelNotFound || !slackChannelIDRegex.MatchString(channelID)) {
+		channelID, detail = "", channelID
+	}
+
 	return types.InsightsEvent{
 		Type:          eventType,
 		Reason:        reason,
-		ChannelID:     alert.SlackChannelID,
+		ChannelID:     channelID,
+		Detail:        detail,
 		CorrelationID: alert.CorrelationID,
 		Severity:      alert.Severity,
 		RouteKey:      alert.RouteKey,
