@@ -639,7 +639,12 @@ func (c *Client) GetChannelName(ctx context.Context, channelID string) string {
 	info, err := c.api.GetChannelInfo(ctx, channelID)
 	if err != nil {
 		// We log the error unless it's a channel not found error, which is expected in some cases.
-		if err.Error() != internal.SlackErrChannelNotFound {
+		// Rate limit errors are expected during a backoff, and callers keep the last known name.
+		switch {
+		case err.Error() == internal.SlackErrChannelNotFound:
+		case internal.IsRateLimitError(err):
+			c.logger.WithField("channel_id", channelID).WithField("error", err).Info("Slack channel name lookup is rate limited")
+		default:
 			c.logger.Errorf("Failed to find Slack channel info for %s: %s", channelID, err)
 		}
 		return ""

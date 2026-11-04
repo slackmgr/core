@@ -126,7 +126,7 @@ func newTestChannelManager(t *testing.T, channelID string, db types.DB, slackCli
 
 	return newChannelManager(
 		channelID,
-		channelID, // use ID as name in tests; no Slack API available
+		"", // unknown Slack channel name; the channel ID is used as metrics label
 		slackClient,
 		db,
 		locker,

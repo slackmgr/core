@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Default values for SlackClientConfig fields.
@@ -36,6 +37,20 @@ const (
 	// DefaultHTTPTimeoutSeconds is the default HTTP client timeout in seconds.
 	// 20 seconds accommodates slow Slack API responses while not hanging indefinitely.
 	DefaultHTTPTimeoutSeconds = 20
+
+	// DefaultChannelInfoCacheTTLSeconds is the default time (in seconds) a Slack channel info lookup
+	// (conversations.info) is cached before it is fetched again. Up to 20% random jitter is added,
+	// to spread refreshes over time. 5 minutes keeps conversations.info well below Slack's Tier 3
+	// limit (~50 calls per minute) even with hundreds of channels, while channel renames and
+	// archiving are still picked up within minutes. The cache is shared by the API and the Manager
+	// when they use the same Redis cache store and key prefix.
+	DefaultChannelInfoCacheTTLSeconds = 300
+
+	// DefaultChannelNotFoundCacheTTLSeconds is the default time (in seconds) a channel_not_found
+	// result from conversations.info is cached. It is shorter than [DefaultChannelInfoCacheTTLSeconds],
+	// so that a channel that is created (or the bot is invited to a private channel) is picked up
+	// within a minute, while repeated alerts to an unknown channel still do not call Slack every time.
+	DefaultChannelNotFoundCacheTTLSeconds = 60
 )
 
 // Validation bounds for SlackClientConfig numeric fields.
@@ -75,6 +90,21 @@ const (
 	// Timeouts longer than 5 minutes typically indicate a configuration error.
 	// Most Slack API calls should complete within seconds.
 	MaxHTTPTimeoutSeconds = 300
+
+	// MinChannelInfoCacheTTLSeconds is the minimum channel info cache TTL.
+	// Shorter values make the cache ineffective and risk Slack rate limits on conversations.info.
+	MinChannelInfoCacheTTLSeconds = 10
+
+	// MaxChannelInfoCacheTTLSeconds is the maximum channel info cache TTL (24 hours).
+	// Longer values delay picking up channel renames and archiving too much.
+	MaxChannelInfoCacheTTLSeconds = 86400
+
+	// MinChannelNotFoundCacheTTLSeconds is the minimum channel_not_found cache TTL.
+	MinChannelNotFoundCacheTTLSeconds = 1
+
+	// MaxChannelNotFoundCacheTTLSeconds is the maximum channel_not_found cache TTL (1 hour).
+	// Longer values delay picking up new channels too much.
+	MaxChannelNotFoundCacheTTLSeconds = 3600
 )
 
 // SlackClientConfig holds configuration for the Slack API client used by both
@@ -106,6 +136,13 @@ const (
 // Higher values increase throughput but risk triggering rate limits. The default of 3
 // is conservative; increase only if you need higher throughput and are prepared to
 // handle more rate limit responses.
+//
+// # Caching
+//
+// Channel info lookups (conversations.info) are cached for ChannelInfoCacheTTLSeconds, and
+// channel_not_found results for ChannelNotFoundCacheTTLSeconds. When the cache store is shared
+// (e.g. Redis) and the API and Manager use the same cache key prefix, the cache is shared by all
+// instances, so each channel is looked up at most about once per TTL in total.
 //
 // # Debug Mode
 //
@@ -167,6 +204,18 @@ type SlackClientConfig struct {
 	// This should be long enough to accommodate slow responses but short enough
 	// to fail fast on unresponsive endpoints. Default: 20. Must be between 1 and 300.
 	HTTPTimeoutSeconds int `json:"httpTimeoutSeconds" mapstructure:"httpTimeoutSeconds" yaml:"httpTimeoutSeconds"`
+
+	// ChannelInfoCacheTTLSeconds sets how long a Slack channel info lookup (conversations.info)
+	// is cached before it is fetched again. Up to 20% random jitter is added. A stale value is
+	// still served for up to 24 hours while Slack rate limits conversations.info.
+	// Default: 300 (5 minutes). Must be between 10 and 86400. Zero means the default.
+	ChannelInfoCacheTTLSeconds int `json:"channelInfoCacheTtlSeconds" mapstructure:"channelInfoCacheTtlSeconds" yaml:"channelInfoCacheTtlSeconds"`
+
+	// ChannelNotFoundCacheTTLSeconds sets how long a channel_not_found result from
+	// conversations.info is cached. It is normally shorter than ChannelInfoCacheTTLSeconds,
+	// so that new channels (or private channels the bot is invited to) are picked up quickly.
+	// Default: 60. Must be between 1 and 3600. Zero means the default.
+	ChannelNotFoundCacheTTLSeconds int `json:"channelNotFoundCacheTtlSeconds" mapstructure:"channelNotFoundCacheTtlSeconds" yaml:"channelNotFoundCacheTtlSeconds"`
 }
 
 // NewDefaultSlackClientConfig returns a SlackClientConfig populated with sensible defaults.
@@ -176,6 +225,7 @@ type SlackClientConfig struct {
 //   - Rate limit retries: 10 attempts, 120s total budget
 //   - Transient error retries: 5 attempts, 60s total budget
 //   - HTTP timeout: 20 seconds
+//   - Channel info cache: 5 minutes (+ up to 20% jitter), channel_not_found: 60 seconds
 //
 // The AppToken and BotToken are intentionally left empty and must be set before use.
 func NewDefaultSlackClientConfig() *SlackClientConfig {
@@ -214,6 +264,34 @@ func (c *SlackClientConfig) SetDefaults() {
 	if c.HTTPTimeoutSeconds <= 0 {
 		c.HTTPTimeoutSeconds = DefaultHTTPTimeoutSeconds
 	}
+
+	if c.ChannelInfoCacheTTLSeconds <= 0 {
+		c.ChannelInfoCacheTTLSeconds = DefaultChannelInfoCacheTTLSeconds
+	}
+
+	if c.ChannelNotFoundCacheTTLSeconds <= 0 {
+		c.ChannelNotFoundCacheTTLSeconds = DefaultChannelNotFoundCacheTTLSeconds
+	}
+}
+
+// ChannelInfoCacheTTL returns the effective channel info cache TTL, i.e.
+// [SlackClientConfig.ChannelInfoCacheTTLSeconds], or [DefaultChannelInfoCacheTTLSeconds] if it is not set.
+func (c *SlackClientConfig) ChannelInfoCacheTTL() time.Duration {
+	if c.ChannelInfoCacheTTLSeconds <= 0 {
+		return DefaultChannelInfoCacheTTLSeconds * time.Second
+	}
+
+	return time.Duration(c.ChannelInfoCacheTTLSeconds) * time.Second
+}
+
+// ChannelNotFoundCacheTTL returns the effective channel_not_found cache TTL, i.e.
+// [SlackClientConfig.ChannelNotFoundCacheTTLSeconds], or [DefaultChannelNotFoundCacheTTLSeconds] if it is not set.
+func (c *SlackClientConfig) ChannelNotFoundCacheTTL() time.Duration {
+	if c.ChannelNotFoundCacheTTLSeconds <= 0 {
+		return DefaultChannelNotFoundCacheTTLSeconds * time.Second
+	}
+
+	return time.Duration(c.ChannelNotFoundCacheTTLSeconds) * time.Second
 }
 
 // Validate checks that all required fields are present and all values are within
@@ -227,6 +305,8 @@ func (c *SlackClientConfig) SetDefaults() {
 //   - All MaxAttempts fields: must be between 1 and 100
 //   - All MaxWaitTime fields: must be between 1 and 600 seconds
 //   - HTTPTimeoutSeconds: must be between 1 and 300 seconds
+//   - ChannelInfoCacheTTLSeconds: zero (default) or between 10 and 86400 seconds
+//   - ChannelNotFoundCacheTTLSeconds: zero (default) or between 1 and 3600 seconds
 //   - DryRun: must be false (dry run mode has been removed)
 func (c *SlackClientConfig) Validate() error {
 	if c.AppToken == "" {
@@ -259,6 +339,14 @@ func (c *SlackClientConfig) Validate() error {
 
 	if c.HTTPTimeoutSeconds < MinHTTPTimeoutSeconds || c.HTTPTimeoutSeconds > MaxHTTPTimeoutSeconds {
 		return fmt.Errorf("http timeout must be between %d and %d seconds", MinHTTPTimeoutSeconds, MaxHTTPTimeoutSeconds)
+	}
+
+	if c.ChannelInfoCacheTTLSeconds != 0 && (c.ChannelInfoCacheTTLSeconds < MinChannelInfoCacheTTLSeconds || c.ChannelInfoCacheTTLSeconds > MaxChannelInfoCacheTTLSeconds) {
+		return fmt.Errorf("channel info cache TTL must be between %d and %d seconds", MinChannelInfoCacheTTLSeconds, MaxChannelInfoCacheTTLSeconds)
+	}
+
+	if c.ChannelNotFoundCacheTTLSeconds != 0 && (c.ChannelNotFoundCacheTTLSeconds < MinChannelNotFoundCacheTTLSeconds || c.ChannelNotFoundCacheTTLSeconds > MaxChannelNotFoundCacheTTLSeconds) {
+		return fmt.Errorf("channel not found cache TTL must be between %d and %d seconds", MinChannelNotFoundCacheTTLSeconds, MaxChannelNotFoundCacheTTLSeconds)
 	}
 
 	if c.DryRun {

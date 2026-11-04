@@ -1694,7 +1694,7 @@ func TestDebugGetAlertFields(t *testing.T) {
 // --- Channel Info Syncer Tests ---
 
 func newTestChannelInfoSyncer(slackClient SlackClient) *channelInfoSyncer {
-	return newChannelInfoSyncer(slackClient, &mockLogger{})
+	return newChannelInfoSyncer(slackClient, config.DefaultChannelInfoRefreshIntervalSeconds*time.Second, &mockLogger{})
 }
 
 func TestChannelInfoSyncer_Init(t *testing.T) {
@@ -2642,4 +2642,84 @@ func TestServer_RunRawAlertConsumer(t *testing.T) {
 
 		assert.ErrorIs(t, err, expectedErr)
 	})
+}
+
+func TestChannelInfoSyncer_RefreshData(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a failed channel does not stop the other refreshes", func(t *testing.T) {
+		t.Parallel()
+
+		slackClient := &mockSlackClient{}
+		slackClient.On("GetChannelInfo", mock.Anything, "C-FAIL").Return(nil, errors.New("rate limited"))
+
+		for _, id := range []string{"C1", "C2", "C3"} {
+			slackClient.On("GetChannelInfo", mock.Anything, id).Return(&slack.Channel{
+				GroupConversation: slack.GroupConversation{Name: "name-" + id},
+			}, nil)
+			slackClient.On("GetUserIDsInChannel", mock.Anything, id).Return(map[string]struct{}{"U1": {}}, nil)
+			slackClient.On("BotIsInChannel", mock.Anything, id).Return(true, nil)
+		}
+
+		syncer := newTestChannelInfoSyncer(slackClient)
+		for _, id := range []string{"C-FAIL", "C1", "C2", "C3"} {
+			syncer.channelsLastSeen[id] = time.Now()
+		}
+
+		err := syncer.refreshData(context.Background())
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "C-FAIL")
+
+		for _, id := range []string{"C1", "C2", "C3"} {
+			info, found := syncer.getCachedInfo(id)
+			require.True(t, found, id)
+			assert.Equal(t, "name-"+id, info.Name)
+		}
+
+		_, found := syncer.getCachedInfo("C-FAIL")
+		assert.False(t, found)
+	})
+
+	t.Run("no errors", func(t *testing.T) {
+		t.Parallel()
+
+		syncer := newTestChannelInfoSyncer(&mockSlackClient{})
+		require.NoError(t, syncer.refreshData(context.Background()))
+	})
+
+	t.Run("cancelled context", func(t *testing.T) {
+		t.Parallel()
+
+		syncer := newTestChannelInfoSyncer(&mockSlackClient{})
+		syncer.channelsLastSeen["C1"] = time.Now()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		require.ErrorIs(t, syncer.refreshData(ctx), context.Canceled)
+	})
+}
+
+func TestChannelInfoSyncer_RunUsesRefreshInterval(t *testing.T) {
+	t.Parallel()
+
+	slackClient := &mockSlackClient{}
+	slackClient.On("GetChannelInfo", mock.Anything, "C1").Return(&slack.Channel{
+		GroupConversation: slack.GroupConversation{Name: "alerts"},
+	}, nil)
+	slackClient.On("GetUserIDsInChannel", mock.Anything, "C1").Return(map[string]struct{}{}, nil)
+	slackClient.On("BotIsInChannel", mock.Anything, "C1").Return(true, nil)
+
+	syncer := newChannelInfoSyncer(slackClient, 50*time.Millisecond, &mockLogger{})
+	syncer.channelsLastSeen["C1"] = time.Now()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	require.ErrorIs(t, syncer.Run(ctx), context.DeadlineExceeded)
+
+	info, found := syncer.getCachedInfo("C1")
+	require.True(t, found, "refreshed by the background loop")
+	assert.Equal(t, "alerts", info.Name)
 }

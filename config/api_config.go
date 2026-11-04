@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 )
 
 // Validation constants for APIConfig fields.
@@ -45,6 +46,21 @@ const (
 	// 3 seconds is long enough to drain typical short-lived alert handlers while keeping
 	// Kubernetes rolling restarts fast (well within a standard terminationGracePeriodSeconds).
 	DefaultShutdownTimeoutMs = 3_000
+)
+
+// Validation constants for the channel info refresh interval.
+const (
+	// MinChannelInfoRefreshIntervalSeconds is the minimum channel info refresh interval.
+	MinChannelInfoRefreshIntervalSeconds = 10
+
+	// MaxChannelInfoRefreshIntervalSeconds is the maximum channel info refresh interval (1 hour).
+	MaxChannelInfoRefreshIntervalSeconds = 3600
+
+	// DefaultChannelInfoRefreshIntervalSeconds is the default interval (in seconds) between background
+	// refreshes of the channel info used to validate alerts. It equals the default channel info cache TTL
+	// ([DefaultChannelInfoCacheTTLSeconds]), so that most refreshes are served from the shared cache and
+	// each channel causes about one conversations.info call per TTL across all API and Manager instances.
+	DefaultChannelInfoRefreshIntervalSeconds = 300
 )
 
 // Validation constants for RateLimitConfig fields.
@@ -141,6 +157,15 @@ type APIConfig struct {
 	// authentication tokens and API behavior settings.
 	SlackClient *SlackClientConfig `json:"slackClient" mapstructure:"slackClient" yaml:"slackClient"`
 
+	// ChannelInfoRefreshIntervalSeconds is the interval between background refreshes of the channel info
+	// (name, archived, member count, bot membership) for channels that received alerts in the last 12 hours.
+	// It must not be longer than SlackClient.ChannelInfoCacheTTLSeconds: with a TTL at least as long as the
+	// interval, only the first refresh after the TTL has expired calls Slack, and the shared cache serves the
+	// other API and Manager instances. With a shorter TTL, nearly every refresh in every instance calls Slack.
+	//
+	// Default: 300 (5 minutes). Valid range: 10–3600 seconds. Zero means the default.
+	ChannelInfoRefreshIntervalSeconds int `json:"channelInfoRefreshIntervalSeconds" mapstructure:"channelInfoRefreshIntervalSeconds" yaml:"channelInfoRefreshIntervalSeconds"`
+
 	// Insights controls recording of alert intake insights events (queued, filtered and rejected alerts).
 	// They are only recorded when the host sets an insights sink with Server.WithInsightsSink.
 	// ChannelStatsIntervalSeconds is not used by the API. See InsightsConfig for details.
@@ -228,9 +253,20 @@ func NewDefaultAPIConfig() *APIConfig {
 			AlertsPerSecond: 1,
 			AllowedBurst:    30,
 		},
-		ShutdownTimeoutMs: DefaultShutdownTimeoutMs,
-		SlackClient:       NewDefaultSlackClientConfig(),
+		ShutdownTimeoutMs:                 DefaultShutdownTimeoutMs,
+		SlackClient:                       NewDefaultSlackClientConfig(),
+		ChannelInfoRefreshIntervalSeconds: DefaultChannelInfoRefreshIntervalSeconds,
 	}
+}
+
+// ChannelInfoRefreshInterval returns the effective channel info refresh interval, i.e.
+// [APIConfig.ChannelInfoRefreshIntervalSeconds], or [DefaultChannelInfoRefreshIntervalSeconds] if it is not set.
+func (c *APIConfig) ChannelInfoRefreshInterval() time.Duration {
+	if c.ChannelInfoRefreshIntervalSeconds <= 0 {
+		return DefaultChannelInfoRefreshIntervalSeconds * time.Second
+	}
+
+	return time.Duration(c.ChannelInfoRefreshIntervalSeconds) * time.Second
 }
 
 // Validate checks that all required fields are present and all values are within
@@ -245,6 +281,8 @@ func NewDefaultAPIConfig() *APIConfig {
 //   - MaxUsersInAlertChannel: must be between 1 and 10,000
 //   - RateLimitPerAlertChannel: must not be nil, and all fields must be valid
 //   - SlackClient: must not be nil, and must pass its own validation
+//   - ChannelInfoRefreshIntervalSeconds: zero (default) or between 10 and 3600 seconds, and not longer than the
+//     effective SlackClient channel info cache TTL
 //   - Insights: if non-nil, defaults are applied to unset fields and it must pass its own validation
 func (c *APIConfig) Validate() error {
 	if err := c.validateRestPort(); err != nil {
@@ -287,12 +325,30 @@ func (c *APIConfig) Validate() error {
 		return fmt.Errorf("slack client config is invalid: %w", err)
 	}
 
+	if err := c.validateChannelInfoRefreshInterval(); err != nil {
+		return err
+	}
+
 	if c.Insights != nil {
 		c.Insights.SetDefaults()
 
 		if err := c.Insights.Validate(); err != nil {
 			return fmt.Errorf("insights config is invalid: %w", err)
 		}
+	}
+
+	return nil
+}
+
+// validateChannelInfoRefreshInterval checks the channel info refresh interval range, and that the channel
+// info cache TTL is at least the refresh interval, so that the shared cache dedups refreshes across instances.
+func (c *APIConfig) validateChannelInfoRefreshInterval() error {
+	if c.ChannelInfoRefreshIntervalSeconds != 0 && (c.ChannelInfoRefreshIntervalSeconds < MinChannelInfoRefreshIntervalSeconds || c.ChannelInfoRefreshIntervalSeconds > MaxChannelInfoRefreshIntervalSeconds) {
+		return fmt.Errorf("channel info refresh interval must be between %d and %d seconds", MinChannelInfoRefreshIntervalSeconds, MaxChannelInfoRefreshIntervalSeconds)
+	}
+
+	if interval, ttl := c.ChannelInfoRefreshInterval(), c.SlackClient.ChannelInfoCacheTTL(); ttl < interval {
+		return fmt.Errorf("slack client channel info cache TTL (%s) must be at least the channel info refresh interval (%s)", ttl, interval)
 	}
 
 	return nil

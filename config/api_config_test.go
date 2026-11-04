@@ -3,6 +3,7 @@ package config_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/slackmgr/core/config"
 	"github.com/stretchr/testify/assert"
@@ -423,4 +424,61 @@ func validAPIConfig() *config.APIConfig {
 	cfg.SlackClient.AppToken = "xapp-test-token"
 	cfg.SlackClient.BotToken = "xoxb-test-token"
 	return cfg
+}
+
+func TestAPIConfig_ChannelInfoRefreshInterval(t *testing.T) {
+	t.Parallel()
+
+	t.Run("default", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := config.NewDefaultAPIConfig()
+		assert.Equal(t, config.DefaultChannelInfoRefreshIntervalSeconds, cfg.ChannelInfoRefreshIntervalSeconds)
+		assert.Equal(t, 5*time.Minute, cfg.ChannelInfoRefreshInterval())
+		assert.Equal(t, 5*time.Minute, (&config.APIConfig{}).ChannelInfoRefreshInterval(), "unset means default")
+	})
+
+	t.Run("custom", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := &config.APIConfig{ChannelInfoRefreshIntervalSeconds: 60}
+		assert.Equal(t, time.Minute, cfg.ChannelInfoRefreshInterval())
+	})
+
+	tests := []struct {
+		name          string
+		interval      int
+		cacheTTL      int
+		wantErrSubstr string
+	}{
+		{name: "zero means default", interval: 0},
+		{name: "at lower bound", interval: config.MinChannelInfoRefreshIntervalSeconds},
+		{name: "equal to cache TTL", interval: 300, cacheTTL: 300},
+		{name: "shorter than cache TTL", interval: 60, cacheTTL: 300},
+		{name: "longer than cache TTL", interval: 600, cacheTTL: 300, wantErrSubstr: "must be at least the channel info refresh interval"},
+		{name: "longer than default cache TTL", interval: 600, wantErrSubstr: "must be at least the channel info refresh interval"},
+		{name: "at upper bound with long cache TTL", interval: config.MaxChannelInfoRefreshIntervalSeconds, cacheTTL: config.MaxChannelInfoRefreshIntervalSeconds},
+		{name: "below minimum", interval: config.MinChannelInfoRefreshIntervalSeconds - 1, wantErrSubstr: "channel info refresh interval must be between"},
+		{name: "above maximum", interval: config.MaxChannelInfoRefreshIntervalSeconds + 1, cacheTTL: 86400, wantErrSubstr: "channel info refresh interval must be between"},
+		{name: "negative", interval: -1, wantErrSubstr: "channel info refresh interval must be between"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := validAPIConfig()
+			cfg.ChannelInfoRefreshIntervalSeconds = tc.interval
+			cfg.SlackClient.ChannelInfoCacheTTLSeconds = tc.cacheTTL
+
+			err := cfg.Validate()
+
+			if tc.wantErrSubstr == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErrSubstr)
+			}
+		})
+	}
 }

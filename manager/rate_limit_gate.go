@@ -16,7 +16,10 @@ const (
 const defaultMaxDrainWait = 30 * time.Second
 
 // RateLimitGate coordinates a global pause across all channel managers when a
-// Slack 429 is detected. Channel managers call [RateLimitGate.Wait] before
+// Slack 429 is detected on a write method (chat.postMessage, chat.update or
+// chat.delete). 429s on lookup methods (e.g. conversations.info) do not signal
+// the gate: they only back off the method itself, so that a rate limited
+// lookup never pauses posting. Channel managers call [RateLimitGate.Wait] before
 // processing each work item; the gate blocks until the rate-limit window has
 // expired and the Socket Mode handler is quiet (no in-flight event handlers).
 type RateLimitGate interface {

@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/slackmgr/core/config"
 	"github.com/stretchr/testify/assert"
@@ -369,4 +370,79 @@ func validSlackClientConfig() *config.SlackClientConfig {
 	cfg.AppToken = "xapp-test-token"
 	cfg.BotToken = "xoxb-test-token"
 	return cfg
+}
+
+func TestSlackClientConfig_ChannelInfoCacheTTLs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("defaults", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := config.NewDefaultSlackClientConfig()
+		assert.Equal(t, config.DefaultChannelInfoCacheTTLSeconds, cfg.ChannelInfoCacheTTLSeconds)
+		assert.Equal(t, config.DefaultChannelNotFoundCacheTTLSeconds, cfg.ChannelNotFoundCacheTTLSeconds)
+		assert.Equal(t, 5*time.Minute, cfg.ChannelInfoCacheTTL())
+		assert.Equal(t, time.Minute, cfg.ChannelNotFoundCacheTTL())
+	})
+
+	t.Run("unset fields use defaults", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := &config.SlackClientConfig{}
+		assert.Equal(t, 5*time.Minute, cfg.ChannelInfoCacheTTL())
+		assert.Equal(t, time.Minute, cfg.ChannelNotFoundCacheTTL())
+
+		cfg.ChannelInfoCacheTTLSeconds = -1
+		cfg.ChannelNotFoundCacheTTLSeconds = -1
+		cfg.SetDefaults()
+		assert.Equal(t, config.DefaultChannelInfoCacheTTLSeconds, cfg.ChannelInfoCacheTTLSeconds)
+		assert.Equal(t, config.DefaultChannelNotFoundCacheTTLSeconds, cfg.ChannelNotFoundCacheTTLSeconds)
+	})
+
+	t.Run("custom values", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := &config.SlackClientConfig{ChannelInfoCacheTTLSeconds: 900, ChannelNotFoundCacheTTLSeconds: 30}
+		assert.Equal(t, 15*time.Minute, cfg.ChannelInfoCacheTTL())
+		assert.Equal(t, 30*time.Second, cfg.ChannelNotFoundCacheTTL())
+	})
+
+	tests := []struct {
+		name          string
+		infoTTL       int
+		notFoundTTL   int
+		wantErrSubstr string
+	}{
+		{name: "zero means default", infoTTL: 0, notFoundTTL: 0},
+		{name: "info TTL at lower bound", infoTTL: config.MinChannelInfoCacheTTLSeconds},
+		{name: "info TTL at upper bound", infoTTL: config.MaxChannelInfoCacheTTLSeconds},
+		{name: "info TTL below minimum", infoTTL: config.MinChannelInfoCacheTTLSeconds - 1, wantErrSubstr: "channel info cache TTL"},
+		{name: "info TTL above maximum", infoTTL: config.MaxChannelInfoCacheTTLSeconds + 1, wantErrSubstr: "channel info cache TTL"},
+		{name: "negative info TTL", infoTTL: -1, wantErrSubstr: "channel info cache TTL"},
+		{name: "not found TTL at lower bound", notFoundTTL: config.MinChannelNotFoundCacheTTLSeconds},
+		{name: "not found TTL at upper bound", notFoundTTL: config.MaxChannelNotFoundCacheTTLSeconds},
+		{name: "not found TTL above maximum", notFoundTTL: config.MaxChannelNotFoundCacheTTLSeconds + 1, wantErrSubstr: "channel not found cache TTL"},
+		{name: "negative not found TTL", notFoundTTL: -1, wantErrSubstr: "channel not found cache TTL"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := config.NewDefaultSlackClientConfig()
+			cfg.AppToken = "xapp-test"
+			cfg.BotToken = "xoxb-test"
+			cfg.ChannelInfoCacheTTLSeconds = tc.infoTTL
+			cfg.ChannelNotFoundCacheTTLSeconds = tc.notFoundTTL
+
+			err := cfg.Validate()
+
+			if tc.wantErrSubstr == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErrSubstr)
+			}
+		})
+	}
 }

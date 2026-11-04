@@ -249,7 +249,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	// Initialize channel info provider if not already set
 	if s.channelInfoProvider == nil {
-		channelInfoSyncer := newChannelInfoSyncer(s.slackClient, s.logger)
+		channelInfoSyncer := newChannelInfoSyncer(s.slackClient, s.cfg.ChannelInfoRefreshInterval(), s.logger)
 
 		if err := channelInfoSyncer.Init(ctx); err != nil {
 			return fmt.Errorf("failed to initialize channel info manager: %w", err)

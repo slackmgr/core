@@ -123,7 +123,7 @@ Beyond grouping alerts by correlation ID, individual alerts can carry a list of 
 
 ### Post Update Throttling
 
-Slack allows about 50 post updates per minute per workspace, shared by all channels. Monitoring systems that send the same alert repeatedly (e.g. every few seconds) would otherwise update the issue post on every alert, and a single noisy issue could exhaust the budget. When Slack responds with a rate limit error, all channels pause until the rate limit window has passed, which delays new alerts as well.
+Slack allows about 50 post updates per minute per workspace, shared by all channels. Monitoring systems that send the same alert repeatedly (e.g. every few seconds) would otherwise update the issue post on every alert, and a single noisy issue could exhaust the budget. When Slack rate limits a post, update or delete, all channels pause until the rate limit window has passed, which delays new alerts as well (see [Slack Rate Limits and Caching](#slack-rate-limits-and-caching)).
 
 Updates of an existing post are therefore classified by what changed since the post was last updated:
 
@@ -136,6 +136,39 @@ Updates of an existing post are therefore classified by what changed since the p
 New posts are never throttled. A throttled update is not lost: the issue keeps its update flag, and the post is updated by the next alert or channel processing run (every `issueProcessingIntervalSeconds`, default 10) after the window has passed. With the defaults, a stream of alerts with changing text updates the post after about 0, 10, 30 and 70 seconds, and then about once per minute.
 
 `minIssueCountForThrottle` is deprecated and ignored, since throttling no longer depends on the number of open issues in the channel.
+
+### Slack Rate Limits and Caching
+
+Slack rate limits each API method separately. A 429 (rate limited) response is handled according to the method's group:
+
+| Group | Methods | On a 429 |
+|---|---|---|
+| Write | `chat.postMessage`, `chat.update`, `chat.delete` | The global rate limit gate is signalled. All channel managers pause before their next alert, command or issue processing run, until the `Retry-After` window (+2 seconds) has passed. The wait happens between runs, never while a channel lock is held |
+| Lookup | All other methods, e.g. `conversations.info`, `conversations.members`, `users.info`, `usergroups.users.list`, `conversations.history` | Only the method itself backs off. Channel processing continues. Until the window has passed, calls to the method wait for it, or fail fast if it ends after the caller's deadline or the `maxRateLimitErrorWaitTimeSeconds` retry budget. Cached lookups serve the last known (stale) value instead |
+
+The deadline of each rate limited method is stored in the cache store under `<cacheKeyPrefix>rate-limit-gate:<method>`. With a shared Redis cache store (`Server.WithCacheStore` and `Manager.WithCacheStore`) and the same `CacheKeyPrefix`, the API and all Manager instances share the backoffs, so a 429 seen by one instance backs off the method in all of them. Without a cache store, each instance uses an in-process store. The global gate is shared through Redis when the Manager uses a `RedisChannelLocker`.
+
+Slack lookups are cached in the same cache store, and are shared the same way:
+
+| Lookup | Fresh for | Stale value kept for |
+|---|---|---|
+| Channel info (`conversations.info`) | `channelInfoCacheTtlSeconds` (default 300) + up to 20% jitter; `channelNotFoundCacheTtlSeconds` (default 60) for unknown channels | 24 hours |
+| User info (`users.info`) | 1–2 hours | 24 hours |
+| Channel members (`conversations.members`), user group members (`usergroups.users.list`) | 1–1.5 minutes | 1 hour |
+
+A stale value is only served while the method is backing off, or when a call fails with a rate limit or transient error. With a 5 minute channel info TTL, each channel causes about one `conversations.info` call per 5 minutes in total, well below Slack's limit for the method (about 50 per minute).
+
+Each channel manager keeps the channel name in memory, and looks it up at most once per `channelInfoCacheTtlSeconds` (once per minute after a failed lookup). A failed lookup keeps the last known name, so a rate limit never blanks the channel name on issues. The API refreshes the info of channels with alerts in the last 12 hours every `channelInfoRefreshIntervalSeconds` (default 300). The refresh interval must not be longer than the channel info cache TTL, so that refreshes are served from the shared cache, and only the first refresh after the TTL has expired calls Slack.
+
+| Setting | Default | Range | Description |
+|---|---|---|---|
+| `SlackClientConfig.ChannelInfoCacheTTLSeconds` | 300 | 10–86400 | How long channel info is cached |
+| `SlackClientConfig.ChannelNotFoundCacheTTLSeconds` | 60 | 1–3600 | How long a `channel_not_found` result is cached |
+| `APIConfig.ChannelInfoRefreshIntervalSeconds` | 300 | 10–3600 | How often the API refreshes the info of recently used channels. Must not exceed the API's `ChannelInfoCacheTTLSeconds` |
+
+Zero means the default for all three. Use the same channel info TTL in the API and the Manager.
+
+The metrics `slack_api_rate_limited_total` (by method and group), `slack_api_backoff_total` (calls that waited for or were rejected by a method backoff) and `slack_client_cache_requests_total{result="stale"}` show which methods are rate limited, and are shown in the Slack API Health row of the Grafana dashboard.
 
 ### Duplicate Post Prevention
 

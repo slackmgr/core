@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	gocache_store "github.com/eko/gocache/store/go_cache/v4"
+	gocache "github.com/patrickmn/go-cache"
 	"github.com/slack-go/slack"
 	"github.com/slackmgr/core/config"
 	"github.com/slackmgr/types"
@@ -33,11 +35,14 @@ func newTestSlackAPIClient(t *testing.T, handler http.HandlerFunc) *SlackAPIClie
 	t.Cleanup(server.Close)
 
 	cfg := config.NewDefaultSlackClientConfig()
+	store := gocache_store.NewGoCache(gocache.New(5*time.Minute, time.Minute))
 
 	return &SlackAPIClient{
 		api:       slack.New("xoxb-test", slack.OptionAPIURL(server.URL+"/")),
 		logger:    &types.NoopLogger{},
 		metrics:   &types.NoopMetrics{},
+		cache:     NewCache(store, "test:slack-api-client:", &types.NoopLogger{}).WithPanicOnError(),
+		backoff:   newMethodBackoff(store, "test:", &types.NoopLogger{}),
 		cfg:       cfg,
 		sem:       semaphore.NewWeighted(int64(cfg.Concurrency)),
 		connected: true,

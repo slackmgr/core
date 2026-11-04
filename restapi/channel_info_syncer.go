@@ -2,6 +2,8 @@ package restapi
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,6 +35,7 @@ type ChannelInfoProvider interface {
 // channelInfoSyncer periodically syncs Slack channel information and caches it.
 type channelInfoSyncer struct {
 	slackClient      SlackClient
+	refreshInterval  time.Duration
 	channelsLastSeen map[string]time.Time
 	detectedChannels chan string
 	channelInfoCache map[string]*ChannelInfo
@@ -57,9 +60,13 @@ type ChannelInfo struct {
 	UserCount          int
 }
 
-func newChannelInfoSyncer(slackClient SlackClient, logger types.Logger) *channelInfoSyncer {
+// newChannelInfoSyncer creates a channel info syncer that refreshes the info of recently seen channels every
+// refreshInterval. The Slack client caches channel info in the (shared) cache store, so refreshes within the cache
+// TTL do not call Slack.
+func newChannelInfoSyncer(slackClient SlackClient, refreshInterval time.Duration, logger types.Logger) *channelInfoSyncer {
 	return &channelInfoSyncer{
 		slackClient:      slackClient,
+		refreshInterval:  refreshInterval,
 		channelsLastSeen: make(map[string]time.Time),
 		detectedChannels: make(chan string, 10000),
 		channelInfoCache: make(map[string]*ChannelInfo),
@@ -85,7 +92,7 @@ func (c *channelInfoSyncer) Run(ctx context.Context) error {
 	c.logger.Info("Slack channel info syncer started")
 	defer c.logger.Info("Slack channel info syncer exited")
 
-	refreshChannelInfoInterval := 30 * time.Second
+	refreshChannelInfoInterval := c.refreshInterval
 	refreshAllManagedChannelsInterval := 5 * time.Minute
 	pruneInterval := 30 * time.Minute
 
@@ -170,9 +177,13 @@ func (c *channelInfoSyncer) getCachedInfo(channel string) (*ChannelInfo, bool) {
 	return nil, false
 }
 
+// refreshData refreshes the info of all recently seen channels. A failed channel does not stop the refresh of the
+// other channels; the failures are returned joined.
 func (c *channelInfoSyncer) refreshData(ctx context.Context) error {
 	sem := semaphore.NewWeighted(3)
-	errg, ctx := errgroup.WithContext(ctx)
+	errg := errgroup.Group{}
+	errs := make([]error, 0)
+	errsLock := sync.Mutex{}
 
 	for channel := range c.channelsLastSeen {
 		errg.Go(func() error {
@@ -182,14 +193,20 @@ func (c *channelInfoSyncer) refreshData(ctx context.Context) error {
 			defer sem.Release(1)
 
 			if _, err := c.refreshChannelInfo(ctx, channel); err != nil {
-				return err
+				errsLock.Lock()
+				errs = append(errs, fmt.Errorf("channel %s: %w", channel, err))
+				errsLock.Unlock()
 			}
 
 			return nil
 		})
 	}
 
-	return errg.Wait()
+	if err := errg.Wait(); err != nil {
+		return err
+	}
+
+	return errors.Join(errs...)
 }
 
 func (c *channelInfoSyncer) refreshChannelInfo(ctx context.Context, channel string) (*ChannelInfo, error) {

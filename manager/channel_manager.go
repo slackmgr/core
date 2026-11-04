@@ -70,9 +70,28 @@ func registerQueueMetrics(metrics types.Metrics) {
 
 type cmdFunc func(ctx context.Context, issue *models.Issue, cmd *models.Command, logger types.Logger) (bool, error)
 
+// channelNameLookupTimeout bounds a Slack channel name lookup, so that a slow Slack API or a rate limit backoff
+// on conversations.info never stalls channel processing (or the coordinator) for long. The last known name is
+// used if a lookup fails.
+const channelNameLookupTimeout = 5 * time.Second
+
+// channelNameRetryInterval is the minimum time between channel name lookups after a failed lookup.
+const channelNameRetryInterval = time.Minute
+
 type channelManager struct {
-	channelID       string
-	channelName     string
+	channelID string
+
+	// channelName is the metrics label of the channel: the Slack channel name when the channel manager was
+	// created, or the channel ID if the name was unknown. It never changes, to keep metric series stable.
+	channelName string
+
+	// slackChannelName is the last known Slack channel name, or empty if it was never resolved. It is refreshed
+	// at most once per channel info cache TTL by currentSlackChannelName, and kept when a refresh fails.
+	slackChannelName string
+
+	// channelNameNextRefresh is when slackChannelName should be looked up again.
+	channelNameNextRefresh time.Time
+
 	slackClient     SlackClient
 	db              types.DB
 	webhookHandlers []WebhookHandler
@@ -104,26 +123,40 @@ type alertOutcome struct {
 	reason    string
 }
 
-func newChannelManager(channelID string, channelName string, slackClient SlackClient, db types.DB, locker ChannelLocker, logger types.Logger, metrics types.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
+// newChannelManager creates a channel manager. slackChannelName is the Slack channel name, or empty if it is unknown.
+func newChannelManager(channelID string, slackChannelName string, slackClient SlackClient, db types.DB, locker ChannelLocker, logger types.Logger, metrics types.Metrics, webhookHandlers []WebhookHandler, cfg *config.ManagerConfig,
 	managerSettings *models.ManagerSettingsWrapper, gate RateLimitGate,
 ) *channelManager {
 	logger = logger.WithField("channel_id", channelID)
 
+	channelName := slackChannelName
+	if channelName == "" {
+		channelName = channelID
+	}
+
+	// An unknown name is looked up on first use.
+	var channelNameNextRefresh time.Time
+	if slackChannelName != "" {
+		channelNameNextRefresh = time.Now().Add(channelNameRefreshInterval(cfg))
+	}
+
 	c := &channelManager{
-		channelID:       channelID,
-		channelName:     channelName,
-		slackClient:     slackClient,
-		db:              db,
-		locker:          locker,
-		logger:          logger,
-		metrics:         metrics,
-		webhookHandlers: webhookHandlers,
-		cfg:             cfg,
-		managerSettings: managerSettings,
-		gate:            gate,
-		alertCh:         make(chan *models.Alert, 10),
-		commandCh:       make(chan *models.Command, 10),
-		keepAliveCh:     make(chan struct{}, 10),
+		channelID:              channelID,
+		channelName:            channelName,
+		slackChannelName:       slackChannelName,
+		channelNameNextRefresh: channelNameNextRefresh,
+		slackClient:            slackClient,
+		db:                     db,
+		locker:                 locker,
+		logger:                 logger,
+		metrics:                metrics,
+		webhookHandlers:        webhookHandlers,
+		cfg:                    cfg,
+		managerSettings:        managerSettings,
+		gate:                   gate,
+		alertCh:                make(chan *models.Alert, 10),
+		commandCh:              make(chan *models.Command, 10),
+		keepAliveCh:            make(chan struct{}, 10),
 	}
 
 	c.cmdFuncs = map[models.CommandAction]cmdFunc{
@@ -437,7 +470,7 @@ func (c *channelManager) processAlert(ctx context.Context, alert *models.Alert) 
 	}
 
 	alert.SetDefaultValues(c.managerSettings.GetSettings())
-	alert.SlackChannelName = c.slackClient.GetChannelName(ctx, c.channelID)
+	alert.SlackChannelName = c.currentSlackChannelName(ctx)
 
 	if err := alert.Validate(); err != nil {
 		// Non-retryable: the alert data is malformed and will never become valid.
@@ -765,7 +798,7 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 	// Insights events for archived and escalated issues are recorded after the issues are saved.
 	var pendingEvents []types.InsightsEvent
 
-	currentChannelName := c.slackClient.GetChannelName(ctx, c.channelID)
+	currentChannelName := c.currentSlackChannelName(ctx)
 
 	for _, issue := range issues {
 		if issue.IsReadyForArchiving() {
@@ -787,7 +820,10 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		issue.ExpirePostClickState(now)
 
 		// The channel name may have changed since the issue was created. Update it if needed.
-		issue.LastAlert.SlackChannelName = currentChannelName
+		// An unknown name never blanks a known one.
+		if currentChannelName != "" {
+			issue.LastAlert.SlackChannelName = currentChannelName
+		}
 
 		result := issue.ApplyEscalationRules()
 		escalationResults = append(escalationResults, result)
@@ -1356,6 +1392,43 @@ func (c *channelManager) obtainLock(ctx context.Context, channelID string, ttl, 
 	c.logger.WithField("lock_key", lock.Key()).Debug("Channel lock obtained")
 
 	return lock, nil
+}
+
+// currentSlackChannelName returns the Slack channel name, or empty if it was never resolved. The name is looked up
+// at most once per channel info cache TTL (and once per [channelNameRetryInterval] after a failed lookup), since
+// a lookup per alert or per issue processing cycle causes too many conversations.info calls. The last known name
+// is kept when a lookup fails, e.g. because of a Slack rate limit.
+// Must only be called from the channel manager goroutine.
+func (c *channelManager) currentSlackChannelName(ctx context.Context) string {
+	now := time.Now()
+
+	if now.Before(c.channelNameNextRefresh) {
+		return c.slackChannelName
+	}
+
+	lookupCtx, cancel := context.WithTimeout(ctx, channelNameLookupTimeout)
+	defer cancel()
+
+	interval := channelNameRefreshInterval(c.cfg)
+
+	if name := c.slackClient.GetChannelName(lookupCtx, c.channelID); name != "" {
+		c.slackChannelName = name
+		c.channelNameNextRefresh = now.Add(interval)
+	} else {
+		c.channelNameNextRefresh = now.Add(min(channelNameRetryInterval, interval))
+	}
+
+	return c.slackChannelName
+}
+
+// channelNameRefreshInterval returns how often a channel manager refreshes the Slack channel name: the channel info
+// cache TTL, since a more frequent refresh would mostly be served from the cache anyway.
+func channelNameRefreshInterval(cfg *config.ManagerConfig) time.Duration {
+	if cfg == nil || cfg.SlackClient == nil {
+		return config.DefaultChannelInfoCacheTTLSeconds * time.Second
+	}
+
+	return cfg.SlackClient.ChannelInfoCacheTTL()
 }
 
 // waitForGate blocks until the rate limit gate allows processing to resume.

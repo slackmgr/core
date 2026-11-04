@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `SlackClientConfig.ChannelInfoCacheTTLSeconds` (default 300, range 10–86400) and `SlackClientConfig.ChannelNotFoundCacheTTLSeconds` (default 60, range 1–3600): how long `conversations.info` results and `channel_not_found` results are cached. Zero means the default
+- `APIConfig.ChannelInfoRefreshIntervalSeconds` (default 300, range 10–3600): how often the API refreshes the info of recently used channels. Validation fails if it is longer than the API's channel info cache TTL. Zero means the default
+- Per-method Slack rate limit backoff: a 429 records the method's deadline in the cache store (`<cacheKeyPrefix>rate-limit-gate:<method>`), shared by the API and all Manager instances when they use the same Redis cache store and key prefix. Lookup calls wait for the backoff, or fail fast if it ends after their deadline or retry budget
+- Cached Slack lookups (channel info, user info, channel members, user group members) serve the last known value while the method is rate limited, or when the call fails with a rate limit or transient error. Stale values are kept for 24 hours (channel and user info) or 1 hour (memberships)
+- Metrics `slack_api_rate_limited_total` (by `slack_action` and `rate_limit_group`) and `slack_api_backoff_total` (by `slack_action` and `outcome`), and the `stale` result value for `slack_client_cache_requests_total`
+- Dashboard panels "Slack 429s by Method", "Per-Method Backoff Outcomes" and "Stale Lookups Served" in the Slack API Health row
+
+### Changed
+- Only 429s on write methods (`chat.postMessage`, `chat.update`, `chat.delete`) signal the global rate limit gate and pause all channel processing. 429s on lookup methods (e.g. `conversations.info`) only back off the method itself, so a rate limited lookup no longer delays posts and updates in every channel
+- Channel info is cached for 5 minutes (plus up to 20% jitter) by default, instead of 10–20 seconds, and `channel_not_found` for 60 seconds instead of 10–20 seconds
+- The API refreshes channel info every 5 minutes by default, instead of every 30 seconds
+- Channel managers keep the channel name in memory and look it up at most once per channel info cache TTL, instead of on every alert and every issue processing run. Channel name lookups (also when a channel manager is created) time out after 5 seconds
+- Slack lookup cache entries use new keys (`v2:` prefix) with an envelope that supports stale values. During a rolling upgrade, older versions do not share the lookup cache with this version
+- A 429 is recorded (in the gate or method backoff) also when it is not retried, e.g. on the last attempt
+- `slack_api_rate_limit_duration_seconds` is labelled by `slack_action`
+- `channel_not_found` from `conversations.members` and `no_such_subteam` from `usergroups.users.list` are cached, instead of calling Slack again on every lookup
+- Dashboard: updated descriptions of the cache hit ratio, rate limit gate and Retry-After panels
+
+### Fixed
+- A failed channel name lookup (e.g. a rate limit) no longer blanks the Slack channel name on open issues; the last known name is kept
+- A failed channel in the API's background channel info refresh no longer cancels the refresh of the other channels
+
 ## [0.22.0] - 2026-11-03
 
 ### Added

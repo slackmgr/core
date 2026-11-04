@@ -31,7 +31,7 @@ const (
 	slackAPIRetriesTotalMetric = "slack_api_retries_total"
 
 	// slackAPIRateLimitDurationMetric is a histogram of Retry-After durations from Slack
-	// 429 responses — how many seconds the server asked us to back off.
+	// 429 responses — how many seconds the server asked us to back off — labelled by the API action.
 	slackAPIRateLimitDurationMetric = "slack_api_rate_limit_duration_seconds"
 
 	// slackAPICallDurationMetric is a histogram of individual outbound Slack HTTP call
@@ -55,8 +55,18 @@ var ErrTooManyMessages = errors.New("too many messages in channel")
 // maxBotMessagesPages is the maximum number of conversations.history pages read by [SlackAPIClient.ListBotMessages].
 const maxBotMessagesPages = 5
 
+// How long cached lookups are kept after they are no longer fresh, to be served while the lookup method is rate
+// limited. Channel and user info change rarely, so a day-old value is better than an error. Memberships are used for
+// permission checks, so they are served stale for a shorter time.
+const (
+	channelInfoMaxStale = 24 * time.Hour
+	userInfoMaxStale    = 24 * time.Hour
+	membershipMaxStale  = time.Hour
+)
+
 // rateLimitSignaler is satisfied by any type that can record a rate-limit
-// deadline so that all callers can back off until it expires.
+// deadline so that all callers can back off until it expires. It is only
+// signalled for 429s on write methods (see [RateLimitGroupWrite]).
 type rateLimitSignaler interface {
 	Signal(ctx context.Context, until time.Time) error
 }
@@ -67,30 +77,42 @@ type SlackAPIClient struct {
 	cache     *Cache
 	metrics   types.Metrics
 	cfg       *config.SlackClientConfig
-	gate      rateLimitSignaler   // nil = no distributed signalling
+	gate      rateLimitSignaler   // nil = no global gate signalling (write methods only)
+	backoff   *methodBackoff      // per-method rate limit deadlines; nil = disabled
+	apiURL    string              // Slack API base URL override (tests only); empty = default
 	sem       *semaphore.Weighted // limits concurrent Slack API calls
 	connected bool
 	botUserID string
 	botID     string
 }
 
-// WithRateLimitGate is a functional option that wires a RateLimitSignaler into
-// the SlackAPIClient so that a detected 429 is broadcast to all callers.
+// WithRateLimitGate is a functional option that wires a global rate limit gate into
+// the SlackAPIClient, so that a 429 on a write method (see [RateLimitGroupWrite]) is
+// broadcast to all callers. 429s on lookup methods only back off the method itself.
 func WithRateLimitGate(g rateLimitSignaler) func(*SlackAPIClient) {
 	return func(c *SlackAPIClient) { c.gate = g }
 }
 
+// WithAPIURL is a functional option that overrides the Slack API base URL (which must end with a slash).
+// It is intended for tests that run against a fake Slack API.
+func WithAPIURL(apiURL string) func(*SlackAPIClient) {
+	return func(c *SlackAPIClient) { c.apiURL = apiURL }
+}
+
+// NewSlackAPIClient creates a [SlackAPIClient]. Lookups are cached in cacheStore under cacheKeyPrefix, and
+// per-method rate limit deadlines are stored there too (with the key <cacheKeyPrefix>rate-limit-gate:<method>), so
+// that instances sharing the cache store and key prefix also share the cache and the rate limit backoffs.
 func NewSlackAPIClient(cacheStore cachestore.StoreInterface, cacheKeyPrefix string, logger types.Logger, metrics types.Metrics, cfg *config.SlackClientConfig, opts ...func(*SlackAPIClient)) *SlackAPIClient {
 	cfg.SetDefaults()
 
-	cacheKeyPrefix += "slack-api-client:"
-	cache := NewCache(cacheStore, cacheKeyPrefix, logger)
+	cache := NewCache(cacheStore, cacheKeyPrefix+"slack-api-client:", logger)
 
 	c := &SlackAPIClient{
 		logger:  logger,
 		cache:   cache,
 		metrics: metrics,
 		cfg:     cfg,
+		backoff: newMethodBackoff(cacheStore, cacheKeyPrefix, logger),
 		sem:     semaphore.NewWeighted(int64(cfg.Concurrency)),
 	}
 
@@ -125,26 +147,33 @@ func (c *SlackAPIClient) Connect(ctx context.Context) (*slack.AuthTestResponse, 
 	c.metrics.RegisterCounter(slackClientCacheRequestsTotalMetric, "Total calls to cacheable Slack client wrapper methods, by action and result", "slack_action", "result")
 
 	for _, action := range []string{"conversations.info", "users.conversations", "users.info", "usergroups.users.list", "conversations.members"} {
-		for _, result := range []string{"hit", "miss"} {
+		for _, result := range []string{"hit", "miss", "stale"} {
 			c.metrics.CounterAdd(slackClientCacheRequestsTotalMetric, 0, action, result)
 		}
 	}
 	c.metrics.RegisterCounter(slackAPIErrorsTotalMetric, "Total Slack API call errors by error type", "slack_action", "error_type")
 	c.metrics.RegisterCounter(slackAPIRetriesTotalMetric, "Total Slack API retry attempts after a recoverable error", "slack_action", "error_type")
-	c.metrics.RegisterHistogram(slackAPIRateLimitDurationMetric, "Retry-After duration in seconds from Slack 429 responses", []float64{1, 5, 10, 30, 60, 120, 300})
+	c.metrics.RegisterHistogram(slackAPIRateLimitDurationMetric, "Retry-After duration in seconds from Slack 429 responses", []float64{1, 5, 10, 30, 60, 120, 300}, "slack_action")
+	c.metrics.RegisterCounter(slackAPIRateLimitedTotalMetric, "Total Slack 429 responses by action and rate limit group (write = pauses all channels, lookup = backs off the method only)", "slack_action", "rate_limit_group")
+	c.metrics.RegisterCounter(slackAPIBackoffTotalMetric, "Total Slack API calls that found their method backing off after a 429, by outcome (waited or rejected)", "slack_action", "outcome")
 	c.metrics.RegisterHistogram(slackAPICallDurationMetric, "Duration of individual outbound Slack API calls in seconds", []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30}, "slack_action")
 
 	httpClient := &http.Client{
 		Timeout: time.Duration(c.cfg.HTTPTimeoutSeconds) * time.Second,
 	}
 
-	c.api = slack.New(
-		c.cfg.BotToken,
+	options := []slack.Option{
 		slack.OptionDebug(c.cfg.DebugLogging),
 		slack.OptionAppLevelToken(c.cfg.AppToken),
 		slack.OptionLog(&slackApilogger{logger: c.logger}),
 		slack.OptionHTTPClient(httpClient),
-	)
+	}
+
+	if c.apiURL != "" {
+		options = append(options, slack.OptionAPIURL(c.apiURL))
+	}
+
+	c.api = slack.New(c.cfg.BotToken, options...)
 
 	response, err := c.api.AuthTestContext(ctx)
 	if err != nil {
@@ -190,7 +219,7 @@ func (c *SlackAPIClient) ChatPostMessage(ctx context.Context, channelID string, 
 		return ts, nil, err
 	}
 
-	ts, _, err := callAPIWithPolicy(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, isPostOutcomeUnknown, f)
+	ts, _, err := callAPIWithPolicy(ctx, c, c.logger.WithField("channel_id", channelID), action, callPolicy{outcomeUnknown: isPostOutcomeUnknown}, f)
 
 	return ts, err
 }
@@ -232,7 +261,7 @@ func (c *SlackAPIClient) ListBotMessages(ctx context.Context, channelID string, 
 			return resp, nil, err
 		}
 
-		resp, _, err := callAPI(ctx, logger, c.metrics, c.cfg, c.gate, c.sem, action, f)
+		resp, _, err := callAPI(ctx, c, logger, action, f)
 		if err != nil {
 			return nil, err
 		}
@@ -265,7 +294,7 @@ func (c *SlackAPIClient) ChatUpdateMessage(ctx context.Context, channelID string
 		return ts, nil, err
 	}
 
-	ts, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f)
+	ts, _, err := callAPI(ctx, c, c.logger.WithField("channel_id", channelID), action, f)
 
 	return ts, err
 }
@@ -282,7 +311,7 @@ func (c *SlackAPIClient) ChatDeleteMessage(ctx context.Context, channelID string
 		return nil, nil, err
 	}
 
-	_, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f)
+	_, _, err := callAPI(ctx, c, c.logger.WithField("channel_id", channelID), action, f)
 
 	return err
 }
@@ -317,7 +346,7 @@ func (c *SlackAPIClient) SendResponse(ctx context.Context, channelID, responseUR
 		return nil, nil, err
 	}
 
-	_, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f)
+	_, _, err := callAPI(ctx, c, c.logger.WithField("channel_id", channelID), action, f)
 
 	return err
 }
@@ -342,7 +371,7 @@ func (c *SlackAPIClient) PostEphemeral(ctx context.Context, channelID, userID st
 		return ts, nil, err
 	}
 
-	ts, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f)
+	ts, _, err := callAPI(ctx, c, c.logger.WithField("channel_id", channelID), action, f)
 
 	return ts, err
 }
@@ -379,7 +408,7 @@ func (c *SlackAPIClient) UpdateModal(ctx context.Context, viewID string, request
 		return nil, nil, err
 	}
 
-	_, _, err := callAPI(ctx, c.logger.WithField("view_id", viewID), c.metrics, c.cfg, c.gate, c.sem, action, f)
+	_, _, err := callAPI(ctx, c, c.logger.WithField("view_id", viewID), action, f)
 
 	return err
 }
@@ -411,7 +440,7 @@ func (c *SlackAPIClient) MessageHasReplies(ctx context.Context, channelID, ts st
 		return msgs, nil, err
 	}
 
-	msgs, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f, SlackErrChannelNotFound, SlackErrThreadNotFound)
+	msgs, _, err := callAPI(ctx, c, c.logger.WithField("channel_id", channelID), action, f, SlackErrChannelNotFound, SlackErrThreadNotFound)
 	if err != nil {
 		if err.Error() == SlackErrChannelNotFound || err.Error() == SlackErrThreadNotFound {
 			return false, nil
@@ -422,6 +451,10 @@ func (c *SlackAPIClient) MessageHasReplies(ctx context.Context, channelID, ts st
 	return len(msgs) > 1, nil
 }
 
+// GetChannelInfo returns the Slack channel info (conversations.info) for a channel. Results are cached for
+// [config.SlackClientConfig.ChannelInfoCacheTTL] (plus up to 20% jitter), and channel_not_found results for
+// [config.SlackClientConfig.ChannelNotFoundCacheTTL]. A stale value is served for up to [channelInfoMaxStale] while
+// conversations.info is rate limited. A missing channel is returned as an error with the text [SlackErrChannelNotFound].
 func (c *SlackAPIClient) GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error) {
 	if err := c.checkConnected(); err != nil {
 		return nil, err
@@ -432,60 +465,48 @@ func (c *SlackAPIClient) GetChannelInfo(ctx context.Context, channelID string) (
 	}
 
 	action := "conversations.info"
+	logger := c.logger.WithField("channel_id", channelID)
+	ttl := c.cfg.ChannelInfoCacheTTL()
 
-	cacheKey := "GetChannelInfo:" + channelID
-
-	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.CounterInc(slackClientCacheRequestsTotalMetric, action, "hit")
-
-		// If we cached a ChannelNotFoundError, return it as an error
-		if val == SlackErrChannelNotFound {
-			return nil, errors.New(SlackErrChannelNotFound)
-		}
-
-		info := slack.Channel{}
-
-		if err := json.Unmarshal([]byte(val), &info); err != nil {
-			c.logger.WithField("channel_id", channelID).Errorf("Failed to json unmarshal channel info: %s", err)
-		} else {
-			return &info, nil
-		}
+	policy := lookupPolicy{
+		action:      action,
+		key:         "GetChannelInfo:" + channelID,
+		ttl:         ttl,
+		jitter:      ttl / 5,
+		notFoundTTL: c.cfg.ChannelNotFoundCacheTTL(),
+		maxStale:    channelInfoMaxStale,
 	}
 
-	c.metrics.CounterInc(slackClientCacheRequestsTotalMetric, action, "miss")
-
-	f := func(ctx context.Context) (*slack.Channel, any, error) {
-		input := slack.GetConversationInfoInput{
-			ChannelID:     channelID,
-			IncludeLocale: false,
+	fetch := func(ctx context.Context, failFast bool) (*slack.Channel, bool, error) {
+		f := func(ctx context.Context) (*slack.Channel, any, error) {
+			input := slack.GetConversationInfoInput{
+				ChannelID:     channelID,
+				IncludeLocale: false,
+			}
+			val, err := c.api.GetConversationInfoContext(ctx, &input)
+			return val, nil, err
 		}
-		val, err := c.api.GetConversationInfoContext(ctx, &input)
-		return val, nil, err
+
+		policy := callPolicy{expectedErrors: []string{SlackErrChannelNotFound}, failFast: failFast}
+
+		channel, _, err := callAPIWithPolicy(ctx, c, logger, action, policy, f)
+		if err != nil {
+			if err.Error() == SlackErrChannelNotFound {
+				return nil, true, nil
+			}
+			return nil, false, err
+		}
+
+		return channel, false, nil
 	}
 
-	channel, _, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f, SlackErrChannelNotFound)
-	unknownChannel := false
-
+	channel, notFound, err := cachedLookup(ctx, c, logger, policy, fetch)
 	if err != nil {
-		if err.Error() == SlackErrChannelNotFound {
-			unknownChannel = true
-		} else {
-			return nil, err
-		}
-	}
-
-	// No channel found, cache the error to avoid repeated API calls, and then return the error
-	if unknownChannel {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, SlackErrChannelNotFound, 10*time.Second, 10*time.Second)
 		return nil, err
 	}
 
-	// Otherwise cache and return the channel info
-	resultJSON, err := json.Marshal(channel)
-	if err != nil {
-		c.logger.WithField("channel_id", channelID).Errorf("Failed to json marshal channel info: %s", err)
-	} else {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), 10*time.Second, 10*time.Second)
+	if notFound || channel == nil {
+		return nil, errors.New(SlackErrChannelNotFound)
 	}
 
 	return channel, nil
@@ -527,7 +548,7 @@ func (c *SlackAPIClient) ListBotChannels(ctx context.Context) ([]*ChannelSummary
 	channels := []*ChannelSummary{}
 
 	for {
-		chs, nextCursor, err := callAPI(ctx, c.logger, c.metrics, c.cfg, c.gate, c.sem, action, f)
+		chs, nextCursor, err := callAPI(ctx, c, c.logger, action, f)
 		if err != nil {
 			return nil, err
 		}
@@ -557,6 +578,8 @@ func (c *SlackAPIClient) ListBotChannels(ctx context.Context) ([]*ChannelSummary
 	return channels, nil
 }
 
+// GetUserInfo returns the Slack user info (users.info) for a user. Results are cached for 1-2 hours, and a stale
+// value is served for up to [userInfoMaxStale] while users.info is rate limited.
 func (c *SlackAPIClient) GetUserInfo(ctx context.Context, userID string) (*slack.User, error) {
 	if err := c.checkConnected(); err != nil {
 		return nil, err
@@ -568,42 +591,36 @@ func (c *SlackAPIClient) GetUserInfo(ctx context.Context, userID string) (*slack
 
 	action := "users.info"
 
-	cacheKey := "GetUserInfo:" + userID
+	policy := lookupPolicy{
+		action:   action,
+		key:      "GetUserInfo:" + userID,
+		ttl:      time.Hour,
+		jitter:   time.Hour,
+		maxStale: userInfoMaxStale,
+	}
 
-	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.CounterInc(slackClientCacheRequestsTotalMetric, action, "hit")
-
-		user := slack.User{}
-
-		if err := json.Unmarshal([]byte(val), &user); err != nil {
-			c.logger.Errorf("failed to json unmarshal userInfo value: %s", err)
-		} else {
-			return &user, nil
+	fetch := func(ctx context.Context, failFast bool) (*slack.User, bool, error) {
+		f := func(ctx context.Context) (*slack.User, any, error) {
+			val, err := c.api.GetUserInfoContext(ctx, userID)
+			return val, nil, err
 		}
+
+		user, _, err := callAPIWithPolicy(ctx, c, c.logger, action, callPolicy{failFast: failFast}, f)
+
+		return user, false, err
 	}
 
-	c.metrics.CounterInc(slackClientCacheRequestsTotalMetric, action, "miss")
-
-	f := func(ctx context.Context) (*slack.User, any, error) {
-		val, err := c.api.GetUserInfoContext(ctx, userID)
-		return val, nil, err
-	}
-
-	user, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, c.gate, c.sem, action, f)
+	user, _, err := cachedLookup(ctx, c, c.logger, policy, fetch)
 	if err != nil {
 		return nil, err
-	}
-
-	resultJSON, err := json.Marshal(user)
-	if err != nil {
-		c.logger.Errorf("failed to json marshal userInfo value: %s", err)
-	} else {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), time.Hour, time.Hour)
 	}
 
 	return user, nil
 }
 
+// ListUserGroupMembers returns the user IDs in a Slack user group (usergroups.users.list). Results are cached for
+// 1-1.5 minutes, and a stale value is served for up to [membershipMaxStale] while the method is rate limited.
+// An unknown group (no_such_subteam) has no members.
 func (c *SlackAPIClient) ListUserGroupMembers(ctx context.Context, groupID string) (map[string]struct{}, error) {
 	if err := c.checkConnected(); err != nil {
 		return nil, err
@@ -615,51 +632,55 @@ func (c *SlackAPIClient) ListUserGroupMembers(ctx context.Context, groupID strin
 
 	action := "usergroups.users.list"
 
-	cacheKey := "ListUserGroupMembers:" + groupID
+	policy := lookupPolicy{
+		action:      action,
+		key:         "ListUserGroupMembers:" + groupID,
+		ttl:         time.Minute,
+		jitter:      30 * time.Second,
+		notFoundTTL: time.Minute,
+		maxStale:    membershipMaxStale,
+	}
 
-	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.CounterInc(slackClientCacheRequestsTotalMetric, action, "hit")
-
-		var result map[string]struct{}
-
-		if err := json.Unmarshal([]byte(val), &result); err != nil {
-			c.logger.Errorf("failed to json unmarshal group user IDs value: %s", err)
-		} else {
-			return result, nil
+	fetch := func(ctx context.Context, failFast bool) (map[string]struct{}, bool, error) {
+		f := func(ctx context.Context) ([]string, any, error) {
+			val, err := c.api.GetUserGroupMembersContext(ctx, groupID)
+			return val, nil, err
 		}
+
+		policy := callPolicy{expectedErrors: []string{SlackErrNoSuchSubTeam}, failFast: failFast}
+
+		userIDs, _, err := callAPIWithPolicy(ctx, c, c.logger, action, policy, f)
+		if err != nil {
+			if err.Error() == SlackErrNoSuchSubTeam {
+				return nil, true, nil
+			}
+			return nil, false, err
+		}
+
+		result := make(map[string]struct{}, len(userIDs))
+
+		for _, userID := range userIDs {
+			result[userID] = struct{}{}
+		}
+
+		return result, false, nil
 	}
 
-	c.metrics.CounterInc(slackClientCacheRequestsTotalMetric, action, "miss")
-
-	result := make(map[string]struct{})
-
-	f := func(ctx context.Context) ([]string, any, error) {
-		val, err := c.api.GetUserGroupMembersContext(ctx, groupID)
-		return val, nil, err
-	}
-
-	userIDs, _, err := callAPI(ctx, c.logger, c.metrics, c.cfg, c.gate, c.sem, action, f, SlackErrNoSuchSubTeam)
+	result, _, err := cachedLookup(ctx, c, c.logger, policy, fetch)
 	if err != nil {
-		if err.Error() == SlackErrNoSuchSubTeam {
-			return result, nil
-		}
 		return nil, err
 	}
 
-	for _, userID := range userIDs {
-		result[userID] = struct{}{}
-	}
-
-	resultJSON, err := json.Marshal(result)
-	if err != nil {
-		c.logger.Errorf("failed to json marshal user IDs: %s", err)
-	} else {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), time.Minute, 30*time.Second)
+	if result == nil {
+		result = make(map[string]struct{})
 	}
 
 	return result, nil
 }
 
+// GetUserIDsInChannel returns the user IDs of the members of a Slack channel (conversations.members). Results are
+// cached for 1-1.5 minutes, and a stale value is served for up to [membershipMaxStale] while the method is rate
+// limited. An unknown channel (channel_not_found) has no members.
 func (c *SlackAPIClient) GetUserIDsInChannel(ctx context.Context, channelID string) (map[string]struct{}, error) {
 	if err := c.checkConnected(); err != nil {
 		return nil, err
@@ -670,61 +691,57 @@ func (c *SlackAPIClient) GetUserIDsInChannel(ctx context.Context, channelID stri
 	}
 
 	action := "conversations.members"
+	logger := c.logger.WithField("channel_id", channelID)
 
-	cacheKey := "GetUserIDsInChannel:" + channelID
+	policy := lookupPolicy{
+		action:      action,
+		key:         "GetUserIDsInChannel:" + channelID,
+		ttl:         time.Minute,
+		jitter:      30 * time.Second,
+		notFoundTTL: c.cfg.ChannelNotFoundCacheTTL(),
+		maxStale:    membershipMaxStale,
+	}
 
-	if val, hit := c.cache.Get(ctx, cacheKey); hit {
-		c.metrics.CounterInc(slackClientCacheRequestsTotalMetric, action, "hit")
-
-		var result map[string]struct{}
-
-		if err := json.Unmarshal([]byte(val), &result); err != nil {
-			c.logger.WithField("channel_id", channelID).Errorf("failed to json unmarshal userIdsInChannel: %s", err)
-		} else {
-			return result, nil
+	fetch := func(ctx context.Context, failFast bool) (map[string]struct{}, bool, error) {
+		params := &slack.GetUsersInConversationParameters{
+			ChannelID: channelID,
 		}
-	}
 
-	userIDs := []string{}
-	result := make(map[string]struct{})
+		f := func(ctx context.Context) ([]string, string, error) {
+			return c.api.GetUsersInConversationContext(ctx, params)
+		}
 
-	c.metrics.CounterInc(slackClientCacheRequestsTotalMetric, action, "miss")
+		policy := callPolicy{expectedErrors: []string{SlackErrChannelNotFound}, failFast: failFast}
+		result := make(map[string]struct{})
 
-	params := &slack.GetUsersInConversationParameters{
-		ChannelID: channelID,
-	}
-
-	f := func(ctx context.Context) ([]string, string, error) {
-		return c.api.GetUsersInConversationContext(ctx, params)
-	}
-
-	for {
-		users, nextCursor, err := callAPI(ctx, c.logger.WithField("channel_id", channelID), c.metrics, c.cfg, c.gate, c.sem, action, f, SlackErrChannelNotFound)
-		if err != nil {
-			if err.Error() == SlackErrChannelNotFound {
-				return result, nil
+		for {
+			users, nextCursor, err := callAPIWithPolicy(ctx, c, logger, action, policy, f)
+			if err != nil {
+				if err.Error() == SlackErrChannelNotFound {
+					return nil, true, nil
+				}
+				return nil, false, err
 			}
-			return nil, err
+
+			for _, userID := range users {
+				result[userID] = struct{}{}
+			}
+
+			if nextCursor == "" {
+				return result, false, nil
+			}
+
+			params.Cursor = nextCursor
 		}
-
-		userIDs = append(userIDs, users...)
-
-		if nextCursor == "" {
-			break
-		}
-
-		params.Cursor = nextCursor
 	}
 
-	for _, userID := range userIDs {
-		result[userID] = struct{}{}
-	}
-
-	resultJSON, err := json.Marshal(result)
+	result, _, err := cachedLookup(ctx, c, logger, policy, fetch)
 	if err != nil {
-		c.logger.WithField("channel_id", channelID).Errorf("failed to json marshal userIdsInChannel result: %s", err)
-	} else {
-		c.cache.SetWithRandomExpiration(ctx, cacheKey, string(resultJSON), time.Minute, 30*time.Second)
+		return nil, err
+	}
+
+	if result == nil {
+		result = make(map[string]struct{})
 	}
 
 	return result, nil
@@ -768,11 +785,24 @@ func (c *SlackAPIClient) checkConnected() error {
 	return nil
 }
 
-func callAPI[V any, W any](ctx context.Context, logger types.Logger, metrics types.Metrics,
-	cfg *config.SlackClientConfig, gate rateLimitSignaler, sem *semaphore.Weighted,
+// callPolicy configures how [callAPIWithPolicy] handles errors.
+type callPolicy struct {
+	// expectedErrors are Slack error codes that are returned without counting them as errors or retrying.
+	expectedErrors []string
+
+	// outcomeUnknown, if set, reports errors where the call may still have succeeded. They are not retried,
+	// and are returned wrapped in [ErrPostOutcomeUnknown].
+	outcomeUnknown func(error) bool
+
+	// failFast makes a lookup method fail immediately (instead of waiting) if it is backing off after a 429,
+	// and return a 429 without retrying. Used when a stale cached value can be served instead.
+	failFast bool
+}
+
+func callAPI[V any, W any](ctx context.Context, c *SlackAPIClient, logger types.Logger,
 	action string, f func(ctx context.Context) (V, W, error), expectedErrors ...string,
 ) (V, W, error) {
-	return callAPIWithPolicy(ctx, logger, metrics, cfg, gate, sem, action, nil, f, expectedErrors...)
+	return callAPIWithPolicy(ctx, c, logger, action, callPolicy{expectedErrors: expectedErrors}, f)
 }
 
 // MaxCallDuration returns an upper bound for how long a Slack API call made by [SlackAPIClient] can take, including
@@ -783,31 +813,39 @@ func MaxCallDuration(cfg *config.SlackClientConfig) time.Duration {
 	return time.Duration(budget+cfg.HTTPTimeoutSeconds) * time.Second
 }
 
-// callAPIWithPolicy is [callAPI] with an optional outcomeUnknown function. Errors for which it returns true
-// are not retried, and are returned wrapped in [ErrPostOutcomeUnknown].
-func callAPIWithPolicy[V any, W any](ctx context.Context, logger types.Logger, metrics types.Metrics,
-	cfg *config.SlackClientConfig, gate rateLimitSignaler, sem *semaphore.Weighted,
-	action string, outcomeUnknown func(error) bool, f func(ctx context.Context) (V, W, error), expectedErrors ...string,
+// callAPIWithPolicy calls f, retrying rate limit and transient errors within the configured budgets.
+// Lookup methods first wait for (or fail fast on) an active per-method rate limit backoff. A 429 records the
+// per-method backoff, and signals the global rate limit gate for write methods only (see [RateLimitGroup]).
+func callAPIWithPolicy[V any, W any](ctx context.Context, c *SlackAPIClient, logger types.Logger,
+	action string, policy callPolicy, f func(ctx context.Context) (V, W, error),
 ) (V, W, error) {
 	attempt := 1
 	started := time.Now()
+	rateLimitBudgetEnd := started.Add(time.Duration(c.cfg.MaxRateLimitErrorWaitTimeSeconds) * time.Second)
 
 	for {
+		var result1 V
+		var result2 W
+
+		// Wait for (or fail fast on) the method's own rate limit backoff before the call, rather than making a
+		// call that is likely to be rate limited again.
+		if err := c.awaitMethodBackoff(ctx, logger, action, rateLimitBudgetEnd, policy.failFast); err != nil {
+			return result1, result2, err
+		}
+
 		// Acquire a semaphore slot before the HTTP call to limit concurrency.
-		if sem != nil {
-			if err := sem.Acquire(ctx, 1); err != nil {
-				var result1 V
-				var result2 W
+		if c.sem != nil {
+			if err := c.sem.Acquire(ctx, 1); err != nil {
 				return result1, result2, err
 			}
 		}
 
 		callStart := time.Now()
 		val1, val2, err := f(ctx)
-		metrics.Observe(slackAPICallDurationMetric, time.Since(callStart).Seconds(), action)
+		c.metrics.Observe(slackAPICallDurationMetric, time.Since(callStart).Seconds(), action)
 
-		if sem != nil {
-			sem.Release(1)
+		if c.sem != nil {
+			c.sem.Release(1)
 		}
 
 		logger.
@@ -821,12 +859,9 @@ func callAPIWithPolicy[V any, W any](ctx context.Context, logger types.Logger, m
 			return val1, val2, nil
 		}
 
-		var result1 V
-		var result2 W
-
 		// Checked before the context, since a request cancelled in flight may still have been processed.
-		if outcomeUnknown != nil && outcomeUnknown(err) {
-			metrics.CounterInc(slackAPIErrorsTotalMetric, action, getSlackErrorMetricLabel(err))
+		if policy.outcomeUnknown != nil && policy.outcomeUnknown(err) {
+			c.metrics.CounterInc(slackAPIErrorsTotalMetric, action, getSlackErrorMetricLabel(err))
 			return result1, result2, fmt.Errorf("%w: %w", ErrPostOutcomeUnknown, err)
 		}
 
@@ -834,54 +869,48 @@ func callAPIWithPolicy[V any, W any](ctx context.Context, logger types.Logger, m
 			return result1, result2, err
 		}
 
-		if len(expectedErrors) > 0 && slices.Contains(expectedErrors, err.Error()) {
+		if len(policy.expectedErrors) > 0 && slices.Contains(policy.expectedErrors, err.Error()) {
 			return result1, result2, err
 		}
 
 		errTypeMetricLabel := getSlackErrorMetricLabel(err)
 
-		metrics.CounterInc(slackAPIErrorsTotalMetric, action, errTypeMetricLabel)
+		c.metrics.CounterInc(slackAPIErrorsTotalMetric, action, errTypeMetricLabel)
 
 		// waitForAPIError returns nil if we should try again, after waiting an appropriate amount of time for the error type.
 		// A returned error indicates either that the error was not a known recoverable type, or that we've
 		// exceeded retry limits or context deadline and should not retry.
-		if waitErr := waitForAPIError(ctx, started, logger, attempt, action, cfg, gate, metrics, err); waitErr != nil {
+		if waitErr := c.waitForAPIError(ctx, started, logger, attempt, action, policy.failFast, err); waitErr != nil {
 			return result1, result2, waitErr
 		}
 
-		metrics.CounterInc(slackAPIRetriesTotalMetric, action, errTypeMetricLabel)
+		c.metrics.CounterInc(slackAPIRetriesTotalMetric, action, errTypeMetricLabel)
 
 		attempt++
 	}
 }
 
 // waitForAPIError determines whether the given error is a rate limit error or a transient error,
-// and if so waits an appropriate amount of time before the next retry attempt
+// and if so waits an appropriate amount of time before the next retry attempt.
+// A rate limit error is always signalled (see [SlackAPIClient.signalRateLimit]), also when it is not retried.
 // An error is returned if the retry should not be attempted (e.g. if we've exceeded max attempts or context deadline).
-func waitForAPIError(ctx context.Context, started time.Time, logger types.Logger, attempt int, action string, cfg *config.SlackClientConfig, gate rateLimitSignaler, metrics types.Metrics, err error) error {
+func (c *SlackAPIClient) waitForAPIError(ctx context.Context, started time.Time, logger types.Logger, attempt int, action string, failFast bool, err error) error {
 	if rateLimitError, ok := errors.AsType[*slack.RateLimitedError](err); ok {
-		remainingWaitTime := time.Until(started.Add(time.Duration(cfg.MaxRateLimitErrorWaitTimeSeconds) * time.Second))
+		c.signalRateLimit(ctx, logger, action, rateLimitError.RetryAfter)
 
-		if attempt >= cfg.MaxAttemptsForRateLimitError || remainingWaitTime < time.Second {
+		remainingWaitTime := time.Until(started.Add(time.Duration(c.cfg.MaxRateLimitErrorWaitTimeSeconds) * time.Second))
+
+		if failFast || attempt >= c.cfg.MaxAttemptsForRateLimitError || remainingWaitTime < time.Second {
 			return fmt.Errorf("failed to call Slack API %s after %d attempts and %d seconds: rate limit error: %w", action, attempt, int(time.Since(started).Seconds()), err)
-		}
-
-		metrics.Observe(slackAPIRateLimitDurationMetric, rateLimitError.RetryAfter.Seconds())
-
-		if gate != nil {
-			until := time.Now().Add(rateLimitError.RetryAfter + 2*time.Second)
-			if signalErr := gate.Signal(ctx, until); signalErr != nil {
-				logger.WithField("error", signalErr).WithField("action", action).Info("Failed to signal rate limit gate")
-			}
 		}
 
 		return waitForRateLimit(ctx, logger, rateLimitError, attempt, action, remainingWaitTime)
 	}
 
 	if IsTransientError(err) {
-		remainingWaitTime := time.Until(started.Add(time.Duration(cfg.MaxTransientErrorWaitTimeSeconds) * time.Second))
+		remainingWaitTime := time.Until(started.Add(time.Duration(c.cfg.MaxTransientErrorWaitTimeSeconds) * time.Second))
 
-		if attempt >= cfg.MaxAttemptsForTransientError || remainingWaitTime < time.Second {
+		if attempt >= c.cfg.MaxAttemptsForTransientError || remainingWaitTime < time.Second {
 			return fmt.Errorf("failed to call Slack API %s after %d attempts and %d seconds: transient error: %w", action, attempt, int(time.Since(started).Seconds()), err)
 		}
 
