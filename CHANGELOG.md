@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-04
+
 ### Added
 - `SlackClientConfig.ChannelInfoCacheTTLSeconds` (default 300, range 10–86400) and `SlackClientConfig.ChannelNotFoundCacheTTLSeconds` (default 60, range 1–3600): how long `conversations.info` results and `channel_not_found` results are cached. Zero means the default
 - `APIConfig.ChannelInfoRefreshIntervalSeconds` (default 300, range 10–3600): how often the API refreshes the info of recently used channels. Validation fails if it is longer than the API's channel info cache TTL. Zero means the default
@@ -547,7 +549,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/slackmgr/core/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/slackmgr/core/compare/v0.21.2...v0.22.0
 [0.21.2]: https://github.com/slackmgr/core/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/slackmgr/core/compare/v0.21.0...v0.21.1
