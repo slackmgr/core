@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-11-04
+
 ### Fixed
 - Per-channel metrics no longer use the channel ID as their `channel` label (until the next restart) when the channel name cannot be resolved at startup, e.g. while `conversations.info` is rate limited. While the name is unknown, the channel's per-channel metrics are held in memory and emitted under the name at the first successful lookup (retried once per minute), so no channel ID series is created. If the name is still unknown after 5 minutes, the channel ID is used as label until the name is resolved; then the label switches to the name and `channel_open_issues` is set to 0 under the channel ID
 - `channel_open_issues` could stay at a stale value with multiple manager instances: an instance whose processing run was skipped (because another instance had just processed the channel) kept its own last value, and an instance that found the channel empty after another instance archived the last issues did not reset it. Since the dashboard takes the max over instances, channels could show open issues after all were archived. Skipped runs now take over the count persisted by the other instance, and an empty channel sets the gauge to 0
@@ -16,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - The channel name is looked up by the channel manager goroutine when it starts, instead of by the coordinator when the channel manager is created, so a slow lookup (up to 5 seconds) no longer delays alert routing for all channels
 - Per-channel metric series appear at `/metrics` once the channel name is known (at the latest after 5 minutes), instead of when the channel manager is created
+- README: fixed the quick start example
 
 ## [0.23.0] - 2026-11-04
 
@@ -559,7 +562,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.23.1...HEAD
+[0.23.1]: https://github.com/slackmgr/core/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/slackmgr/core/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/slackmgr/core/compare/v0.21.2...v0.22.0
 [0.21.2]: https://github.com/slackmgr/core/compare/v0.21.1...v0.21.2
