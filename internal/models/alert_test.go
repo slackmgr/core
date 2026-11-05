@@ -47,6 +47,7 @@ func TestNewAlertFromQueueItem(t *testing.T) {
 
 		alertData := types.Alert{
 			SlackChannelID: "C12345",
+			Client:         "prometheus",
 			CorrelationID:  "corr-123",
 			Severity:       types.AlertError,
 			Header:         "Test Alert",
@@ -78,6 +79,17 @@ func TestNewAlertFromQueueItem(t *testing.T) {
 		assert.Equal(t, "corr-123", alert.CorrelationID)
 		assert.Equal(t, types.AlertError, alert.Severity)
 		assert.Equal(t, "Test Alert", alert.Header)
+		assert.Equal(t, "prometheus", alert.Client)
+
+		// The client reaches the issue's last alert unchanged, also after the issue JSON round trip.
+		issue := NewIssue(alert, &mockLogger{})
+		body, err := json.Marshal(issue)
+		require.NoError(t, err)
+
+		var stored Issue
+		require.NoError(t, json.Unmarshal(body, &stored))
+		require.NotNil(t, stored.LastAlert)
+		assert.Equal(t, "prometheus", stored.LastAlert.Client)
 
 		// Verify ack function is set
 		alert.Ack()
@@ -298,6 +310,40 @@ func TestAlert_SetDefaultValues(t *testing.T) {
 		alert.SetDefaultValues(defaultSettings)
 
 		assert.Equal(t, "default-bot", alert.Username)
+	})
+
+	t.Run("sets unknown client before defaulting Username", func(t *testing.T) {
+		t.Parallel()
+
+		alert := &Alert{Alert: types.Alert{CorrelationID: "corr-123"}}
+
+		alert.SetDefaultValues(defaultSettings)
+
+		assert.Equal(t, types.UnknownClient, alert.Client, "the default post username must not become the client")
+		assert.Equal(t, types.UnknownClient, alert.EffectiveClient())
+		assert.Equal(t, "default-bot", alert.Username)
+	})
+
+	t.Run("preserves client when defaulting Username", func(t *testing.T) {
+		t.Parallel()
+
+		alert := &Alert{Alert: types.Alert{CorrelationID: "corr-123", Client: "prometheus"}}
+
+		alert.SetDefaultValues(defaultSettings)
+
+		assert.Equal(t, "prometheus", alert.Client)
+		assert.Equal(t, "default-bot", alert.Username)
+	})
+
+	t.Run("leaves client empty when Username is set", func(t *testing.T) {
+		t.Parallel()
+
+		alert := &Alert{Alert: types.Alert{CorrelationID: "corr-123", Username: "custom-bot"}}
+
+		alert.SetDefaultValues(defaultSettings)
+
+		assert.Empty(t, alert.Client, "the username is the effective client")
+		assert.Equal(t, "custom-bot", alert.EffectiveClient())
 	})
 
 	t.Run("preserves existing Username", func(t *testing.T) {

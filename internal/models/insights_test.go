@@ -127,11 +127,44 @@ func TestAlert_InsightsEvent(t *testing.T) {
 	e := alert.InsightsEvent(types.InsightsEventAlertGrouped, "r", "C12345")
 	assert.Equal(t, types.InsightsEvent{
 		Type: types.InsightsEventAlertGrouped, Reason: "r", ChannelID: "C12345", CorrelationID: alert.CorrelationID,
-		Severity: types.AlertError, RouteKey: "rk", AlertType: "t", Host: "h", Author: "a",
+		Severity: types.AlertError, RouteKey: "rk", AlertType: "t", Host: "h", Author: "a", Client: types.UnknownClient,
 	}, e)
 
 	e = alert.InsightsEvent(types.InsightsEventAlertGrouped, "", "C_MOVED")
 	assert.Equal(t, "C12345", e.RelatedChannelID, "original channel when redirected by a move mapping")
+}
+
+func TestAlert_InsightsEvent_Client(t *testing.T) {
+	tests := []struct {
+		name, client, username, want string
+	}{
+		{"client", "prometheus", "Prom Bot", "prometheus"},
+		{"username fallback", "", "Prom Bot", "Prom Bot"},
+		{"unknown", "", "", types.UnknownClient},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			alert := createTestAlert()
+			alert.Client, alert.Username = tt.client, tt.username
+
+			assert.Equal(t, tt.want, alert.InsightsEvent(types.InsightsEventAlertNewIssue, "", "C12345").Client)
+		})
+	}
+}
+
+func TestIssue_InsightsEvent_ClientOfLastAlert(t *testing.T) {
+	logger := &mockLogger{}
+	first := createTestAlert()
+	first.Client = "first-client"
+	issue := NewIssue(first, logger)
+
+	assert.Equal(t, "first-client", issue.InsightsEvent(types.InsightsEventIssueCreated, "").Client)
+	assert.Equal(t, "first-client", issue.ArchivedInsightsEvent(time.Now()).Client)
+
+	issue.LastAlert.Client = ""
+	issue.LastAlert.Username = "Bot"
+	assert.Equal(t, "Bot", issue.InsightsEvent(types.InsightsEventIssueUpdated, "").Client, "username fallback of the last alert")
 }
 
 func TestIssue_Resolution(t *testing.T) {

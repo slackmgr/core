@@ -1517,6 +1517,37 @@ func TestMapPrometheusAlert(t *testing.T) {
 		require.Len(t, alerts, 1)
 		assert.Contains(t, alerts[0].IgnoreIfTextContains, "test-ignore")
 	})
+
+	t.Run("maps client", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name        string
+			annotations map[string]string
+			labels      map[string]string
+			want        string
+		}{
+			{"none", nil, nil, ""},
+			{"annotation", map[string]string{"slackmgr_client": " grafana "}, nil, "grafana"},
+			{"camel case annotation", map[string]string{"slackmgrClient": "grafana"}, nil, "grafana"},
+			{"label", nil, map[string]string{"slackmgr_client": "prometheus"}, "prometheus"},
+			{"annotation takes precedence over label", map[string]string{"slackmgr_client": "grafana"}, map[string]string{"slackmgr_client": "prometheus"}, "grafana"},
+			{"plain client key is ignored", map[string]string{"client": "acme"}, map[string]string{"client": "acme"}, ""},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				t.Parallel()
+
+				webhook := &PrometheusWebhook{Alerts: []*PrometheusAlert{{Annotations: tt.annotations, Labels: tt.labels}}}
+
+				alerts := server.mapPrometheusAlert(webhook)
+
+				require.Len(t, alerts, 1)
+				assert.Equal(t, tt.want, alerts[0].Client)
+			})
+		}
+	})
 }
 
 func TestCorrelationIDFromLabels(t *testing.T) {

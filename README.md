@@ -256,9 +256,18 @@ Tune or disable recording with `ManagerConfig.Insights` (`config.InsightsConfig`
 
 The API server can also record alert intake events (queued, filtered and rejected alerts) with `Server.WithInsightsSink` and `APIConfig.Insights`. This is optional; without it, rejections are still counted in the `alerts_rejected_total{reason}` and `alerts_filtered_total{reason}` metrics. Filtered and rejected alerts whose `slackChannelId` is not a channel ID (e.g. a channel name the API cannot map yet, or a channel Slack does not find) are recorded with the value in `Detail` and an empty `ChannelID`, so that intake insights are only grouped by real channel IDs.
 
+### Clients
+
+Every event recorded for an alert or issue carries the effective client of the alert (for issues, of the last alert): `Alert.Client` if set, else `Alert.Username`, else `unknown` (`types.Alert.EffectiveClient`). Setting `client` is optional; falling back to the username is permanent, supported behaviour. The client is only used for grouping, filtering and reporting, never for routing or Slack rendering.
+
+- An alert without client and username is recorded as `unknown` by both the API and the manager: the manager sets `Client` to `unknown` before it applies the default post username (`DefaultPostUsername`), so the Slack Manager bot persona is never used as a client
+- Issues created from Slack with the create issue command get the client `slack` (`manager.SlackCommandClient`), not the name of the Slack user
+- The Prometheus webhook reads the client from the `slackmgr_client` (or `slackmgrClient`) annotation, then label. A plain `client` key is deliberately not used, since it is a common metric label
+- Events that do not relate to an alert or issue (channel snapshots, gap events, commands without an issue) have no client
+
 ### Events
 
-Every event has a type and an optional reason. Events carry identifiers and classifications only, never alert content. They do include some personal data: the alert host and author, and the Slack user ID and real name of users who run commands. These are kept for the storage retention (30 days by default in the Postgres plugin). All types, reasons and value keys are documented constants in `github.com/slackmgr/types` (`InsightsEvent*`, `InsightsReason*`, `InsightsValue*`). Key definitions:
+Every event has a type and an optional reason. Events carry identifiers and classifications only, never alert content. They do include some personal data: the alert host and author, the client (which falls back to the alert username), and the Slack user ID and real name of users who run commands. These are kept for the storage retention (30 days by default in the Postgres plugin). All types, reasons and value keys are documented constants in `github.com/slackmgr/types` (`InsightsEvent*`, `InsightsReason*`, `InsightsValue*`). Key definitions:
 
 | Concept | Definition |
 |---|---|
@@ -284,20 +293,22 @@ _ = reader.Connect(ctx)
 _ = reader.CheckSchema(ctx)
 
 svc := insights.New(reader)
-f := insights.Filter{From: from, To: to, ChannelIDs: channels}
+f := insights.Filter{From: from, To: to, ChannelIDs: channels, Clients: clients} // empty lists match all
 
 summary, _ := svc.Summary(ctx, f)                       // all activity counts
 series, _ := svc.Series(ctx, insights.SeriesQuery{Filter: f, Bucket: time.Hour,
     Metrics: []insights.Metric{{Type: types.InsightsEventIssueCreated}}})
-state, _ := svc.CurrentState(ctx, insights.CurrentStateQuery{ChannelIDs: channels})
+state, _ := svc.CurrentState(ctx, insights.CurrentStateQuery{ChannelIDs: channels, Clients: clients})
 ```
+
+`Filter.Clients` and `CurrentStateQuery.Clients` select by effective client (exact match). Each open issue in `CurrentState` carries its `Client` (effective client) and `Username`. `OpenIssuesSeries` is based on channel snapshots, which have no client, so it rejects a filter with clients; use `CurrentState` for open issues per client.
 
 | Method | Answers |
 |---|---|
 | `Summary` | Counts of all alert, issue, command, Slack post and webhook events, by reason, plus lost events |
 | `Series` | Zero-filled time series of any event type (and reason), optionally per channel |
 | `OpenIssuesSeries` | Open issues over time per channel, from channel snapshots |
-| `Breakdown` | Top-N values of a dimension, e.g. noisiest route keys, hosts or correlation IDs, most active users |
+| `Breakdown` | Top-N values of a dimension, e.g. noisiest clients, route keys, hosts or correlation IDs, most active users |
 | `CurrentState` | Open issues by channel and severity, resolved-but-not-archived, muted, investigated, escalated, moved, stale; oldest, stale and noisiest issues |
 | `Lifecycle` | Time to resolve, time to first investigation, open time, alerts and reopens per issue (avg, p50, p90, p99, max); resolution mix |
 | `Flapping` | Issues reopened most often |

@@ -86,6 +86,7 @@ func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*types.Alert {
 		routeKey := find(promAlert.Annotations, promAlert.Labels, "routekey", "route", "route_key")
 		issueFollowUpEnabled := valueOrDefault(strings.ToLower(find(promAlert.Annotations, promAlert.Labels, "issuefollowupenabled")), "true")
 		username := find(promAlert.Annotations, promAlert.Labels, "username")
+		client := find(promAlert.Annotations, promAlert.Labels, "slackmgrclient", "slackmgr_client")
 		icon := find(promAlert.Annotations, promAlert.Labels, "iconemoji", "icon")
 		notificationDelay := find(promAlert.Annotations, promAlert.Labels, "notificationdelayseconds")
 		archivingDelay := find(promAlert.Annotations, promAlert.Labels, "archivingdelayseconds", "deletiondelayseconds")
@@ -176,6 +177,7 @@ func (s *Server) mapPrometheusAlert(webhook *PrometheusWebhook) []*types.Alert {
 			RouteKey:                  routeKey,
 			Severity:                  severity,
 			Username:                  username,
+			Client:                    client,
 			IconEmoji:                 icon,
 			NotificationDelaySeconds:  notificationDelaySeconds,
 			ArchivingDelaySeconds:     archivingDelaySeconds,

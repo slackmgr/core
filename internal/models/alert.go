@@ -80,6 +80,12 @@ func (a *Alert) SetDefaultValues(settings *config.ManagerSettings) {
 	}
 
 	if a.Username == "" {
+		// Without this, the effective client would become the default post username (the Slack Manager bot
+		// persona) once the username is defaulted, while API intake events recorded the alert as unknown.
+		if a.Client == "" {
+			a.Client = types.UnknownClient
+		}
+
 		a.Username = settings.DefaultPostUsername
 	}
 

@@ -99,16 +99,25 @@ func (s *Service) Supported() bool {
 	return s.reader != nil
 }
 
-// Filter selects the time range [From, To) and the channels of a query. Empty ChannelIDs means all channels.
+// Filter selects the time range [From, To), the channels and the clients of a query.
+// Empty ChannelIDs means all channels.
+//
+// Clients selects events by their effective client (see [types.Alert.EffectiveClient]). Empty means all clients.
+// Events that do not relate to an alert or issue (e.g. commands without an issue) have no client, so they never
+// match a non-empty Clients filter.
 type Filter struct {
 	From       time.Time `json:"from"`
 	To         time.Time `json:"to"`
 	ChannelIDs []string  `json:"channelIds,omitempty"`
+	Clients    []string  `json:"clients,omitempty"`
 }
 
 func (f Filter) toTypes() types.InsightsFilter {
-	return types.InsightsFilter{From: f.From, To: f.To, ChannelIDs: f.ChannelIDs}
+	return types.InsightsFilter{From: f.From, To: f.To, ChannelIDs: f.ChannelIDs, Clients: f.Clients}
 }
+
+// errClientsFilterNotSupported is returned by queries over channel snapshots, which have no client.
+var errClientsFilterNotSupported = errors.New("the clients filter is not supported for open issue series, because channel snapshots have no client; use CurrentState for open issues per client")
 
 // Metric identifies a series of events: an event type, optionally restricted to one reason.
 type Metric struct {
@@ -457,9 +466,14 @@ func (s *Service) Series(ctx context.Context, q SeriesQuery) (*Series, error) {
 // snapshot are zero, so choose a bucket at least as large as the channel stats interval (default 5 minutes).
 // If the number of buckets times the number of channels exceeds [types.MaxInsightsRows], it fails with
 // [types.ErrInsightsTooManyRows]; use a shorter time range, a larger bucket or fewer channels.
+// Channel snapshots have no client, so a filter with Clients is rejected.
 func (s *Service) OpenIssuesSeries(ctx context.Context, f Filter, bucket time.Duration) (*Series, error) {
 	if err := s.requireReader(); err != nil {
 		return nil, err
+	}
+
+	if len(f.Clients) > 0 {
+		return nil, errClientsFilterNotSupported
 	}
 
 	rows, err := s.stats(ctx, &types.InsightsStatsQuery{
@@ -588,6 +602,8 @@ func groupKeyValue(k types.InsightsGroupKey, d types.InsightsDimension) string {
 		return k.Host
 	case types.InsightsDimensionAuthor:
 		return k.Author
+	case types.InsightsDimensionClient:
+		return k.Client
 	case types.InsightsDimensionActor:
 		return k.ActorID
 	case types.InsightsDimensionCorrelationID:
@@ -778,7 +794,7 @@ func (s *Service) MoveFlows(ctx context.Context, f Filter) ([]MoveFlow, error) {
 	filters := []types.InsightsFilter{withTypes(f.toTypes(), types.InsightsEventIssueMoved)}
 
 	if len(f.ChannelIDs) > 0 {
-		incoming := withTypes(types.InsightsFilter{From: f.From, To: f.To, RelatedChannelIDs: f.ChannelIDs}, types.InsightsEventIssueMoved)
+		incoming := withTypes(types.InsightsFilter{From: f.From, To: f.To, RelatedChannelIDs: f.ChannelIDs, Clients: f.Clients}, types.InsightsEventIssueMoved)
 		filters = append(filters, incoming)
 	}
 

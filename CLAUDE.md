@@ -180,6 +180,7 @@ manager.Run(ctx)
 
 - Emit sites must never block, allocate heavily, or do extra I/O: guard with `recorder.Enabled()`, build events only from in-memory data (`models.Issue.InsightsEvent`, `models.Alert.InsightsEvent`), and call `Record` (non-blocking). A nil `*insights.Recorder` is valid.
 - The recorder sink is discovered on the raw DB in `Manager.Run`, before the DB cache middleware wraps it.
+- Events built from an alert or issue carry `Client` = `EffectiveClient()` of the alert (for issues, `LastAlert`). Build them with the `models` constructors (or `restapi.alertInsightsEvent` for intake events) so this is never missed.
 - Event types, reasons and value keys live in `github.com/slackmgr/types` (`InsightsEvent*`, `InsightsReason*`, `InsightsValue*`); add new ones there first.
 
 ## Concurrency Patterns

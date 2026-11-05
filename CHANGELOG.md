@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Insights events built from an alert or issue (manager alert and issue events, and the API intake events `alert.queued`, `alert.filtered` and `alert.rejected`) carry the effective client of the alert (`types.Alert.EffectiveClient`: `Client`, else `Username`, else `unknown`). For issues, the last alert is used
+- `insights.OpenIssue.Client` (effective client of the last alert) and `insights.OpenIssue.Username`
+- `insights.Filter.Clients` and `insights.CurrentStateQuery.Clients`: optional filters by effective client. Empty means all clients. `OpenIssuesSeries` rejects a clients filter, because channel snapshots have no client
+- Prometheus webhook: the alert client is read from the `slackmgr_client` (or `slackmgrClient`) annotation, then label. A plain `client` key is not used, since it is a common metric label
+- `manager.SlackCommandClient` (`"slack"`): the client of issues created from Slack with the create issue command, so that they are not grouped under the Slack user's name
+
+### Changed
+- An alert without client and username gets the client `unknown` in the manager before the default post username is applied, so the Slack Manager bot persona is never used as a client and API and manager events agree
+- The current state cache key includes the clients filter, and is JSON encoded so that separators in channel IDs or client names cannot make two queries share a cache entry
+- Requires `github.com/slackmgr/types` with `Alert.Client`, `Alert.EffectiveClient` and the client insights field, filter and dimension
+
 ## [0.23.1] - 2026-11-04
 
 ### Fixed

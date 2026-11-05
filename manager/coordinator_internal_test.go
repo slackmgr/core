@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -249,4 +250,41 @@ func TestCoordinator_RefreshChannelManagers(t *testing.T) {
 		require.ErrorContains(t, err, "boom")
 		assert.Empty(t, c.channelManagers)
 	})
+}
+
+// capturingFifoQueue records the bodies of sent messages.
+type capturingFifoQueue struct {
+	stubFifoQueue
+
+	bodies []string
+}
+
+func (q *capturingFifoQueue) Send(_ context.Context, _, _, body string) error {
+	q.bodies = append(q.bodies, body)
+	return nil
+}
+
+func TestCoordinator_HandleCreateIssueCommand_SetsSlackClient(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCoordinator(t, &stubDB{}, newNamingSlackClient("alerts"), &types.NoopMetrics{})
+	queue := &capturingFifoQueue{stubFifoQueue: stubFifoQueue{name: "alerts"}}
+	c.alertQueue = queue
+
+	cmd := &models.Command{
+		SlackChannelID: "C12345678",
+		UserID:         "U1",
+		UserRealName:   "Jane Doe",
+		Action:         models.CommandActionCreateIssue,
+		Parameters:     map[string]any{"header": "Manual issue", "severity": "error"},
+	}
+
+	require.NoError(t, c.handleCreateIssueCommand(context.Background(), cmd))
+	require.Len(t, queue.bodies, 1)
+
+	var alert types.Alert
+	require.NoError(t, json.Unmarshal([]byte(queue.bodies[0]), &alert))
+	assert.Equal(t, SlackCommandClient, alert.Client)
+	assert.Equal(t, "slack", alert.EffectiveClient(), "the Slack user's name must not become the client")
+	assert.Equal(t, "Jane Doe", alert.Username)
 }

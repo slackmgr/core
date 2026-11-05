@@ -17,6 +17,11 @@ import (
 
 const activeChannelManagersMetric = "active_channel_managers"
 
+// SlackCommandClient is the client ([types.Alert.Client]) of issues created manually from Slack, with the create
+// issue command. It keeps such issues grouped under one client, rather than under the name of the Slack user
+// (which is used as the alert username).
+const SlackCommandClient = "slack"
+
 type coordinator struct {
 	// channelManagers holds the active channel managers, keyed by Slack channel ID.
 	// No locking is required, since all access happen via the synchronous coordinator run loop.
@@ -388,6 +393,7 @@ func (c *coordinator) handleCreateIssueCommand(ctx context.Context, cmd *models.
 	alert.AutoResolveSeconds = cmd.ParamAsInt("autoResolveSeconds")
 	alert.IconEmoji = cmd.ParamAsString("iconEmoji")
 	alert.Username = cmd.UserRealName
+	alert.Client = SlackCommandClient
 
 	if err := alert.ValidateIcon(); err != nil {
 		alert.IconEmoji = ""

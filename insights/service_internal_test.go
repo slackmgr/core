@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -282,6 +283,55 @@ func TestService_OpenIssuesSeries(t *testing.T) {
 	require.NoError(t, err)
 	assert.InDelta(t, 4, series.Values["C1"][1], 0)
 	assert.InDelta(t, 0, series.Values["C1"][0], 0)
+
+	// Channel snapshots have no client, so a clients filter is rejected rather than returning empty series.
+	f := testFilter()
+	f.Clients = []string{"prometheus"}
+	_, err = New(reader).OpenIssuesSeries(context.Background(), f, time.Hour)
+	require.ErrorIs(t, err, errClientsFilterNotSupported)
+	assert.Len(t, reader.statsQueries, 1, "no query is run")
+}
+
+func TestService_ClientsFilterIsPassedToQueries(t *testing.T) {
+	t.Parallel()
+
+	f := testFilter()
+	f.Clients = []string{"prometheus", "grafana"}
+
+	reader := &fakeReader{}
+	s := New(reader)
+
+	_, err := s.Summary(context.Background(), f)
+	require.NoError(t, err)
+	_, err = s.Series(context.Background(), SeriesQuery{Filter: f, Bucket: time.Hour, Metrics: []Metric{{Type: types.InsightsEventIssueCreated}}})
+	require.NoError(t, err)
+	_, err = s.Breakdown(context.Background(), f, Metric{Type: types.InsightsEventIssueCreated}, types.InsightsDimensionClient, 0)
+	require.NoError(t, err)
+	_, err = s.Lifecycle(context.Background(), f)
+	require.NoError(t, err)
+	_, err = s.Flapping(context.Background(), f, 1, 0)
+	require.NoError(t, err)
+	_, err = s.MoveFlows(context.Background(), f)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, reader.countQueries)
+
+	for _, q := range reader.countQueries {
+		if slices.Equal(q.Types, []types.InsightsEventType{types.InsightsEventGap}) {
+			continue // gap events are not client specific
+		}
+
+		assert.Equal(t, f.Clients, q.Clients, "count query for %v", q.Types)
+	}
+
+	for _, q := range reader.statsQueries {
+		if slices.Equal(q.Types, []types.InsightsEventType{types.InsightsEventGap}) {
+			assert.Empty(t, q.Clients, "gap events are counted across all clients")
+			continue
+		}
+
+		assert.Equal(t, f.Clients, q.Clients, "stats query for %v", q.Types)
+	}
 }
 
 func TestService_Breakdown(t *testing.T) {
@@ -290,13 +340,13 @@ func TestService_Breakdown(t *testing.T) {
 	dims := []types.InsightsDimension{
 		types.InsightsDimensionChannel, types.InsightsDimensionRelatedChannel, types.InsightsDimensionType,
 		types.InsightsDimensionReason, types.InsightsDimensionSeverity, types.InsightsDimensionRouteKey,
-		types.InsightsDimensionAlertType, types.InsightsDimensionHost, types.InsightsDimensionAuthor,
+		types.InsightsDimensionAlertType, types.InsightsDimensionHost, types.InsightsDimensionAuthor, types.InsightsDimensionClient,
 		types.InsightsDimensionActor, types.InsightsDimensionCorrelationID, types.InsightsDimensionIssue,
 	}
 
 	key := types.InsightsGroupKey{
 		ChannelID: "channel", RelatedChannelID: "related_channel", Type: "type", Reason: "reason", Severity: "severity",
-		RouteKey: "route_key", AlertType: "alert_type", Host: "host", Author: "author", ActorID: "actor",
+		RouteKey: "route_key", AlertType: "alert_type", Host: "host", Author: "author", Client: "client", ActorID: "actor",
 		CorrelationID: "correlation_id", IssueID: "issue",
 	}
 
@@ -414,6 +464,16 @@ func TestService_MoveFlows(t *testing.T) {
 	_, err = New(reader).MoveFlows(context.Background(), Filter{From: testFrom, To: testTo})
 	require.NoError(t, err)
 	assert.Len(t, reader.countQueries, 1)
+
+	// The clients filter also applies to incoming moves.
+	reader.countQueries = nil
+	f := testFilter()
+	f.Clients = []string{"prometheus"}
+	_, err = New(reader).MoveFlows(context.Background(), f)
+	require.NoError(t, err)
+	require.Len(t, reader.countQueries, 2)
+	assert.Equal(t, []string{"prometheus"}, reader.countQueries[1].Clients)
+	assert.Equal(t, []string{"C1"}, reader.countQueries[1].RelatedChannelIDs)
 }
 
 func TestService_IssueTimelineAndEvents(t *testing.T) {
@@ -598,6 +658,111 @@ func TestService_CurrentState(t *testing.T) {
 	_, err = s.CurrentState(context.Background(), CurrentStateQuery{ChannelIDs: []string{"C1"}})
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), reader.loads.Load())
+}
+
+func TestService_CurrentState_Clients(t *testing.T) {
+	t.Parallel()
+
+	now := testFrom.Add(time.Hour)
+
+	reader := &fakeReader{issues: map[string]json.RawMessage{
+		"prom": issueJSON(t, func(i *models.Issue) {
+			i.ID = "prom"
+			i.LastAlert.Client = "prometheus"
+			i.LastAlert.Username = "Prometheus Bot"
+		}),
+		"grafana": issueJSON(t, func(i *models.Issue) {
+			i.ID = "grafana"
+			i.LastAlert.Username = "Grafana"
+			i.LastAlert.SlackChannelID = "C2"
+		}),
+		"unknown": issueJSON(t, func(i *models.Issue) {
+			i.ID = "unknown"
+		}),
+	}}
+
+	s := New(reader, WithClock(func() time.Time { return now }), WithCurrentStateCacheTTL(time.Minute))
+
+	state, err := s.CurrentState(context.Background(), CurrentStateQuery{IncludeIssues: true})
+	require.NoError(t, err)
+
+	clients := map[string]string{}
+	usernames := map[string]string{}
+
+	for _, i := range state.Issues {
+		clients[i.ID] = i.Client
+		usernames[i.ID] = i.Username
+	}
+
+	assert.Equal(t, map[string]string{"prom": "prometheus", "grafana": "Grafana", "unknown": types.UnknownClient}, clients)
+	assert.Equal(t, map[string]string{"prom": "Prometheus Bot", "grafana": "Grafana", "unknown": ""}, usernames)
+
+	// Clients filter: matches the effective client, and leaves out channels without matching issues.
+	state, err = s.CurrentState(context.Background(), CurrentStateQuery{IncludeIssues: true, Clients: []string{"prometheus", types.UnknownClient}})
+	require.NoError(t, err)
+	assert.Equal(t, 2, state.Totals.Open)
+	require.Len(t, state.Channels, 1)
+	assert.Equal(t, "C1", state.Channels[0].ChannelID)
+
+	ids := make([]string, 0, len(state.Issues))
+	for _, i := range state.Issues {
+		ids = append(ids, i.ID)
+	}
+
+	assert.ElementsMatch(t, []string{"prom", "unknown"}, ids)
+
+	// Different client filters are cached separately.
+	state, err = s.CurrentState(context.Background(), CurrentStateQuery{IncludeIssues: true, Clients: []string{"Grafana"}})
+	require.NoError(t, err)
+	require.Len(t, state.Issues, 1)
+	assert.Equal(t, "grafana", state.Issues[0].ID)
+	assert.Equal(t, int32(3), reader.loads.Load())
+}
+
+func TestCurrentStateCacheKey(t *testing.T) {
+	t.Parallel()
+
+	key := currentStateCacheKey
+
+	assert.Equal(t, key(CurrentStateQuery{ChannelIDs: []string{"C1", "C2"}, Clients: []string{"a", "b"}}),
+		key(CurrentStateQuery{ChannelIDs: []string{"C2", "C1"}, Clients: []string{"b", "a"}}), "order does not matter")
+	assert.NotEqual(t, key(CurrentStateQuery{Clients: []string{"a,b"}}), key(CurrentStateQuery{Clients: []string{"a", "b"}}),
+		"separators in client names cannot make queries collide")
+	assert.NotEqual(t, key(CurrentStateQuery{ChannelIDs: []string{"a"}}), key(CurrentStateQuery{Clients: []string{"a"}}))
+}
+
+// TestService_CurrentState_DBFallbackClient verifies that the client of the last alert survives a real DB round
+// trip (opaque issue JSON) and is returned by CurrentState with the WithDB fallback.
+func TestService_CurrentState_DBFallbackClient(t *testing.T) {
+	t.Parallel()
+
+	db := types.NewInMemoryDB()
+
+	withClient := &models.Alert{Alert: types.Alert{
+		SlackChannelID: "C1", CorrelationID: "corr-1", Header: "h", Severity: types.AlertError, Timestamp: testFrom,
+		Client: "prometheus", Username: "Prometheus Bot", IssueFollowUpEnabled: true, AutoResolveSeconds: 3600,
+	}}
+	withoutClient := &models.Alert{Alert: types.Alert{
+		SlackChannelID: "C1", CorrelationID: "corr-2", Header: "h", Severity: types.AlertError, Timestamp: testFrom,
+		Username: "Grafana", IssueFollowUpEnabled: true, AutoResolveSeconds: 3600,
+	}}
+
+	for _, alert := range []*models.Alert{withClient, withoutClient} {
+		require.NoError(t, db.SaveIssue(context.Background(), models.NewIssue(alert, &types.NoopLogger{})))
+	}
+
+	s := New(nil, WithDB(db), WithClock(func() time.Time { return testFrom.Add(time.Minute) }))
+
+	state, err := s.CurrentState(context.Background(), CurrentStateQuery{IncludeIssues: true, Clients: []string{"prometheus", "Grafana"}})
+	require.NoError(t, err)
+	require.Len(t, state.Issues, 2)
+
+	got := map[string]string{}
+	for _, i := range state.Issues {
+		got[i.CorrelationID] = i.Client + "/" + i.Username
+	}
+
+	assert.Equal(t, map[string]string{"corr-1": "prometheus/Prometheus Bot", "corr-2": "Grafana/Grafana"}, got)
 }
 
 func TestService_CurrentState_CacheExpiry(t *testing.T) {

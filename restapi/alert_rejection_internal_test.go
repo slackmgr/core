@@ -314,16 +314,16 @@ func TestServer_HandleAlerts_InsightsEvents(t *testing.T) {
 
 	// Accepted request: one queued, one filtered.
 	body, err := json.Marshal(map[string]any{"alerts": []types.Alert{
-		{SlackChannelID: "C123", Header: "a", Text: "noise", IgnoreIfTextContains: []string{"noise"}, RouteKey: "rk"},
-		{SlackChannelID: "C123", Header: "b", CorrelationID: "corr-b", RouteKey: "rk"},
+		{SlackChannelID: "C123", Header: "a", Text: "noise", IgnoreIfTextContains: []string{"noise"}, RouteKey: "rk", Username: "Noisy Bot"},
+		{SlackChannelID: "C123", Header: "b", CorrelationID: "corr-b", RouteKey: "rk", Client: " prometheus "},
 	}})
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusAccepted, postAlerts(t, server, body))
 
 	// Rejected request (unknown channel): both alerts are rejected.
 	body, err = json.Marshal(map[string]any{"alerts": []types.Alert{
-		{SlackChannelID: "C456", Header: "c"},
-		{SlackChannelID: "C456", Header: "d"},
+		{SlackChannelID: "C456", Header: "c", Client: "grafana"},
+		{SlackChannelID: "C456", Header: "d", Client: "grafana"},
 	}})
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusBadRequest, postAlerts(t, server, body))
@@ -339,19 +339,29 @@ func TestServer_HandleAlerts_InsightsEvents(t *testing.T) {
 	assert.Equal(t, "corr-b", events[types.InsightsEventAlertQueued][0].CorrelationID)
 	assert.Equal(t, "C123", events[types.InsightsEventAlertQueued][0].ChannelID)
 	assert.Equal(t, "rk", events[types.InsightsEventAlertQueued][0].RouteKey)
+	assert.Equal(t, "prometheus", events[types.InsightsEventAlertQueued][0].Client)
+
+	// The queued alert carries the cleaned client to the manager.
+	queued := queue.Calls[0].Arguments.String(3)
+	assert.Contains(t, queued, `"client":"prometheus"`)
 
 	require.Len(t, events[types.InsightsEventAlertFiltered], 1)
 	assert.Equal(t, filterReasonIgnoreTerm, events[types.InsightsEventAlertFiltered][0].Reason)
+	assert.Equal(t, "Noisy Bot", events[types.InsightsEventAlertFiltered][0].Client)
 
 	rejected := events[types.InsightsEventAlertRejected]
 	require.Len(t, rejected, 3)
 
 	reasons := map[string]int{}
+	clients := map[string]int{}
+
 	for _, e := range rejected {
 		reasons[e.Reason]++
+		clients[e.Client]++
 	}
 
 	assert.Equal(t, map[string]int{rejectReasonChannelNotFound: 2, rejectReasonInvalidBody: 1}, reasons)
+	assert.Equal(t, map[string]int{"grafana": 2, "": 1}, clients, "a rejection without alert details has no client")
 }
 
 func TestAlertInsightsEvent_ChannelID(t *testing.T) {
@@ -386,6 +396,32 @@ func TestAlertInsightsEvent_ChannelID(t *testing.T) {
 			assert.Equal(t, tt.wantChannelID, e.ChannelID)
 			assert.Equal(t, tt.wantDetail, e.Detail)
 			assert.Equal(t, "corr", e.CorrelationID)
+			assert.Equal(t, types.UnknownClient, e.Client)
+		})
+	}
+}
+
+func TestAlertInsightsEvent_Client(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		alert types.Alert
+		want  string
+	}{
+		{"client", types.Alert{Client: "prometheus", Username: "Prom Bot"}, "prometheus"},
+		{"untrimmed client of an alert rejected before cleaning", types.Alert{Client: "  prometheus  "}, "prometheus"},
+		{"username fallback", types.Alert{Username: "Prom Bot"}, "Prom Bot"},
+		{"unknown", types.Alert{}, types.UnknownClient},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			for _, eventType := range []types.InsightsEventType{types.InsightsEventAlertQueued, types.InsightsEventAlertFiltered, types.InsightsEventAlertRejected} {
+				assert.Equal(t, tt.want, alertInsightsEvent(eventType, "", &tt.alert).Client, eventType)
+			}
 		})
 	}
 }

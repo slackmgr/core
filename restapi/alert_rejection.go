@@ -157,5 +157,6 @@ func alertInsightsEvent(eventType types.InsightsEventType, reason string, alert 
 		AlertType:     alert.Type,
 		Host:          alert.Host,
 		Author:        alert.Author,
+		Client:        alert.EffectiveClient(),
 	}
 }

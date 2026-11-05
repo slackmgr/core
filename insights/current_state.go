@@ -8,7 +8,6 @@ import (
 	"maps"
 	"slices"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/slackmgr/core/internal/models"
@@ -19,6 +18,10 @@ import (
 type CurrentStateQuery struct {
 	// ChannelIDs limits the result to these channels. Empty means all channels.
 	ChannelIDs []string
+
+	// Clients limits the result to open issues whose effective client ([OpenIssue.Client]) is one of these values
+	// (exact match). Empty means all clients. Channels without matching issues are left out of Channels.
+	Clients []string
 
 	// StaleAfter is the time without new alerts after which an unresolved open issue is considered stale.
 	// Zero means [DefaultStaleAfter].
@@ -42,11 +45,19 @@ type OpenIssue struct {
 	RouteKey      string              `json:"routeKey,omitempty"`
 	Host          string              `json:"host,omitempty"`
 	Author        string              `json:"author,omitempty"`
-	Created       time.Time           `json:"created"`
-	LastAlertAt   time.Time           `json:"lastAlertAt"`
-	AlertCount    int                 `json:"alertCount"`
-	ReopenCount   int                 `json:"reopenCount"`
-	FollowUp      bool                `json:"followUp"`
+
+	// Client is the effective client of the last alert (see [types.Alert.EffectiveClient]): the alert client,
+	// else the username, else [types.UnknownClient]. It is never empty.
+	Client string `json:"client"`
+
+	// Username is the Slack username of the last alert, i.e. the bot persona the issue is posted as.
+	Username string `json:"username,omitempty"`
+
+	Created     time.Time `json:"created"`
+	LastAlertAt time.Time `json:"lastAlertAt"`
+	AlertCount  int       `json:"alertCount"`
+	ReopenCount int       `json:"reopenCount"`
+	FollowUp    bool      `json:"followUp"`
 
 	// Resolved is true if the issue is resolved (by alert, user or auto-resolve) but not yet archived.
 	Resolved   bool      `json:"resolved"`
@@ -145,7 +156,7 @@ func (s *Service) CurrentState(ctx context.Context, q CurrentStateQuery) (*Curre
 			return nil, fmt.Errorf("failed to decode issue %s: %w", id, err)
 		}
 
-		if issue != nil {
+		if issue != nil && matchesClient(issue.Client, q.Clients) {
 			issues = append(issues, *issue)
 		}
 	}
@@ -225,6 +236,8 @@ func decodeOpenIssue(body json.RawMessage, now time.Time) (*OpenIssue, error) {
 		RouteKey:      alert.RouteKey,
 		Host:          alert.Host,
 		Author:        alert.Author,
+		Client:        alert.EffectiveClient(),
+		Username:      alert.Username,
 		Created:       issue.Created,
 		LastAlertAt:   issue.LastAlertReceived,
 		AlertCount:    issue.AlertCount,
@@ -385,10 +398,21 @@ func topIssues(issues []OpenIssue, n int, less func(a, b OpenIssue) bool) []Open
 }
 
 func currentStateCacheKey(q CurrentStateQuery) string {
+	// Values are JSON encoded, so that separators in channel IDs or client names cannot make two queries collide.
 	channels := slices.Clone(q.ChannelIDs)
 	slices.Sort(channels)
 
-	return fmt.Sprintf("%s|%s|%d|%t", strings.Join(channels, ","), q.StaleAfter, q.TopN, q.IncludeIssues)
+	clients := slices.Clone(q.Clients)
+	slices.Sort(clients)
+
+	key, _ := json.Marshal([]any{channels, clients, q.StaleAfter, q.TopN, q.IncludeIssues}) //nolint:errchkjson // plain values always marshal
+
+	return string(key)
+}
+
+// matchesClient returns true if clients is empty, or contains client.
+func matchesClient(client string, clients []string) bool {
+	return len(clients) == 0 || slices.Contains(clients, client)
 }
 
 func (s *Service) cachedState(key string, now time.Time) *CurrentState {

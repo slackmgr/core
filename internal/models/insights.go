@@ -19,6 +19,7 @@ func (a *Alert) InsightsEvent(eventType types.InsightsEventType, reason, channel
 		AlertType:     a.Type,
 		Host:          a.Host,
 		Author:        a.Author,
+		Client:        a.EffectiveClient(),
 	}
 
 	if a.OriginalSlackChannelID != "" && a.OriginalSlackChannelID != channelID {
@@ -29,7 +30,7 @@ func (a *Alert) InsightsEvent(eventType types.InsightsEventType, reason, channel
 }
 
 // InsightsEvent returns an insights event of the given type and reason, describing this issue in its current channel.
-// Count is set to the issue alert count.
+// Count is set to the issue alert count, and Client to the effective client of the last alert.
 func (issue *Issue) InsightsEvent(eventType types.InsightsEventType, reason string) types.InsightsEvent {
 	return types.InsightsEvent{
 		Type:          eventType,
@@ -42,6 +43,7 @@ func (issue *Issue) InsightsEvent(eventType types.InsightsEventType, reason stri
 		AlertType:     issue.LastAlert.Type,
 		Host:          issue.LastAlert.Host,
 		Author:        issue.LastAlert.Author,
+		Client:        issue.LastAlert.EffectiveClient(),
 		Count:         issue.AlertCount,
 	}
 }
