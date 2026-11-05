@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - An alert without client and username gets the client `unknown` in the manager before the default post username is applied, so the Slack Manager bot persona is never used as a client and API and manager events agree
 - The current state cache key includes the clients filter, and is JSON encoded so that separators in channel IDs or client names cannot make two queries share a cache entry
-- Requires `github.com/slackmgr/types` with `Alert.Client`, `Alert.EffectiveClient` and the client insights field, filter and dimension
+- Bump `github.com/slackmgr/types` to v0.11.0 (adds `Alert.Client`, `Alert.EffectiveClient` and the client insights field, filter and dimension)
 
 ## [0.23.1] - 2026-11-04
 
