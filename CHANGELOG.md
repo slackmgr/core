@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-06
+
+### Added
+- `fire_and_forget_alerts_total{channel}` metric: fire-and-forget notifications (alerts with follow-up disabled, including every new info alert)
+- Insights `alert.fire_and_forget` event, recorded for fire-and-forget notifications, and `insights.AlertSummary.FireAndForget` (included in `Accepted`)
+- Dashboard: "Fire-and-Forget Notifications by Channel" panel in the Alert & Issue Flow row
+
+### Changed
+- Fire-and-forget notifications are no longer counted as issues anywhere. They are excluded from `channel_open_issues`, `issues_created_total` and `issues_archived_total`, no longer record `alert.new_issue`, `issue.created` or `issue.archived` insights events, and are excluded from channel snapshots (`open`, `alerting` etc.), `OpenIssuesSeries` and `CurrentState`. `ChannelProcessingState.OpenIssues` no longer counts them
+- Dashboard: descriptions of the open issues and issue lifecycle panels state that fire-and-forget notifications are not counted. Version 9
+- Bump `github.com/slackmgr/types` to v0.12.0 (adds `InsightsEventAlertFireAndForget`, deprecates `InsightsReasonFireAndForget`)
+
+### Fixed
+- A fire-and-forget issue with escalation rules could be escalated (and moved) if its archiving was delayed, e.g. by a pending Slack post. Fire-and-forget issues are never escalated
+
 ## [0.24.0] - 2026-11-05
 
 ### Added
@@ -576,7 +591,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/slackmgr/core/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/slackmgr/core/compare/v0.23.1...v0.24.0
 [0.23.1]: https://github.com/slackmgr/core/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/slackmgr/core/compare/v0.22.0...v0.23.0
