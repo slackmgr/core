@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-06
+
 ### Added
 - `insights.Service.AlertingIssuesSeries`: alerting issues (open, neither resolved nor info) over time per channel, from channel snapshots. Works like `OpenIssuesSeries`, which counts alerting and resolved issues
 
@@ -594,7 +596,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/slackmgr/core/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/slackmgr/core/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/slackmgr/core/compare/v0.23.1...v0.24.0
 [0.23.1]: https://github.com/slackmgr/core/compare/v0.23.0...v0.23.1
