@@ -271,15 +271,17 @@ Every event has a type and an optional reason. Events carry identifiers and clas
 
 | Concept | Definition |
 |---|---|
-| Accepted alert | Processed by the manager and acked as successful: `alert.new_issue` + `alert.grouped` + `alert.ignored` |
-| Ignored alert | Processed and saved, but intentionally without effect. Reasons: `not_newer`, `already_resolved`, `follow_up_disabled`, `resolved_without_issue` |
+| Issue | Always an issue with follow-up. Only issues are counted as open, alerting, resolved or archived |
+| Fire-and-forget notification | An alert with follow-up disabled (including every new info alert) that creates a Slack post (`alert.fire_and_forget`). It is **not** an issue: it never produces `issue.*` events, and is never counted as open, alerting, resolved or archived, in insights or in Prometheus metrics |
+| Accepted alert | Processed by the manager and acked as successful: `alert.new_issue` + `alert.fire_and_forget` + `alert.grouped` + `alert.ignored` |
+| Ignored alert | Processed and saved, but intentionally without effect. Reasons: `not_newer`, `already_resolved`, `follow_up_disabled` (repeated alert for a recent fire-and-forget notification), `resolved_without_issue` |
 | Dropped alert | Queued, but permanently discarded by the manager without processing: `invalid`, `missing_encryption_key`, `corrupt_issue`, `unreadable` |
 | Retried alert | Processing attempt aborted and the alert returned to the queue (not terminal): `lock_timeout`, `gate_timeout`, `slack_error`, `db_error`, `move_race` |
 | Rejected / filtered alert | Refused by the API (client got an error), or discarded by the alert's own `ignoreIfTextContains` rule (API recording only) |
 | Updated issue | An existing open issue changed by a new alert (`issue.updated`) |
 | Resolved / reopened issue | Explicit transition by an alert or a user. Auto-resolve by timeout is implicit, and shown in `issue.archived` and in the current state |
 | Escalated issue | An escalation rule raised the severity or became active for the first time |
-| Archived issue | Reason is how the issue ended (`user_resolved`, `alert_resolved`, `auto_resolved`, `auto_resolved_inconclusive`, `terminated`, `fire_and_forget`), with lifecycle values (open time, time to resolve, time to first investigation, alert and reopen counts) |
+| Archived issue | Reason is how the issue ended (`user_resolved`, `alert_resolved`, `auto_resolved`, `auto_resolved_inconclusive`, `terminated`), with lifecycle values (open time, time to resolve, time to first investigation, alert and reopen counts) |
 
 Delivery is best effort: events can be lost (shown by `insights.gap`) and, in rare retry paths, duplicated.
 
@@ -305,11 +307,11 @@ state, _ := svc.CurrentState(ctx, insights.CurrentStateQuery{ChannelIDs: channel
 
 | Method | Answers |
 |---|---|
-| `Summary` | Counts of all alert, issue, command, Slack post and webhook events, by reason, plus lost events |
+| `Summary` | Counts of all alert, issue, command, Slack post and webhook events, by reason, plus lost events. Fire-and-forget notifications are counted in `Alerts.FireAndForget` only |
 | `Series` | Zero-filled time series of any event type (and reason), optionally per channel |
 | `OpenIssuesSeries` | Open issues over time per channel, from channel snapshots |
 | `Breakdown` | Top-N values of a dimension, e.g. noisiest clients, route keys, hosts or correlation IDs, most active users |
-| `CurrentState` | Open issues by channel and severity, resolved-but-not-archived, muted, investigated, escalated, moved, stale; oldest, stale and noisiest issues |
+| `CurrentState` | Open issues (excluding fire-and-forget notifications) by channel and severity, resolved-but-not-archived, muted, investigated, escalated, moved, stale; oldest, stale and noisiest issues |
 | `Lifecycle` | Time to resolve, time to first investigation, open time, alerts and reopens per issue (avg, p50, p90, p99, max); resolution mix |
 | `Flapping` | Issues reopened most often |
 | `MoveFlows` | Issue moves between channels, by reason |
@@ -320,6 +322,8 @@ Activity methods return `types.ErrInsightsNotSupported` when no reader is availa
 ## Metrics and Grafana Dashboard
 
 Both `restapi` and `manager` emit metrics through the injected `types.Metrics` implementation, with all names prefixed by `MetricsPrefix` (default `slackmgr_`). A ready-made Grafana dashboard for a Prometheus data source is available in [`dashboards/slackmgr.json`](dashboards/slackmgr.json). It covers every metric emitted by the library: alert and issue flow, open issues, Slack API health, Slack posts (including pending posts), queue processing, lock contention and DB cache, the REST API, alert intake and the insights recorder. If you use a custom prefix, set the dashboard's "Metrics prefix" variable (default `slackmgr_`) to match, either in the dashboard settings or with the `var-prefix` URL parameter.
+
+Fire-and-forget notifications (alerts with follow-up disabled, including every new info alert) are not issues: they are excluded from `channel_open_issues`, `issues_created_total` and `issues_archived_total`, and counted only in `fire_and_forget_alerts_total`.
 
 Per-channel metrics (`alerts_processed_total`, `channel_open_issues`, `issues_created_total`, `process_active_issues_duration_seconds` and the other metrics with a `channel` label) are labelled by Slack channel name. A channel manager looks up the name when it starts, in its own goroutine, so a slow lookup never delays alert routing for other channels. If the name cannot be resolved yet (e.g. while `conversations.info` is rate limited after a cold start):
 

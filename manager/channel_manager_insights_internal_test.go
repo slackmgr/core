@@ -378,6 +378,10 @@ func TestChannelManager_RecordChannelStats_Interval(t *testing.T) {
 	alert := &models.Alert{Alert: validInsightsAlert(types.AlertError, time.Now())}
 	issue := models.NewIssue(alert, &types.NoopLogger{})
 
+	ffAlert := &models.Alert{Alert: validInsightsAlert(types.AlertError, time.Now())}
+	ffAlert.IssueFollowUpEnabled = false
+	ffIssue := models.NewIssue(ffAlert, &types.NoopLogger{})
+
 	hour := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
 	issues := []*models.Issue{issue}
 
@@ -395,6 +399,9 @@ func TestChannelManager_RecordChannelStats_Interval(t *testing.T) {
 		{"became empty", hour.Add(10 * time.Minute), channelStatsPrevRun{processed: hour.Add(9 * time.Minute), openIssues: 2}, nil, true},
 		{"still empty", hour.Add(2 * time.Hour), channelStatsPrevRun{processed: hour, openIssues: 0}, nil, false},
 		{"all issues archived by this run", hour.Add(2 * time.Hour), channelStatsPrevRun{processed: hour, openIssues: 1}, []*models.Issue{archivedIssue(issue)}, false},
+		{"only fire-and-forget issues", hour.Add(2 * time.Hour), channelStatsPrevRun{processed: hour, openIssues: 0}, []*models.Issue{ffIssue}, false},
+		{"became empty except fire-and-forget issues", hour.Add(10 * time.Minute), channelStatsPrevRun{processed: hour.Add(9 * time.Minute), openIssues: 2}, []*models.Issue{ffIssue}, true},
+		{"fire-and-forget issues are not counted", hour.Add(time.Hour), channelStatsPrevRun{processed: hour.Add(59 * time.Minute), openIssues: 1}, []*models.Issue{issue, ffIssue}, true},
 	}
 
 	for _, tt := range tests {
@@ -414,8 +421,17 @@ func TestChannelManager_RecordChannelStats_Interval(t *testing.T) {
 				return
 			}
 
+			wantCount := 0
+
+			for _, i := range tt.issues {
+				if !i.IsFireAndForget() && !i.Archived {
+					wantCount++
+				}
+			}
+
 			require.Len(t, stats, 1)
-			assert.Equal(t, len(tt.issues), stats[0].Count)
+			assert.Equal(t, wantCount, stats[0].Count)
+			assert.InDelta(t, float64(wantCount), stats[0].Values[types.InsightsValueAlerting], 0)
 		})
 	}
 }

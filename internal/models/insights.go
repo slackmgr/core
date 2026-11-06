@@ -49,13 +49,12 @@ func (issue *Issue) InsightsEvent(eventType types.InsightsEventType, reason stri
 }
 
 // Resolution returns how the issue ended (or would end, if archived now), as one of the types.InsightsReason*
-// values used by [types.InsightsEventIssueArchived].
+// values used by [types.InsightsEventIssueArchived]. It is only meaningful for issues with follow-up, since
+// fire-and-forget issues ([Issue.IsFireAndForget]) are never archived with an insights event.
 func (issue *Issue) Resolution() string {
 	switch {
 	case issue.IsEmojiTerminated:
 		return types.InsightsReasonTerminated
-	case !issue.LastAlert.IssueFollowUpEnabled:
-		return types.InsightsReasonFireAndForget
 	case issue.IsEmojiResolved:
 		return types.InsightsReasonUserResolved
 	case issue.LastAlert.Severity == types.AlertResolved || issue.LastAlert.Severity == types.AlertInfo:

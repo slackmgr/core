@@ -50,6 +50,10 @@ const (
 	// alertsResolvedWithoutIssueTotalMetric counts resolved alerts that were ignored because no open issue existed.
 	alertsResolvedWithoutIssueTotalMetric = "alerts_resolved_without_issue_total"
 
+	// fireAndForgetAlertsTotalMetric counts fire-and-forget notifications (alerts without follow-up that created a
+	// Slack post). These are not issues, and are excluded from all issue metrics.
+	fireAndForgetAlertsTotalMetric = "fire_and_forget_alerts_total"
+
 	// Queue types and results used as label values for queueMessagesProcessedTotalMetric.
 	queueTypeAlert        = "alert"
 	queueTypeCommand      = "command"
@@ -210,6 +214,7 @@ func newChannelManager(channelID string, slackClient SlackClient, db types.DB, l
 	metrics.RegisterCounter(alertsGroupedTotalMetric, "Total alerts added to an existing open issue", "channel")
 	metrics.RegisterCounter(alertsIgnoredTotalMetric, "Total alerts that matched an existing issue but caused no change", "channel")
 	metrics.RegisterCounter(alertsResolvedWithoutIssueTotalMetric, "Total resolved alerts ignored because no open issue existed for the correlation ID", "channel")
+	metrics.RegisterCounter(fireAndForgetAlertsTotalMetric, "Total fire-and-forget notifications (alerts without follow-up, not counted as issues)", "channel")
 
 	// Command processing by type
 	metrics.RegisterCounter(commandsProcessedTotalMetric, "Total commands processed by action type", "action")
@@ -709,6 +714,9 @@ func (c *channelManager) execCmd(ctx context.Context, cmd *models.Command) (*mod
 // It skips processing if the last processing time is within the specified interval. This may happen if there are
 // multiple managers running in parallel, e.g. in a Kubernetes cluster.
 //
+// It returns the number of issues left to process (including fire-and-forget issues), or, if skipped, the number of
+// open issues (excluding fire-and-forget issues) found by the other instance. Zero stops the processing loop.
+//
 // This method must obtain a lock for the channel before processing the issues.
 func (c *channelManager) processActiveIssues(ctx context.Context, minInterval time.Duration) (int, error) {
 	lock, err := c.obtainLock(ctx, c.channelID, 5*time.Minute, 2*minInterval)
@@ -740,6 +748,8 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		// Take over the open issue count from the other instance's run, so that this instance's gauge is not stuck
 		// at its own last value (the dashboard takes the max over instances). The persisted count is taken before
 		// archiving, so issues archived by that run are still counted until the next run.
+		// A channel with only fire-and-forget issues returns zero here, which is fine: the other instance keeps
+		// processing the channel until they are archived.
 		c.setOpenIssues(float64(processingState.OpenIssues))
 
 		return processingState.OpenIssues, nil
@@ -752,36 +762,8 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		return 0, fmt.Errorf("failed to load open issues from database: %w", err)
 	}
 
-	now := time.Now().UTC()
-
-	// The previous run (by any manager instance) decides whether a channel stats snapshot is due.
-	prevRun := channelStatsPrevRun{processed: processingState.LastProcessed, openIssues: processingState.OpenIssues}
-
-	// Update the processing state with the current time. This is used to ensure that the processing is not repeated too often (by multiple managers).
-	processingState.LastProcessed = now
-
-	// Update the processing state with the number of open issues in the channel.
-	processingState.OpenIssues = len(issueBodies)
-
-	// We update the LastChannelActivity only if there are open issues.
-	if processingState.OpenIssues > 0 {
-		processingState.LastChannelActivity = now
-	}
-
-	// Save the updated processing state to the database.
-	if err := c.db.SaveChannelProcessingState(ctx, processingState); err != nil {
-		return 0, fmt.Errorf("failed to save channel processing state: %w", err)
-	}
-
-	// Stop here if there are no open issues in the channel.
-	if processingState.OpenIssues == 0 {
-		// The last issues may have been archived by another instance, so the gauge is not necessarily zero yet.
-		c.setOpenIssues(0)
-		c.recordChannelStats(now, prevRun, nil)
-		return 0, nil
-	}
-
-	issues := make(map[string]*models.Issue)
+	issues := make(map[string]*models.Issue, len(issueBodies))
+	followUpIssues := 0
 
 	for _, body := range issueBodies {
 		issue := &models.Issue{}
@@ -795,6 +777,40 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		}
 
 		issues[issue.ID] = issue
+
+		if !issue.IsFireAndForget() {
+			followUpIssues++
+		}
+	}
+
+	now := time.Now().UTC()
+
+	// The previous run (by any manager instance) decides whether a channel stats snapshot is due.
+	prevRun := channelStatsPrevRun{processed: processingState.LastProcessed, openIssues: processingState.OpenIssues}
+
+	// Update the processing state with the current time. This is used to ensure that the processing is not repeated too often (by multiple managers).
+	processingState.LastProcessed = now
+
+	// Update the processing state with the number of open issues in the channel. Fire-and-forget issues are not
+	// counted, since they are not issues in the stats sense (see models.Issue.IsFireAndForget).
+	processingState.OpenIssues = followUpIssues
+
+	// We update the LastChannelActivity only if there are issues to process (including fire-and-forget issues).
+	if len(issues) > 0 {
+		processingState.LastChannelActivity = now
+	}
+
+	// Save the updated processing state to the database.
+	if err := c.db.SaveChannelProcessingState(ctx, processingState); err != nil {
+		return 0, fmt.Errorf("failed to save channel processing state: %w", err)
+	}
+
+	// Stop here if there are no issues in the channel.
+	if len(issues) == 0 {
+		// The last issues may have been archived by another instance, so the gauge is not necessarily zero yet.
+		c.setOpenIssues(0)
+		c.recordChannelStats(now, prevRun, nil)
+		return 0, nil
 	}
 
 	started := time.Now()
@@ -814,7 +830,8 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 		if issue.IsReadyForArchiving() {
 			if err := c.registerIssueAsArchived(ctx, issue); err != nil {
 				c.logger.WithFields(issue.LogFields()).Errorf("Failed to archive issue: %s", err)
-			} else {
+			} else if !issue.IsFireAndForget() {
+				// Fire-and-forget issues are not counted as archived, and have no archived insights event.
 				archivedCount++
 
 				if c.insights.Enabled() {
@@ -824,7 +841,9 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 			continue
 		}
 
-		openIssues++
+		if !issue.IsFireAndForget() {
+			openIssues++
+		}
 
 		// Expire the post-click state if no alert was received in time. The issue is saved and updated in Slack below.
 		issue.ExpirePostClickState(now)
@@ -907,7 +926,8 @@ func (c *channelManager) processActiveIssues(ctx context.Context, minInterval ti
 	c.observe(processActiveIssuesDurationMetric, elapsed.Seconds())
 	c.setOpenIssues(float64(openIssues))
 
-	return processingState.OpenIssues, nil
+	// Fire-and-forget issues keep the processing loop running until they are archived.
+	return len(issues), nil
 }
 
 // registerIssueAsArchived marks the issue as archived (but does not update it in the database).
@@ -1046,6 +1066,14 @@ func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert
 		return alertOutcome{}, fmt.Errorf("failed to save issue to database: %w", err)
 	}
 
+	// Fire-and-forget notifications are not issues, and are counted separately from issue metrics and events.
+	if issue.IsFireAndForget() {
+		logger.Info("Fire-and-forget notification created")
+		c.counterAdd(fireAndForgetAlertsTotalMetric, 1)
+
+		return alertOutcome{eventType: types.InsightsEventAlertFireAndForget}, nil
+	}
+
 	logger.Info("Issue created")
 	c.counterAdd(issuesCreatedTotalMetric, 1)
 
@@ -1053,7 +1081,7 @@ func (c *channelManager) createNewIssue(ctx context.Context, alert *models.Alert
 		e := issue.InsightsEvent(types.InsightsEventIssueCreated, "")
 		e.Time = issue.Created
 
-		if alert.IssueFollowUpEnabled && alert.NotificationDelaySeconds > 0 {
+		if alert.NotificationDelaySeconds > 0 {
 			e.Values = map[string]float64{types.InsightsValueNotificationDelaySeconds: float64(alert.NotificationDelaySeconds)}
 		}
 

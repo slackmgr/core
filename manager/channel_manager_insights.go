@@ -82,7 +82,7 @@ type channelStatsPrevRun struct {
 
 // recordChannelStats records a channel stats snapshot of the given open issues, if insights are enabled and
 // this is the first processing run in the current stats interval window (windows are aligned to the interval).
-// Archived issues are ignored. A snapshot with zero open issues is recorded on the first run that finds the
+// Archived and fire-and-forget issues are ignored. A snapshot with zero open issues is recorded on the first run that finds the
 // channel empty, so that time series drop to zero.
 //
 // The decision is based on the persisted state of the previous run, not on in-memory state, because processing
@@ -96,9 +96,17 @@ func (c *channelManager) recordChannelStats(now time.Time, prev channelStatsPrev
 		return
 	}
 
-	var open, alerting, resolved, muted, investigated, escalated int
+	// followUp counts the issues with follow-up, including those archived by this run. Fire-and-forget issues are
+	// not issues in the stats sense, and are ignored entirely.
+	var followUp, open, alerting, resolved, muted, investigated, escalated int
 
 	for _, issue := range issues {
+		if issue.IsFireAndForget() {
+			continue
+		}
+
+		followUp++
+
 		if issue.Archived {
 			continue
 		}
@@ -133,7 +141,7 @@ func (c *channelManager) recordChannelStats(now time.Time, prev channelStatsPrev
 
 	// Issues archived by this run leave open at zero, but the next run (which finds the channel empty) records
 	// the zero snapshot, so it is recorded exactly once.
-	becameEmpty := len(issues) == 0 && prev.openIssues > 0
+	becameEmpty := followUp == 0 && prev.openIssues > 0
 	newWindow := prev.processed.IsZero() || !now.Truncate(interval).Equal(prev.processed.Truncate(interval))
 
 	if !becameEmpty && (open == 0 || !newWindow) {

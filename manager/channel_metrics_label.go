@@ -96,6 +96,7 @@ func (c *channelManager) useLabel(label string, state channelLabelState) {
 		channelLockAcquireFailuresTotalMetric,
 		alertsGroupedTotalMetric,
 		alertsIgnoredTotalMetric,
+		fireAndForgetAlertsTotalMetric,
 		alertsResolvedWithoutIssueTotalMetric,
 	} {
 		c.metrics.CounterAdd(name, c.pendingCounters[name], label)

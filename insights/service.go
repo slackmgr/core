@@ -144,13 +144,18 @@ type Count struct {
 
 // AlertSummary counts alert outcomes. See the types.InsightsEventAlert* constants for precise definitions.
 type AlertSummary struct {
-	// Accepted is the number of alerts fully processed by the manager (NewIssue + Grouped + Ignored).
+	// Accepted is the number of alerts fully processed by the manager (NewIssue + FireAndForget + Grouped + Ignored).
 	Accepted int64 `json:"accepted"`
 	NewIssue int64 `json:"newIssue"`
-	Grouped  int64 `json:"grouped"`
-	Ignored  int64 `json:"ignored"`
-	Dropped  int64 `json:"dropped"`
-	Retried  int64 `json:"retried"`
+
+	// FireAndForget is the number of fire-and-forget notifications (alerts without follow-up). These are not issues,
+	// and are not counted in [IssueSummary] or any open issue numbers.
+	FireAndForget int64 `json:"fireAndForget"`
+
+	Grouped int64 `json:"grouped"`
+	Ignored int64 `json:"ignored"`
+	Dropped int64 `json:"dropped"`
+	Retried int64 `json:"retried"`
 
 	// Queued, Filtered and Rejected are only recorded when the API server has an insights sink.
 	Queued   int64 `json:"queued"`
@@ -253,7 +258,7 @@ func (s *Service) Summary(ctx context.Context, f Filter) (*Summary, error) {
 		sum.add(r.Type, r.Reason, r.Count)
 	}
 
-	sum.Alerts.Accepted = sum.Alerts.NewIssue + sum.Alerts.Grouped + sum.Alerts.Ignored
+	sum.Alerts.Accepted = sum.Alerts.NewIssue + sum.Alerts.FireAndForget + sum.Alerts.Grouped + sum.Alerts.Ignored
 
 	distinct, err := s.count(ctx, &types.InsightsCountQuery{
 		InsightsFilter: withTypes(f.toTypes(), types.InsightsEventIssueUpdated),
@@ -290,6 +295,8 @@ func (sum *Summary) add(t types.InsightsEventType, reason string, n int64) {
 	switch t {
 	case types.InsightsEventAlertNewIssue:
 		a.NewIssue += n
+	case types.InsightsEventAlertFireAndForget:
+		a.FireAndForget += n
 	case types.InsightsEventAlertGrouped:
 		a.Grouped += n
 	case types.InsightsEventAlertIgnored:

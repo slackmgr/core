@@ -69,7 +69,7 @@
     },
     {
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "description": "Total open issues across all channels.",
+      "description": "Total open issues across all channels. Fire-and-forget notifications (alerts without follow-up) are not issues, and are not counted.",
       "fieldConfig": {
         "defaults": {
           "color": {"fixedColor": "blue", "mode": "fixed"},
@@ -291,7 +291,7 @@
     },
     {
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "description": "Rate of issue lifecycle events summed across all channels. Created should roughly balance archived over time.",
+      "description": "Rate of issue lifecycle events summed across all channels. Created should roughly balance archived over time. Fire-and-forget notifications are not issues, and are not counted (see Fire-and-Forget Notifications by Channel).",
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "palette-classic"},
@@ -361,7 +361,7 @@
         },
         "overrides": [{"matcher": {"id": "byName", "options": "success"}, "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "discarded"}, "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "slack_error"}, "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "db_error"}, "properties": [{"id": "color", "value": {"fixedColor": "#C71585", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "gate_timeout"}, "properties": [{"id": "color", "value": {"fixedColor": "orange", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "lock_timeout"}, "properties": [{"id": "color", "value": {"fixedColor": "yellow", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "move_race"}, "properties": [{"id": "color", "value": {"fixedColor": "#17BECF", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "unreadable"}, "properties": [{"id": "color", "value": {"fixedColor": "#8C564B", "mode": "fixed"}}]}]
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 14},
       "id": 10,
       "options": {
         "legend": {
@@ -402,7 +402,7 @@
         },
         "overrides": [{"matcher": {"id": "byName", "options": "resolve_issue"}, "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "unresolve_issue"}, "properties": [{"id": "color", "value": {"fixedColor": "orange", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "terminate_issue"}, "properties": [{"id": "color", "value": {"fixedColor": "#8E8E8E", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "investigate_issue"}, "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "uninvestigate_issue"}, "properties": [{"id": "color", "value": {"fixedColor": "#17BECF", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "mute_issue"}, "properties": [{"id": "color", "value": {"fixedColor": "purple", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "unmute_issue"}, "properties": [{"id": "color", "value": {"fixedColor": "#BCBD22", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "create_issue"}, "properties": [{"id": "color", "value": {"fixedColor": "#37872D", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "move_issue"}, "properties": [{"id": "color", "value": {"fixedColor": "yellow", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "show_issue_option_buttons"}, "properties": [{"id": "color", "value": {"fixedColor": "#8C564B", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "hide_issue_option_buttons"}, "properties": [{"id": "color", "value": {"fixedColor": "#1F3A93", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "webhook"}, "properties": [{"id": "color", "value": {"fixedColor": "#6A3D9A", "mode": "fixed"}}]}, {"matcher": {"id": "byName", "options": "webhook_result"}, "properties": [{"id": "color", "value": {"fixedColor": "#CCCCDC", "mode": "fixed"}}]}]
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 14},
       "id": 11,
       "options": {
         "legend": {
@@ -424,6 +424,7 @@
       "title": "Commands Processed by Action",
       "type": "timeseries"
     },
+    {"datasource": {"type": "prometheus", "uid": "${datasource}"}, "description": "Rate of fire-and-forget notifications (alerts without follow-up, including all new info alerts), by channel. These are Slack posts only: they are not issues, and are excluded from all open, created and archived issue metrics.", "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "pointSize": 5, "showPoints": "auto", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "short"}, "overrides": []}, "gridPos": {"h": 8, "w": 8, "x": 16, "y": 14}, "id": 60, "options": {"legend": {"calcs": ["lastNotNull", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}, "targets": [{"datasource": {"type": "prometheus", "uid": "${datasource}"}, "expr": "sum by (channel) (rate(${prefix}fire_and_forget_alerts_total[$__rate_interval]))", "legendFormat": "{{channel}}", "refId": "A"}], "title": "Fire-and-Forget Notifications by Channel", "type": "timeseries"},
 
     {
       "collapsed": false,
@@ -434,7 +435,7 @@
     },
     {
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "description": "Current open issue count per channel, sorted descending. Sized for 20-50 channels.",
+      "description": "Current open issue count per channel, sorted descending. Fire-and-forget notifications are not counted. Sized for 20-50 channels.",
       "fieldConfig": {
         "defaults": {
           "color": {"mode": "continuous-GrYlRd"},
@@ -1616,6 +1617,6 @@
   "timezone": "browser",
   "title": "slackmgr",
   "uid": "slackmgr-overview",
-  "version": 8,
+  "version": 9,
   "weekStart": ""
 }

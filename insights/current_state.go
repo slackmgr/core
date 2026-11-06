@@ -34,7 +34,8 @@ type CurrentStateQuery struct {
 	IncludeIssues bool
 }
 
-// OpenIssue describes an open (non-archived) issue.
+// OpenIssue describes an open (non-archived) issue. Fire-and-forget notifications (alerts without follow-up) are not
+// issues, and are never included.
 type OpenIssue struct {
 	ID            string              `json:"id"`
 	ChannelID     string              `json:"channelId"`
@@ -80,7 +81,7 @@ type OpenIssue struct {
 
 // StateCounts counts open issues by state.
 type StateCounts struct {
-	// Open is the number of open (non-archived) issues.
+	// Open is the number of open (non-archived) issues, excluding fire-and-forget notifications.
 	Open int `json:"open"`
 
 	// Alerting is the number of open issues that are neither resolved nor info, and BySeverity splits them by severity.
@@ -207,7 +208,8 @@ func (s *Service) loadOpenIssues(ctx context.Context, channelIDs []string) (map[
 }
 
 // decodeOpenIssue decodes issue JSON with the manager's own issue model, so that time-dependent state
-// (e.g. auto-resolve) is evaluated exactly like the manager does. It returns nil for archived issues.
+// (e.g. auto-resolve) is evaluated exactly like the manager does. It returns nil for archived and fire-and-forget
+// issues, since fire-and-forget notifications are never counted as open issues.
 func decodeOpenIssue(body json.RawMessage, now time.Time) (*OpenIssue, error) {
 	issue := &models.Issue{}
 
@@ -219,8 +221,8 @@ func decodeOpenIssue(body json.RawMessage, now time.Time) (*OpenIssue, error) {
 		return nil, errors.New("issue has no last alert")
 	}
 
-	if issue.Archived {
-		return nil, nil //nolint:nilnil // Archived issues are skipped
+	if issue.Archived || issue.IsFireAndForget() {
+		return nil, nil //nolint:nilnil // Archived and fire-and-forget issues are skipped
 	}
 
 	alert := issue.LastAlert

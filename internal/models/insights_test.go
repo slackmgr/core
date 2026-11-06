@@ -176,7 +176,6 @@ func TestIssue_Resolution(t *testing.T) {
 		want   string
 	}{
 		{"terminated", func(i *Issue) { i.IsEmojiTerminated = true }, types.InsightsReasonTerminated},
-		{"fire and forget", func(i *Issue) { i.LastAlert.IssueFollowUpEnabled = false }, types.InsightsReasonFireAndForget},
 		{"user resolved", func(i *Issue) { i.IsEmojiResolved = true }, types.InsightsReasonUserResolved},
 		{"alert resolved", func(i *Issue) { i.LastAlert.Severity = types.AlertResolved }, types.InsightsReasonAlertResolved},
 		{"inconclusive", func(i *Issue) { i.LastAlert.AutoResolveAsInconclusive = true }, types.InsightsReasonAutoResolvedInconclusive},

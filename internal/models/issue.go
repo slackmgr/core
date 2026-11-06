@@ -205,6 +205,13 @@ func (issue *Issue) FollowUpEnabled() bool {
 	return issue.LastAlert.IssueFollowUpEnabled
 }
 
+// IsFireAndForget returns true if the issue has follow-up disabled. Such an issue is a fire-and-forget notification,
+// kept only briefly to ignore repeated alerts. It is not an issue in any stats sense: it is never counted as open,
+// alerting, resolved or archived, and never produces issue insights events or issue metrics.
+func (issue *Issue) IsFireAndForget() bool {
+	return !issue.LastAlert.IssueFollowUpEnabled
+}
+
 // AddAlert adds a new alert to an existing issue.
 // Alerts that are older than the previous alert are ignored.
 // Alerts with status Resolved are ignored if the issue is already resolved.
@@ -659,8 +666,8 @@ func (issue *Issue) ApplyEscalationRules() *EscalationResult {
 		Escalated: false,
 	}
 
-	// Issues that are info/resolved or archived should never be escalated
-	if issue.IsInfoOrResolved() || issue.Archived {
+	// Issues that are info/resolved, fire-and-forget or archived should never be escalated
+	if issue.IsInfoOrResolved() || issue.IsFireAndForget() || issue.Archived {
 		return result
 	}
 

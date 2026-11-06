@@ -132,6 +132,7 @@ func TestService_Summary(t *testing.T) {
 
 			return []*types.InsightsCountRow{
 				row(types.InsightsEventAlertNewIssue, "", 5),
+				row(types.InsightsEventAlertFireAndForget, "", 3),
 				row(types.InsightsEventAlertGrouped, "", 7),
 				row(types.InsightsEventAlertIgnored, types.InsightsReasonNotNewer, 2),
 				row(types.InsightsEventAlertDropped, types.InsightsReasonInvalid, 1),
@@ -168,7 +169,8 @@ func TestService_Summary(t *testing.T) {
 	sum, err := New(reader).Summary(context.Background(), testFilter())
 	require.NoError(t, err)
 
-	assert.Equal(t, int64(14), sum.Alerts.Accepted)
+	assert.Equal(t, int64(17), sum.Alerts.Accepted)
+	assert.Equal(t, int64(3), sum.Alerts.FireAndForget)
 	assert.Equal(t, int64(2), sum.Alerts.IgnoredByReason[types.InsightsReasonNotNewer])
 	assert.Equal(t, int64(1), sum.Alerts.DroppedByReason[types.InsightsReasonInvalid])
 	assert.Equal(t, int64(4), sum.Alerts.RetriedByReason[types.InsightsReasonDBError])
@@ -603,6 +605,14 @@ func TestService_CurrentState(t *testing.T) {
 		"archived": issueJSON(t, func(i *models.Issue) {
 			i.ID = "archived"
 			i.Archived = true
+		}),
+		// Fire-and-forget issues are never counted, even though this one would top every list.
+		"fire-and-forget": issueJSON(t, func(i *models.Issue) {
+			i.ID = "fire-and-forget"
+			i.LastAlert.IssueFollowUpEnabled = false
+			i.LastAlert.SlackChannelID = "C3"
+			i.Created = testFrom.Add(-48 * time.Hour)
+			i.AlertCount = 100
 		}),
 	}}
 

@@ -210,6 +210,28 @@ func TestIssue_FollowUpEnabled(t *testing.T) {
 	})
 }
 
+func TestIssue_IsFireAndForget(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		followUp bool
+		want     bool
+	}{
+		{"follow-up enabled", true, false},
+		{"follow-up disabled", false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			issue := &Issue{LastAlert: &Alert{Alert: types.Alert{IssueFollowUpEnabled: tt.followUp}}}
+			assert.Equal(t, tt.want, issue.IsFireAndForget())
+		})
+	}
+}
+
 func TestIssue_AddAlert(t *testing.T) {
 	logger := &mockLogger{}
 
@@ -942,6 +964,31 @@ func TestIssue_ApplyEscalationRules(t *testing.T) {
 		result := issue.ApplyEscalationRules()
 
 		assert.False(t, result.Escalated)
+	})
+
+	t.Run("no escalation when fire-and-forget", func(t *testing.T) {
+		fixedTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+		cleanup := setTestTime(fixedTime)
+		defer cleanup()
+
+		issue := &Issue{
+			Created: fixedTime.Add(-2 * time.Hour),
+			LastAlert: &Alert{
+				Alert: types.Alert{
+					Severity:             types.AlertWarning,
+					IssueFollowUpEnabled: false,
+					Escalation: []*types.Escalation{
+						{DelaySeconds: 3600, Severity: types.AlertError, MoveToChannel: "C0OTHER"},
+					},
+				},
+			},
+		}
+
+		result := issue.ApplyEscalationRules()
+
+		assert.False(t, result.Escalated)
+		assert.False(t, issue.IsEscalated)
+		assert.Equal(t, types.AlertWarning, issue.LastAlert.Severity)
 	})
 
 	t.Run("applies escalation when delay passed", func(t *testing.T) {
