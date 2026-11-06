@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `insights.Service.AlertingIssuesSeries`: alerting issues (open, neither resolved nor info) over time per channel, from channel snapshots. Works like `OpenIssuesSeries`, which counts alerting and resolved issues
+
 ## [0.25.0] - 2026-11-06
 
 ### Added

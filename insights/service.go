@@ -117,7 +117,7 @@ func (f Filter) toTypes() types.InsightsFilter {
 }
 
 // errClientsFilterNotSupported is returned by queries over channel snapshots, which have no client.
-var errClientsFilterNotSupported = errors.New("the clients filter is not supported for open issue series, because channel snapshots have no client; use CurrentState for open issues per client")
+var errClientsFilterNotSupported = errors.New("the clients filter is not supported for channel snapshot series (open and alerting issues), because channel snapshots have no client; use CurrentState for issues per client")
 
 // Metric identifies a series of events: an event type, optionally restricted to one reason.
 type Metric struct {
@@ -469,40 +469,27 @@ func (s *Service) Series(ctx context.Context, q SeriesQuery) (*Series, error) {
 }
 
 // OpenIssuesSeries returns the number of open issues over time, per channel, from channel snapshots.
+// Open issues are all non-archived issues, alerting and resolved; see [Service.AlertingIssuesSeries] for
+// alerting issues only.
 // Series keys are channel IDs. The value of a bucket is the highest snapshot in it; buckets without a
 // snapshot are zero, so choose a bucket at least as large as the channel stats interval (default 5 minutes).
 // If the number of buckets times the number of channels exceeds [types.MaxInsightsRows], it fails with
 // [types.ErrInsightsTooManyRows]; use a shorter time range, a larger bucket or fewer channels.
 // Channel snapshots have no client, so a filter with Clients is rejected.
 func (s *Service) OpenIssuesSeries(ctx context.Context, f Filter, bucket time.Duration) (*Series, error) {
-	if err := s.requireReader(); err != nil {
-		return nil, err
-	}
+	return s.channelStatsSeries(ctx, f, bucket, types.InsightsValueOpen)
+}
 
-	if len(f.Clients) > 0 {
-		return nil, errClientsFilterNotSupported
-	}
-
-	rows, err := s.stats(ctx, &types.InsightsStatsQuery{
-		InsightsFilter: withTypes(f.toTypes(), types.InsightsEventChannelStats),
-		InsightsGrouping: types.InsightsGrouping{
-			GroupBy: []types.InsightsDimension{types.InsightsDimensionBucket, types.InsightsDimensionChannel},
-			Bucket:  bucket,
-		},
-		ValueKey:   types.InsightsValueOpen,
-		Aggregates: []types.InsightsAggregate{types.InsightsAggregateMax},
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	series := newSeries(f.From, f.To, bucket)
-
-	for _, r := range rows {
-		series.add(r.ChannelID, r.Bucket, r.Values[types.InsightsAggregateMax])
-	}
-
-	return series, nil
+// AlertingIssuesSeries returns the number of alerting issues over time, per channel, from channel snapshots.
+// Alerting issues are open issues that are neither resolved nor info, like [StateCounts.Alerting];
+// fire-and-forget notifications are not counted.
+// Series keys are channel IDs. The value of a bucket is the highest snapshot in it; buckets without a
+// snapshot are zero, so choose a bucket at least as large as the channel stats interval (default 5 minutes).
+// If the number of buckets times the number of channels exceeds [types.MaxInsightsRows], it fails with
+// [types.ErrInsightsTooManyRows]; use a shorter time range, a larger bucket or fewer channels.
+// Channel snapshots have no client, so a filter with Clients is rejected.
+func (s *Service) AlertingIssuesSeries(ctx context.Context, f Filter, bucket time.Duration) (*Series, error) {
+	return s.channelStatsSeries(ctx, f, bucket, types.InsightsValueAlerting)
 }
 
 func newSeries(from, to time.Time, bucket time.Duration) *Series {
@@ -908,6 +895,38 @@ func (s *Service) requireReader() error {
 	}
 
 	return nil
+}
+
+// channelStatsSeries returns the highest channel snapshot value of valueKey per bucket and channel.
+func (s *Service) channelStatsSeries(ctx context.Context, f Filter, bucket time.Duration, valueKey string) (*Series, error) {
+	if err := s.requireReader(); err != nil {
+		return nil, err
+	}
+
+	if len(f.Clients) > 0 {
+		return nil, errClientsFilterNotSupported
+	}
+
+	rows, err := s.stats(ctx, &types.InsightsStatsQuery{
+		InsightsFilter: withTypes(f.toTypes(), types.InsightsEventChannelStats),
+		InsightsGrouping: types.InsightsGrouping{
+			GroupBy: []types.InsightsDimension{types.InsightsDimensionBucket, types.InsightsDimensionChannel},
+			Bucket:  bucket,
+		},
+		ValueKey:   valueKey,
+		Aggregates: []types.InsightsAggregate{types.InsightsAggregateMax},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	series := newSeries(f.From, f.To, bucket)
+
+	for _, r := range rows {
+		series.add(r.ChannelID, r.Bucket, r.Values[types.InsightsAggregateMax])
+	}
+
+	return series, nil
 }
 
 func (s *Service) count(ctx context.Context, q *types.InsightsCountQuery) ([]*types.InsightsCountRow, error) {

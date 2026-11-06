@@ -105,6 +105,8 @@ func TestService_NotSupported(t *testing.T) {
 	require.ErrorIs(t, err, types.ErrInsightsNotSupported)
 	_, err = s.OpenIssuesSeries(ctx, f, time.Hour)
 	require.ErrorIs(t, err, types.ErrInsightsNotSupported)
+	_, err = s.AlertingIssuesSeries(ctx, f, time.Hour)
+	require.ErrorIs(t, err, types.ErrInsightsNotSupported)
 	_, err = s.Breakdown(ctx, f, Metric{Type: types.InsightsEventIssueCreated}, types.InsightsDimensionRouteKey, 0)
 	require.ErrorIs(t, err, types.ErrInsightsNotSupported)
 	_, err = s.Lifecycle(ctx, f)
@@ -260,6 +262,9 @@ func TestService_TooManyRows(t *testing.T) {
 
 	_, err = s.OpenIssuesSeries(ctx, testFilter(), time.Minute)
 	require.ErrorIs(t, err, types.ErrInsightsTooManyRows)
+
+	_, err = s.AlertingIssuesSeries(ctx, testFilter(), time.Minute)
+	require.ErrorIs(t, err, types.ErrInsightsTooManyRows)
 }
 
 func TestAlignBucket(t *testing.T) {
@@ -271,27 +276,51 @@ func TestAlignBucket(t *testing.T) {
 	assert.Equal(t, ts.UTC(), alignBucket(ts, time.Millisecond))
 }
 
-func TestService_OpenIssuesSeries(t *testing.T) {
+func TestService_ChannelStatsSeries(t *testing.T) {
 	t.Parallel()
 
-	reader := &fakeReader{statsFn: func(q *types.InsightsStatsQuery) []*types.InsightsStatsRow {
-		assert.Equal(t, types.InsightsValueOpen, q.ValueKey)
-		return []*types.InsightsStatsRow{
-			{InsightsGroupKey: types.InsightsGroupKey{Bucket: testFrom.Add(time.Hour), ChannelID: "C1"}, Values: map[types.InsightsAggregate]float64{types.InsightsAggregateMax: 4}},
-		}
-	}}
+	tests := []struct {
+		name     string
+		valueKey string
+		call     func(s *Service, ctx context.Context, f Filter, bucket time.Duration) (*Series, error)
+	}{
+		{name: "OpenIssuesSeries", valueKey: types.InsightsValueOpen, call: (*Service).OpenIssuesSeries},
+		{name: "AlertingIssuesSeries", valueKey: types.InsightsValueAlerting, call: (*Service).AlertingIssuesSeries},
+	}
 
-	series, err := New(reader).OpenIssuesSeries(context.Background(), testFilter(), time.Hour)
-	require.NoError(t, err)
-	assert.InDelta(t, 4, series.Values["C1"][1], 0)
-	assert.InDelta(t, 0, series.Values["C1"][0], 0)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	// Channel snapshots have no client, so a clients filter is rejected rather than returning empty series.
-	f := testFilter()
-	f.Clients = []string{"prometheus"}
-	_, err = New(reader).OpenIssuesSeries(context.Background(), f, time.Hour)
-	require.ErrorIs(t, err, errClientsFilterNotSupported)
-	assert.Len(t, reader.statsQueries, 1, "no query is run")
+			reader := &fakeReader{statsFn: func(q *types.InsightsStatsQuery) []*types.InsightsStatsRow {
+				assert.Equal(t, tt.valueKey, q.ValueKey)
+				assert.Equal(t, []types.InsightsEventType{types.InsightsEventChannelStats}, q.Types)
+				assert.Equal(t, []types.InsightsDimension{types.InsightsDimensionBucket, types.InsightsDimensionChannel}, q.GroupBy)
+				assert.Equal(t, time.Hour, q.Bucket)
+				assert.Equal(t, []types.InsightsAggregate{types.InsightsAggregateMax}, q.Aggregates)
+				return []*types.InsightsStatsRow{
+					{InsightsGroupKey: types.InsightsGroupKey{Bucket: testFrom.Add(time.Hour), ChannelID: "C1"}, Values: map[types.InsightsAggregate]float64{types.InsightsAggregateMax: 4}},
+					{InsightsGroupKey: types.InsightsGroupKey{Bucket: testFrom.Add(3 * time.Hour), ChannelID: "C2"}, Values: map[types.InsightsAggregate]float64{types.InsightsAggregateMax: 2}},
+				}
+			}}
+
+			series, err := tt.call(New(reader), context.Background(), testFilter(), time.Hour)
+			require.NoError(t, err)
+			assert.Len(t, series.Buckets, 24)
+			assert.Len(t, series.Values, 2, "one series per channel")
+			assert.InDelta(t, 4, series.Values["C1"][1], 0)
+			assert.InDelta(t, 0, series.Values["C1"][0], 0)
+			assert.InDelta(t, 2, series.Values["C2"][3], 0)
+			assert.InDelta(t, 0, series.Values["C2"][1], 0)
+
+			// Channel snapshots have no client, so a clients filter is rejected rather than returning empty series.
+			f := testFilter()
+			f.Clients = []string{"prometheus"}
+			_, err = tt.call(New(reader), context.Background(), f, time.Hour)
+			require.ErrorIs(t, err, errClientsFilterNotSupported)
+			assert.Len(t, reader.statsQueries, 1, "no query is run")
+		})
+	}
 }
 
 func TestService_ClientsFilterIsPassedToQueries(t *testing.T) {
@@ -522,6 +551,8 @@ func TestService_ReaderErrorsPropagate(t *testing.T) {
 	require.ErrorIs(t, err, boom)
 	_, err = s.OpenIssuesSeries(ctx, f, time.Hour)
 	require.ErrorIs(t, err, boom)
+	_, err = s.AlertingIssuesSeries(ctx, f, time.Hour)
+	require.ErrorIs(t, err, boom)
 	_, err = s.Lifecycle(ctx, f)
 	require.ErrorIs(t, err, boom)
 	_, err = s.Flapping(ctx, f, 1, 1)
@@ -539,6 +570,8 @@ func TestService_ReaderErrorsPropagate(t *testing.T) {
 	_, err = s.Summary(ctx, Filter{})
 	require.ErrorContains(t, err, "invalid query")
 	_, err = s.OpenIssuesSeries(ctx, Filter{}, time.Hour)
+	require.ErrorContains(t, err, "invalid query")
+	_, err = s.AlertingIssuesSeries(ctx, Filter{}, time.Hour)
 	require.ErrorContains(t, err, "invalid query")
 }
 

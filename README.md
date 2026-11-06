@@ -303,13 +303,14 @@ series, _ := svc.Series(ctx, insights.SeriesQuery{Filter: f, Bucket: time.Hour,
 state, _ := svc.CurrentState(ctx, insights.CurrentStateQuery{ChannelIDs: channels, Clients: clients})
 ```
 
-`Filter.Clients` and `CurrentStateQuery.Clients` select by effective client (exact match). Each open issue in `CurrentState` carries its `Client` (effective client) and `Username`. `OpenIssuesSeries` is based on channel snapshots, which have no client, so it rejects a filter with clients; use `CurrentState` for open issues per client.
+`Filter.Clients` and `CurrentStateQuery.Clients` select by effective client (exact match). Each open issue in `CurrentState` carries its `Client` (effective client) and `Username`. `OpenIssuesSeries` and `AlertingIssuesSeries` are based on channel snapshots, which have no client, so they reject a filter with clients; use `CurrentState` for open issues per client.
 
 | Method | Answers |
 |---|---|
 | `Summary` | Counts of all alert, issue, command, Slack post and webhook events, by reason, plus lost events. Fire-and-forget notifications are counted in `Alerts.FireAndForget` only |
 | `Series` | Zero-filled time series of any event type (and reason), optionally per channel |
-| `OpenIssuesSeries` | Open issues over time per channel, from channel snapshots |
+| `OpenIssuesSeries` | Open issues (alerting and resolved) over time per channel, from channel snapshots |
+| `AlertingIssuesSeries` | Alerting issues (open, neither resolved nor info) over time per channel, from channel snapshots |
 | `Breakdown` | Top-N values of a dimension, e.g. noisiest clients, route keys, hosts or correlation IDs, most active users |
 | `CurrentState` | Open issues (excluding fire-and-forget notifications) by channel and severity, resolved-but-not-archived, muted, investigated, escalated, moved, stale; oldest, stale and noisiest issues |
 | `Lifecycle` | Time to resolve, time to first investigation, open time, alerts and reopens per issue (avg, p50, p90, p99, max); resolution mix |
@@ -317,7 +318,7 @@ state, _ := svc.CurrentState(ctx, insights.CurrentStateQuery{ChannelIDs: channel
 | `MoveFlows` | Issue moves between channels, by reason |
 | `IssueTimeline` / `Events` | Paginated event listings, e.g. all events of one issue |
 
-Activity methods return `types.ErrInsightsNotSupported` when no reader is available. A query matching more than `types.MaxInsightsRows` (10,000) groups fails with `types.ErrInsightsTooManyRows` rather than returning truncated results. This mainly affects `Series` with `ByChannel` and `OpenIssuesSeries` (one row per bucket and channel, and for `Series` also per event type, and per reason if a metric has one); use a shorter range, a larger bucket or fewer channels. `CurrentState` also works with any `types.DB` (`insights.NewFromDB` or `insights.WithDB`), including plugins without insights support.
+Activity methods return `types.ErrInsightsNotSupported` when no reader is available. A query matching more than `types.MaxInsightsRows` (10,000) groups fails with `types.ErrInsightsTooManyRows` rather than returning truncated results. This mainly affects `Series` with `ByChannel`, `OpenIssuesSeries` and `AlertingIssuesSeries` (one row per bucket and channel, and for `Series` also per event type, and per reason if a metric has one); use a shorter range, a larger bucket or fewer channels. `CurrentState` also works with any `types.DB` (`insights.NewFromDB` or `insights.WithDB`), including plugins without insights support.
 
 ## Metrics and Grafana Dashboard
 
