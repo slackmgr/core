@@ -2006,6 +2006,9 @@ func TestServer_CreateClientErrorAlert(t *testing.T) {
 		assert.Equal(t, types.AlertWarning, alert.Severity)
 		assert.Equal(t, "C-errors", alert.SlackChannelID)
 		assert.Contains(t, alert.Header, "400")
+		assert.Equal(t, ClientErrorReportClient, alert.Client)
+		assert.Empty(t, alert.Username, "username is left to the manager default post username")
+		assert.Equal(t, ClientErrorReportClient, alert.EffectiveClient())
 	})
 
 	t.Run("creates error alert for 5xx errors", func(t *testing.T) {

@@ -9,6 +9,6 @@ type slackApilogger struct {
 }
 
 func (l *slackApilogger) Output(_ int, msg string) error {
-	l.logger.Debugf(msg)
+	l.logger.Debug(msg)
 	return nil
 }

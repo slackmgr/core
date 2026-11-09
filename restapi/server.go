@@ -577,6 +577,11 @@ func (s *Server) writeErrorResponse(c *gin.Context, err error, statusCode int, a
 	}
 }
 
+// ClientErrorReportClient is the client ([types.Alert.Client]) of alerts that report client errors to the error
+// report channel ([config.APIConfig.ErrorReportChannelID]). Without it, such alerts would be recorded in insights with
+// the client [types.UnknownClient], since they have no username.
+const ClientErrorReportClient = "slackmgr-api"
+
 // createClientErrorAlert creates an alert for reporting client errors to the configured Slack error report channel.
 // This is an optional debug feature, used by Slack Manager admins to track client errors that may indicate misconfiguration or integration issues.
 func (s *Server) createClientErrorAlert(err error, statusCode int, debugFields map[string]string, targetChannel string) *types.Alert {
@@ -596,6 +601,7 @@ func (s *Server) createClientErrorAlert(err error, statusCode int, debugFields m
 	alert.Header = fmt.Sprintf(":status: Client error %d", statusCode)
 	alert.FallbackText = fmt.Sprintf("Client error %d", statusCode)
 	alert.SlackChannelID = s.cfg.ErrorReportChannelID
+	alert.Client = ClientErrorReportClient
 	alert.IssueFollowUpEnabled = true
 	alert.AutoResolveSeconds = 3600
 	alert.ArchivingDelaySeconds = 24 * 3600
@@ -631,7 +637,7 @@ func (s *Server) queueAlert(ctx context.Context, alert *types.Alert) error {
 	// Errors from this method are supposed to indicate retryable queuing errors, not fatal serialization errors.
 	body, err := json.Marshal(alert)
 	if err != nil {
-		s.logger.Errorf("Failed to marshal alert: %w", err)
+		s.logger.Errorf("Failed to marshal alert: %s", err)
 		return nil
 	}
 

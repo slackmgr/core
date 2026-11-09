@@ -262,6 +262,7 @@ Every event recorded for an alert or issue carries the effective client of the a
 
 - An alert without client and username is recorded as `unknown` by both the API and the manager: the manager sets `Client` to `unknown` before it applies the default post username (`DefaultPostUsername`), so the Slack Manager bot persona is never used as a client
 - Issues created from Slack with the create issue command get the client `slack` (`manager.SlackCommandClient`), not the name of the Slack user
+- Client error alerts posted by the API to the error report channel (`ErrorReportChannelID`) get the client `slackmgr-api` (`restapi.ClientErrorReportClient`)
 - The Prometheus webhook reads the client from the `slackmgr_client` (or `slackmgrClient`) annotation, then label. A plain `client` key is deliberately not used, since it is a common metric label
 - Events that do not relate to an alert or issue (channel snapshots, gap events, commands without an issue) have no client
 
