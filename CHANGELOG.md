@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.2] - 2026-11-11
+
 ### Fixed
 - Reactions (added and removed) on Slack posts created by another user or app (e.g. a legacy Slack Manager app) are now ignored. Previously, a terminate reaction on such a post fell back to `chat.delete`, which failed with `cant_delete_message` and counted as a Slack API error
 
@@ -609,7 +611,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.26.1...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.26.2...HEAD
+[0.26.2]: https://github.com/slackmgr/core/compare/v0.26.1...v0.26.2
 [0.26.1]: https://github.com/slackmgr/core/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/slackmgr/core/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/slackmgr/core/compare/v0.24.0...v0.25.0
