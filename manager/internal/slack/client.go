@@ -81,6 +81,7 @@ type slackAPI interface {
 	GetUserInfo(ctx context.Context, userID string) (*slack.User, error)
 	ListUserGroupMembers(ctx context.Context, groupID string) (map[string]struct{}, error)
 	BotIsInChannel(ctx context.Context, channelID string) (bool, error)
+	BotUserID() string
 }
 
 type Client struct {
@@ -589,6 +590,11 @@ func (c *Client) DeletePost(ctx context.Context, channelID, ts string) error {
 	c.historyCache.removeMessage(channelID, ts)
 
 	return nil
+}
+
+// BotUserID returns the Slack user ID of the bot, as reported by auth.test.
+func (c *Client) BotUserID() string {
+	return c.api.BotUserID()
 }
 
 func (c *Client) IsAlertChannel(ctx context.Context, channelID string) (bool, string, error) {

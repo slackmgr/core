@@ -59,6 +59,10 @@ func (c *reactionsController) reactionAdded(ctx context.Context, evt *socketmode
 		return
 	}
 
+	if c.isForeignPost(reactionAddedEvent.Item.Channel, reactionAddedEvent.Item.Timestamp, reactionAddedEvent.Reaction, reactionAddedEvent.ItemUser) {
+		return
+	}
+
 	reaction := c.managerSettings.GetSettings().MapSlackPostReaction(reactionAddedEvent.Reaction)
 
 	c.logger.Debugf("Registered added reaction '%s', mapped to '%s'", reactionAddedEvent.Reaction, reaction)
@@ -94,6 +98,10 @@ func (c *reactionsController) reactionRemoved(ctx context.Context, evt *socketmo
 		return
 	}
 
+	if c.isForeignPost(reactionRemovedEvent.Item.Channel, reactionRemovedEvent.Item.Timestamp, reactionRemovedEvent.Reaction, reactionRemovedEvent.ItemUser) {
+		return
+	}
+
 	reaction := c.managerSettings.GetSettings().MapSlackPostReaction(reactionRemovedEvent.Reaction)
 
 	c.logger.Debugf("Registered removed reaction '%s', mapped to '%s'", reactionRemovedEvent.Reaction, reaction)
@@ -111,6 +119,20 @@ func (c *reactionsController) reactionRemoved(ctx context.Context, evt *socketmo
 		// This can't really happen (we can't un-terminate an issue)
 	default:
 	}
+}
+
+// isForeignPost reports whether the reacted-to post was created by someone other than this app's bot user
+// (e.g. another Slack app). Reactions on such posts are ignored, since the app can't manage them. An empty itemUser
+// (Slack omits item_user for some messages, such as incoming webhook posts) is not treated as foreign.
+func (c *reactionsController) isForeignPost(channelID, postTS, reaction, itemUser string) bool {
+	if itemUser == "" || itemUser == c.apiClient.BotUserID() {
+		return false
+	}
+
+	c.logger.WithField("channel_id", channelID).WithField("slack_post_id", postTS).WithField("reaction", reaction).
+		WithField("item_user", itemUser).Debug("Ignoring reaction to post not owned by this app")
+
+	return true
 }
 
 func (c *reactionsController) sendReactionAddedCommand(ctx context.Context, evt *slackevents.ReactionAddedEvent, action models.CommandAction, requireChannelAdmin bool) {

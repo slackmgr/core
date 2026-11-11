@@ -105,6 +105,11 @@ func (m *mockSlackAPIClient) IsAlertChannel(ctx context.Context, channelID strin
 	return args.Bool(0), args.String(1), args.Error(2)
 }
 
+func (m *mockSlackAPIClient) BotUserID() string {
+	args := m.Called()
+	return args.String(0)
+}
+
 // mockFifoQueueProducer implements FifoQueueProducer for testing.
 type mockFifoQueueProducer struct {
 	mock.Mock

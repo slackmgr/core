@@ -99,3 +99,19 @@ func TestFormatAlertCount(t *testing.T) {
 		})
 	}
 }
+
+// botUserIDSlackAPI is a [slackAPI] that only implements BotUserID.
+type botUserIDSlackAPI struct {
+	slackAPI // Unused methods panic
+
+	botUserID string
+}
+
+func (a *botUserIDSlackAPI) BotUserID() string { return a.botUserID }
+
+func TestClient_BotUserID(t *testing.T) {
+	t.Parallel()
+
+	c := &Client{api: &botUserIDSlackAPI{botUserID: "UBOT"}}
+	assert.Equal(t, "UBOT", c.BotUserID())
+}

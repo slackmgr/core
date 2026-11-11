@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -9,8 +10,12 @@ import (
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+	"github.com/slackmgr/core/config"
 	"github.com/slackmgr/core/internal"
+	"github.com/slackmgr/core/internal/models"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestReactionsController_reactionAdded(t *testing.T) {
@@ -515,6 +520,119 @@ func TestReactionsController_sendReactionAddedCommand(t *testing.T) {
 		logger.AssertExpectations(t)
 		commandQueue.AssertExpectations(t)
 	})
+}
+
+func TestReactionsController_postOwnership(t *testing.T) {
+	t.Parallel()
+
+	const botUserID = "UBOT"
+
+	tests := []struct {
+		name         string
+		removed      bool
+		reaction     string
+		itemUser     string
+		expectedCall bool
+	}{
+		{name: "added on post owned by bot sends command", reaction: "eyes", itemUser: botUserID, expectedCall: true},
+		{name: "added on post owned by other app is ignored", reaction: "skull", itemUser: "UOTHERAPP"},
+		{name: "added on post owned by other app is ignored for non-command reaction", reaction: "unknown", itemUser: "UOTHERAPP"},
+		{name: "added with empty item user sends command", reaction: "eyes", itemUser: "", expectedCall: true},
+		{name: "removed on post owned by bot sends command", removed: true, reaction: "eyes", itemUser: botUserID, expectedCall: true},
+		{name: "removed on post owned by other app is ignored", removed: true, reaction: "eyes", itemUser: "UOTHERAPP"},
+		{name: "removed with empty item user sends command", removed: true, reaction: "eyes", itemUser: "", expectedCall: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			logger := &mockLogger{}
+			logger.On("Debugf", mock.Anything, mock.Anything).Maybe()
+			logger.On("Info", "User reaction to message in managed channel").Maybe()
+			logger.On("Debug", "Ignoring reaction to post not owned by this app").Maybe()
+
+			client := newMockSocketModeClient()
+			req := socketmode.Request{EnvelopeID: "test-envelope"}
+			client.On("Ack", &req).Once()
+
+			apiClient := &mockSlackAPIClient{}
+			if tt.itemUser != "" {
+				apiClient.On("BotUserID").Return(botUserID).Once()
+			}
+			if tt.expectedCall {
+				apiClient.On("IsAlertChannel", mock.Anything, "C12345").Return(true, "", nil).Once()
+				apiClient.On("GetUserInfo", mock.Anything, "U12345").Return(&slack.User{ID: "U12345", RealName: "Test User"}, nil).Once()
+			}
+
+			commandQueue := &mockFifoQueueProducer{}
+			var sentBody string
+			if tt.expectedCall {
+				commandQueue.On("Send", mock.Anything, "C12345", mock.AnythingOfType("string"), mock.AnythingOfType("string")).
+					Run(func(args mock.Arguments) { sentBody = args.String(3) }).Return(nil).Once()
+			}
+
+			controller := newReactionsController(client, apiClient, commandQueue, nil, logger, nil, newInitializedTestManagerSettings(t))
+
+			item := slackevents.Item{Channel: "C12345", Timestamp: "1234567890.123456"}
+			var data any
+			if tt.removed {
+				data = &slackevents.ReactionRemovedEvent{Reaction: tt.reaction, User: "U12345", ItemUser: tt.itemUser, Item: item}
+			} else {
+				data = &slackevents.ReactionAddedEvent{Reaction: tt.reaction, User: "U12345", ItemUser: tt.itemUser, Item: item}
+			}
+
+			evt := &socketmode.Event{
+				Type:    socketmode.EventTypeEventsAPI,
+				Data:    slackevents.EventsAPIEvent{InnerEvent: slackevents.EventsAPIInnerEvent{Data: data}},
+				Request: &req,
+			}
+
+			if tt.removed {
+				controller.reactionRemoved(context.Background(), evt)
+			} else {
+				controller.reactionAdded(context.Background(), evt)
+			}
+
+			client.AssertExpectations(t)
+			apiClient.AssertExpectations(t)
+			commandQueue.AssertExpectations(t)
+
+			if tt.expectedCall {
+				expectedAction := models.CommandActionInvestigateIssue
+				if tt.removed {
+					expectedAction = models.CommandActionUninvestigateIssue
+				}
+
+				var cmd models.Command
+				require.NoError(t, json.Unmarshal([]byte(sentBody), &cmd))
+				assert.Equal(t, expectedAction, cmd.Action)
+				assert.Equal(t, "1234567890.123456", cmd.SlackPostID)
+				logger.AssertNotCalled(t, "Debug", "Ignoring reaction to post not owned by this app")
+			} else {
+				apiClient.AssertNotCalled(t, "IsAlertChannel", mock.Anything, mock.Anything)
+				apiClient.AssertNotCalled(t, "GetUserInfo", mock.Anything, mock.Anything)
+				apiClient.AssertNotCalled(t, "PostEphemeral", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+				commandQueue.AssertNotCalled(t, "Send", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+				logger.AssertCalled(t, "Debug", "Ignoring reaction to post not owned by this app")
+				logger.AssertNotCalled(t, "Debugf", mock.Anything, mock.Anything)
+			}
+		})
+	}
+}
+
+func newInitializedTestManagerSettings(t *testing.T) *models.ManagerSettingsWrapper {
+	t.Helper()
+
+	settings := &config.ManagerSettings{
+		IssueReactions: &config.IssueReactionSettings{
+			TerminateEmojis:   []string{":skull:"},
+			InvestigateEmojis: []string{":eyes:"},
+		},
+	}
+	require.NoError(t, settings.InitAndValidate())
+
+	return models.NewManagerSettingsWrapper(settings)
 }
 
 // Unused import guard for time package

@@ -13,4 +13,5 @@ type SlackAPIClient interface {
 	SendResponse(ctx context.Context, channelID, responseURL, responseType, text string) error
 	OpenModal(ctx context.Context, triggerID string, request slackapi.ModalViewRequest) error
 	IsAlertChannel(ctx context.Context, channelID string) (bool, string, error)
+	BotUserID() string
 }

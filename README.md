@@ -43,7 +43,7 @@ Users interact with issues by reacting with emojis directly on the Slack post â€
 | `:firecracker:` | Terminate â€” archive the issue immediately, regardless of its state |
 | `:information_source:` | Toggle the visibility of interactive action buttons on the post |
 
-Removing a reaction reverses the action: unreacting `:white_check_mark:` reopens the issue, unreacting `:eyes:` removes your name, and so on. Resolve, mute, and terminate require admin rights; marking yourself as investigating is open to anyone in the channel. All emoji triggers are configurable, so teams can remap actions to whichever emojis fit their workflow.
+Removing a reaction reverses the action: unreacting `:white_check_mark:` reopens the issue, unreacting `:eyes:` removes your name, and so on. Resolve, mute, and terminate require admin rights; marking yourself as investigating is open to anyone in the channel. All emoji triggers are configurable, so teams can remap actions to whichever emojis fit their workflow. Reactions on posts not created by the app itself (for example, posts from another Slack app) are ignored.
 
 ### Alert Routing via Route Keys
 
