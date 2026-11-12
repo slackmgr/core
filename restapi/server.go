@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -687,9 +688,26 @@ type rateLimitInfo struct {
 }
 
 func (s *Server) setRateLimitHeaders(c *gin.Context, info rateLimitInfo) {
+	c.Header("Ratelimit-Policy", rateLimitPolicy(s.cfg.RateLimitPerAlertChannel))
 	c.Header("Ratelimit-Limit", strconv.Itoa(info.limit))
 	c.Header("Ratelimit-Remaining", strconv.Itoa(info.remaining))
 	c.Header("Ratelimit-Reset", strconv.Itoa(info.resetSecs))
+}
+
+// rateLimitPolicyName is the name of the per-channel quota policy in the RateLimit-Policy header.
+const rateLimitPolicyName = "channel"
+
+// rateLimitPolicy returns the RateLimit-Policy header value (IETF draft-ietf-httpapi-ratelimit-headers-11) for
+// the per-channel token bucket, e.g. `"channel";q=30;w=30` for 1 alert per second with a burst of 30.
+//
+// The window is the time to refill an empty bucket, in whole seconds (at least 1), and the quota is the number of
+// alerts refilled in that window. So q/w is the refill rate, as exact as whole numbers allow, and q equals the
+// burst whenever the refill time is a whole number of seconds. The burst itself is in the RateLimit-Limit header.
+func rateLimitPolicy(cfg *config.RateLimitConfig) string {
+	window := max(1, math.Round(float64(cfg.AllowedBurst)/cfg.AlertsPerSecond))
+	quota := math.Round(cfg.AlertsPerSecond * window)
+
+	return fmt.Sprintf("%q;q=%d;w=%d", rateLimitPolicyName, int64(quota), int64(window))
 }
 
 // ceilSeconds rounds d up to whole seconds.

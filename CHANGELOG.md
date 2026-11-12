@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `RateLimit-Policy` header (IETF `draft-ietf-httpapi-ratelimit-headers-11`) on `POST /alert` responses that carry the `RateLimit-*` headers, describing the per-channel quota as `"channel";q=<quota>;w=<window seconds>`, where `q/w` is the refill rate
+
+### Changed
+- HTTP 429 (rate limited) responses are no longer reported to the error report channel (`ErrorReportChannelID`)
+
 ## [0.27.0] - 2026-11-12
 
 ### Added

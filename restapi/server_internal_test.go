@@ -776,6 +776,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 		assert.Equal(t, http.StatusTooManyRequests, w.Code)
 		assertJSONError(t, w, "Rate limit exceeded")
 		assert.NotEmpty(t, w.Header().Get("Retry-After"))
+		assert.NotEmpty(t, w.Header().Get("Ratelimit-Policy"))
 		assert.NotEmpty(t, w.Header().Get("Ratelimit-Limit"))
 		assert.Equal(t, "0", w.Header().Get("Ratelimit-Remaining"))
 		assert.NotEmpty(t, w.Header().Get("Ratelimit-Reset"))
@@ -879,6 +880,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusAccepted, w.Code)
+		assert.Equal(t, `"channel";q=100;w=1`, w.Header().Get("Ratelimit-Policy"))
 		assert.Equal(t, "10", w.Header().Get("Ratelimit-Limit"))
 		assert.NotEmpty(t, w.Header().Get("Ratelimit-Remaining"))
 		assert.NotEmpty(t, w.Header().Get("Ratelimit-Reset"))
@@ -910,6 +912,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 
 		assert.Equal(t, http.StatusAccepted, w.Code)
 		assert.Empty(t, w.Header().Get("Ratelimit-Limit"))
+		assert.Empty(t, w.Header().Get("Ratelimit-Policy"))
 		queue.AssertNumberOfCalls(t, "Send", 1)
 	})
 
@@ -2812,4 +2815,30 @@ func TestChannelInfoSyncer_RunUsesRefreshInterval(t *testing.T) {
 	info, found := syncer.getCachedInfo("C1")
 	require.True(t, found, "refreshed by the background loop")
 	assert.Equal(t, "alerts", info.Name)
+}
+
+func TestRateLimitPolicy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		rate     float64
+		burst    int
+		expected string
+	}{
+		{"defaults", 1, 30, `"channel";q=30;w=30`},
+		{"fractional rate", 0.5, 30, `"channel";q=30;w=60`},
+		{"refill time not whole seconds", 0.7, 30, `"channel";q=30;w=43`},
+		{"refill faster than a second", 100, 10, `"channel";q=100;w=1`},
+		{"slow rate", 0.01, 1, `"channel";q=1;w=100`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := rateLimitPolicy(&config.RateLimitConfig{AlertsPerSecond: tt.rate, AllowedBurst: tt.burst})
+			assert.Equal(t, tt.expected, got)
+		})
+	}
 }
