@@ -580,7 +580,8 @@ func (s *Server) writeErrorResponse(c *gin.Context, err error, statusCode int, a
 
 	c.JSON(statusCode, errorResponse{Error: errorMsg})
 
-	if s.cfg.ErrorReportChannelID != "" {
+	// Rate limit rejections (429) are expected under load and too noisy for the error report channel.
+	if s.cfg.ErrorReportChannelID != "" && statusCode != http.StatusTooManyRequests {
 		targetChannel := debugGetAlertChannelOrRouteKey(c, alert)
 		debugFields := debugGetAlertFields(alert)
 

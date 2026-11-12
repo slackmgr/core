@@ -129,7 +129,7 @@ type APIConfig struct {
 	MetricsPrefix string `json:"metricsPrefix" mapstructure:"metricsPrefix" yaml:"metricsPrefix"`
 
 	// ErrorReportChannelID is the Slack channel where the API posts error reports for
-	// failed requests (4xx and 5xx responses). This is useful for monitoring API health
+	// failed requests (4xx and 5xx responses, except 429 rate limit rejections). This is useful for monitoring API health
 	// and debugging integration issues. Leave empty to disable error reporting.
 	// The channel must exist and the bot must be a member.
 	ErrorReportChannelID string `json:"errorReportChannelId" mapstructure:"errorReportChannelId" yaml:"errorReportChannelId"`

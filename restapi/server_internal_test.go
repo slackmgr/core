@@ -781,6 +781,38 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 		assert.NotEmpty(t, w.Header().Get("Ratelimit-Reset"))
 	})
 
+	t.Run("does not report 429 to ErrorReportChannelID", func(t *testing.T) {
+		t.Parallel()
+
+		server, queue, channelInfo := newTestServer(t)
+		server.cfg.ErrorReportChannelID = "C-errors"
+		server.cfg.RateLimitPerAlertChannel.AlertsPerSecond = 0.001
+		server.cfg.RateLimitPerAlertChannel.AllowedBurst = 1
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: true,
+			UserCount:          10,
+		}, nil)
+
+		res, err := server.alertRateLimiter.Take(t.Context(), "C123", 1, *server.cfg.RateLimitPerAlertChannel)
+		require.NoError(t, err)
+		require.True(t, res.Allowed)
+
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		body, _ := json.Marshal(types.Alert{SlackChannelID: "C123", Header: "Test Alert"})
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusTooManyRequests, w.Code)
+		queue.AssertNotCalled(t, "Send", mock.Anything, "C-errors", mock.Anything, mock.Anything)
+	})
+
 	t.Run("accepts alerts within burst limit", func(t *testing.T) {
 		t.Parallel()
 
