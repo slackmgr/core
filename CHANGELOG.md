@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-12
+
 ### Added
 - `RateLimit-Policy` header (IETF `draft-ietf-httpapi-ratelimit-headers-11`) on `POST /alert` responses that carry the `RateLimit-*` headers, describing the per-channel quota as `"channel";q=<quota>;w=<window seconds>`, where `q/w` is the refill rate
 
@@ -630,7 +632,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/slackmgr/core/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/slackmgr/core/compare/v0.26.2...v0.27.0
 [0.26.2]: https://github.com/slackmgr/core/compare/v0.26.1...v0.26.2
 [0.26.1]: https://github.com/slackmgr/core/compare/v0.26.0...v0.26.1
