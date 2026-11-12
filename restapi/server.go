@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net"
 	"net/http"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -666,18 +668,19 @@ func (s *Server) queueAlert(ctx context.Context, alert *types.Alert) error {
 	return nil
 }
 
-// checkRateLimit takes count tokens from the rate limiter of channel. If the rate limiter fails,
-// the alerts are allowed (fail open), and the returned bool is false, since the result holds no limiter state.
-func (s *Server) checkRateLimit(ctx context.Context, channel string, count int) (RateLimitResult, bool) {
-	result, err := s.alertRateLimiter.Take(ctx, channel, count, *s.cfg.RateLimitPerAlertChannel)
+// checkRateLimit takes the tokens of all channels in counts (channel -> number of alerts) at once. If the rate
+// limiter fails, the alerts are allowed (fail open), and the returned bool is false, since the results hold no
+// limiter state.
+func (s *Server) checkRateLimit(ctx context.Context, counts map[string]int) (map[string]RateLimitResult, bool) {
+	results, err := s.alertRateLimiter.TakeAll(ctx, counts, *s.cfg.RateLimitPerAlertChannel)
 	if err != nil {
 		s.metrics.CounterInc(alertRateLimiterErrorsMetric)
-		s.logger.WithField("channel_id", channel).WithField("error", err.Error()).Errorf("Alert rate limit check failed, allowing %d alert(s)", count)
+		s.logger.WithField("channel_ids", strings.Join(slices.Sorted(maps.Keys(counts)), ",")).WithField("error", err.Error()).Errorf("Alert rate limit check failed, allowing the alerts of %d channel(s)", len(counts))
 
-		return RateLimitResult{Allowed: true}, false
+		return nil, false
 	}
 
-	return result, true
+	return results, true
 }
 
 // rateLimitInfo holds a snapshot of the rate limiter state for RateLimit-* headers.

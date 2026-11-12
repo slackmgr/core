@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** `AlertRateLimiter.Take` is replaced by `TakeAll(ctx, counts map[string]int, limit)`, which takes the tokens of all channels of a request at once: either all, or none. Custom `AlertRateLimiter` implementations must be updated
+- `POST /alert` validates all alerts and channels, encrypts webhook payloads and checks the rate limits of all channels before queuing any alert. A request is rate limited as a whole: previously, the alerts for some channels could be queued before another channel was rate limited, so that a client retrying the 429 duplicated them. `Retry-After` is the wait until all channels have enough tokens. `http_alerts_rate_limited_total` is incremented for each channel with too few tokens
+- `RedisAlertRateLimiter` checks all channels of a request with one Lua script call. Its keys are now `<keyPrefix>{alert-rate-limit}:<channel>` (with a hash tag, so that the script works on Redis Cluster). The buckets start full once after the upgrade, and the old keys expire on their own
+
 ## [0.28.0] - 2026-11-12
 
 ### Added

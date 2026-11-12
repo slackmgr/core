@@ -19,24 +19,29 @@ const localLimiterSweepInterval = time.Minute
 // Use [RedisAlertRateLimiter] (via [Server.WithAlertRateLimiter]) to share the limit between all
 // API instances, so that the configured rate is the total cap per channel.
 type AlertRateLimiter interface {
-	// Take attempts to take count tokens from the token bucket of the given channel, using the
-	// rate and burst of limit. Either all count tokens are taken, or none.
+	// TakeAll attempts to take tokens from the token buckets of all channels of a request at once,
+	// using the rate and burst of limit. counts maps each channel to its number of tokens. Either the
+	// tokens of all channels are taken, or none, so that a request is accepted or rejected as a whole.
+	//
+	// The result has an entry for each channel in counts. Allowed is the same for all entries: true if
+	// the tokens were taken. When it is false, RetryAfter is set for the channels with too few tokens,
+	// and zero for the others.
 	//
 	// An error means the limit could not be checked. The [Server] then allows the alerts (fails open).
-	Take(ctx context.Context, channel string, count int, limit config.RateLimitConfig) (RateLimitResult, error)
+	TakeAll(ctx context.Context, counts map[string]int, limit config.RateLimitConfig) (map[string]RateLimitResult, error)
 }
 
-// RateLimitResult is the outcome of an [AlertRateLimiter.Take] call.
+// RateLimitResult is the outcome of an [AlertRateLimiter.TakeAll] call for one channel.
 type RateLimitResult struct {
-	// Allowed is true if the tokens were taken.
+	// Allowed is true if the tokens were taken (for all channels of the call).
 	Allowed bool
 
 	// Remaining is the number of whole tokens left in the bucket after the call.
 	Remaining int
 
-	// RetryAfter is how long to wait until count tokens are available. It is only set when
-	// Allowed is false. It is capped at 24 hours when count tokens can never be available
-	// (count is larger than the burst).
+	// RetryAfter is how long to wait until the channel has enough tokens. It is only set when
+	// Allowed is false, and the channel has too few tokens. It is capped at 24 hours when the
+	// tokens can never be available (the count is larger than the burst).
 	RetryAfter time.Duration
 
 	// Reset is how long until the bucket is full again.
@@ -64,8 +69,8 @@ func NewLocalAlertRateLimiter() *LocalAlertRateLimiter {
 	}
 }
 
-// Take implements [AlertRateLimiter]. It never returns an error.
-func (l *LocalAlertRateLimiter) Take(_ context.Context, channel string, count int, limit config.RateLimitConfig) (RateLimitResult, error) {
+// TakeAll implements [AlertRateLimiter]. It never returns an error.
+func (l *LocalAlertRateLimiter) TakeAll(_ context.Context, counts map[string]int, limit config.RateLimitConfig) (map[string]RateLimitResult, error) {
 	now := l.now()
 
 	l.mu.Lock()
@@ -73,26 +78,44 @@ func (l *LocalAlertRateLimiter) Take(_ context.Context, channel string, count in
 
 	l.sweep(now)
 
-	lim, ok := l.limiters[channel]
-	if !ok {
-		lim = rate.NewLimiter(rate.Limit(limit.AlertsPerSecond), limit.AllowedBurst)
-		l.limiters[channel] = lim
-	}
+	reservations := make(map[string]*rate.Reservation, len(counts))
+	retryAfter := make(map[string]time.Duration, len(counts))
+	allowed := true
 
-	r := lim.ReserveN(now, count)
-	delay := r.DelayFrom(now)
-
-	if !r.OK() || delay > 0 {
-		r.CancelAt(now)
-
-		if !r.OK() {
-			delay = maxRetryAfterDelay
+	for channel, count := range counts {
+		lim, ok := l.limiters[channel]
+		if !ok {
+			lim = rate.NewLimiter(rate.Limit(limit.AlertsPerSecond), limit.AllowedBurst)
+			l.limiters[channel] = lim
 		}
 
-		return newLocalResult(lim, now, false, delay), nil
+		r := lim.ReserveN(now, count)
+		reservations[channel] = r
+
+		switch {
+		case !r.OK():
+			retryAfter[channel] = maxRetryAfterDelay
+			allowed = false
+		case r.DelayFrom(now) > 0:
+			retryAfter[channel] = r.DelayFrom(now)
+			allowed = false
+		}
 	}
 
-	return newLocalResult(lim, now, true, 0), nil
+	if !allowed {
+		// Return the tokens of all channels, including those that had enough.
+		for _, r := range reservations {
+			r.CancelAt(now)
+		}
+	}
+
+	results := make(map[string]RateLimitResult, len(counts))
+
+	for channel := range counts {
+		results[channel] = newLocalResult(l.limiters[channel], now, allowed, retryAfter[channel])
+	}
+
+	return results, nil
 }
 
 // sweep removes the limiters with a full bucket. A full bucket is identical to a new one, so

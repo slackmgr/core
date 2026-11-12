@@ -63,8 +63,9 @@ func (s *Server) handleAlerts(c *gin.Context) {
 // processAlerts validates, filters, rate limits and queues the alerts of a single request.
 // If any alert fails, the request fails, and all alerts not yet queued are counted as rejected.
 //
-// Note: alerts are queued channel by channel, so a failure for one channel (e.g. rate limiting) may happen after
-// alerts for another channel in the same request have already been queued.
+// All alerts are validated, and the rate limits of all channels are checked at once, before any alert is queued.
+// So a validation or rate limit failure rejects the request as a whole, and a client can retry it without
+// duplicating alerts. Only a queue error can fail a request after some of its alerts have been queued.
 func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started time.Time) {
 	if len(alerts) == 0 {
 		err := errors.New("request contains no alerts")
@@ -146,8 +147,9 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 		}
 	}
 
-	// Track the most constrained channel for RateLimit-* informational headers.
-	var tightest *rateLimitInfo
+	// Look up and validate all channels, and encrypt the webhook payloads, before taking any rate limit tokens.
+	counts := make(map[string]int, len(alertsByChannel))
+	channelNames := make(map[string]string, len(alertsByChannel))
 
 	for channel, channelAlerts := range alertsByChannel {
 		channelInfo, err := s.channelInfoProvider.GetChannelInfo(c.Request.Context(), channel)
@@ -160,40 +162,6 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 		if err := s.validateChannelInfo(channel, channelInfo); err != nil {
 			reject(rejectReasonOf(err, rejectReasonValidation), err, http.StatusBadRequest, channelAlerts[0])
 			return
-		}
-
-		alertCount := len(channelAlerts)
-
-		rl, rlOK := s.checkRateLimit(c.Request.Context(), channel, alertCount)
-
-		if !rl.Allowed {
-			err := fmt.Errorf("rate limit exceeded for %d alerts in channel %s", alertCount, channel)
-			retrySecs := ceilSeconds(rl.RetryAfter)
-			c.Header("Retry-After", fmt.Sprintf("%d", retrySecs))
-			s.setRateLimitHeaders(c, rateLimitInfo{
-				limit:     s.cfg.RateLimitPerAlertChannel.AllowedBurst,
-				remaining: 0,
-				resetSecs: retrySecs,
-			})
-			channelLabel := channelInfo.Name
-			if channelLabel == "" {
-				channelLabel = channel
-			}
-			s.metrics.CounterInc(httpAlertsRateLimitedMetric, channelLabel)
-			reject(rejectReasonRateLimited, err, http.StatusTooManyRequests, channelAlerts[0])
-			return
-		}
-
-		// Track the limiter state after tokens are consumed. Skipped when the check failed open.
-		if rlOK {
-			info := rateLimitInfo{
-				limit:     s.cfg.RateLimitPerAlertChannel.AllowedBurst,
-				remaining: rl.Remaining,
-				resetSecs: ceilSeconds(rl.Reset),
-			}
-			if tightest == nil || info.remaining < tightest.remaining {
-				tightest = &info
-			}
 		}
 
 		for _, alert := range channelAlerts {
@@ -210,7 +178,63 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 					return
 				}
 			}
+		}
 
+		counts[channel] = len(channelAlerts)
+		channelNames[channel] = channelInfo.Name
+	}
+
+	// Take the tokens of all channels at once: the request is accepted or rate limited as a whole.
+	results, rlOK := s.checkRateLimit(c.Request.Context(), counts)
+
+	if limited, ok := mostLimitedChannel(results); ok {
+		rl := results[limited]
+		err := fmt.Errorf("rate limit exceeded for %d alerts in channel %s", counts[limited], limited)
+		retrySecs := ceilSeconds(rl.RetryAfter)
+		c.Header("Retry-After", fmt.Sprintf("%d", retrySecs))
+		s.setRateLimitHeaders(c, rateLimitInfo{
+			limit:     s.cfg.RateLimitPerAlertChannel.AllowedBurst,
+			remaining: 0,
+			resetSecs: retrySecs,
+		})
+
+		// Count each channel with too few tokens.
+		for channel, res := range results {
+			if res.Allowed || (res.RetryAfter <= 0 && channel != limited) {
+				continue
+			}
+
+			channelLabel := channelNames[channel]
+			if channelLabel == "" {
+				channelLabel = channel
+			}
+
+			s.metrics.CounterInc(httpAlertsRateLimitedMetric, channelLabel)
+		}
+
+		reject(rejectReasonRateLimited, err, http.StatusTooManyRequests, alertsByChannel[limited][0])
+
+		return
+	}
+
+	// Track the most constrained channel for RateLimit-* informational headers. Skipped when the check failed open.
+	var tightest *rateLimitInfo
+
+	if rlOK {
+		for _, rl := range results {
+			info := rateLimitInfo{
+				limit:     s.cfg.RateLimitPerAlertChannel.AllowedBurst,
+				remaining: rl.Remaining,
+				resetSecs: ceilSeconds(rl.Reset),
+			}
+			if tightest == nil || info.remaining < tightest.remaining {
+				tightest = &info
+			}
+		}
+	}
+
+	for _, channelAlerts := range alertsByChannel {
+		for _, alert := range channelAlerts {
 			if err := s.queueAlert(c.Request.Context(), alert); err != nil {
 				reject(rejectReasonQueueError, err, http.StatusInternalServerError, alert)
 				return
@@ -501,4 +525,23 @@ func parseAlertInput(body []byte) ([]*types.Alert, error) {
 
 	// Nothing in the alerts array -> assume the input is a single alert, with all fields at the root level.
 	return []*types.Alert{&input.Alert}, nil
+}
+
+// mostLimitedChannel returns the rate limited channel with the longest RetryAfter, i.e. the wait until the whole
+// request can be accepted. Ties are broken by the channel ID, so that the choice does not depend on the map order.
+// It returns false if the request is allowed.
+func mostLimitedChannel(results map[string]RateLimitResult) (string, bool) {
+	limited, found := "", false
+
+	for channel, res := range results {
+		if res.Allowed {
+			continue
+		}
+
+		if !found || res.RetryAfter > results[limited].RetryAfter || (res.RetryAfter == results[limited].RetryAfter && channel < limited) {
+			limited, found = channel, true
+		}
+	}
+
+	return limited, found
 }

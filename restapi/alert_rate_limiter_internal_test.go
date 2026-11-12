@@ -34,6 +34,16 @@ func (c *fakeClock) Advance(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
+// takeOne takes count tokens of a single channel.
+func takeOne(ctx context.Context, l AlertRateLimiter, channel string, count int, limit config.RateLimitConfig) (RateLimitResult, error) {
+	results, err := l.TakeAll(ctx, map[string]int{channel: count}, limit)
+	if err != nil {
+		return RateLimitResult{}, err
+	}
+
+	return results[channel], nil
+}
+
 func newTestLocalLimiter() (*LocalAlertRateLimiter, *fakeClock) {
 	clock := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 	l := NewLocalAlertRateLimiter()
@@ -42,7 +52,7 @@ func newTestLocalLimiter() (*LocalAlertRateLimiter, *fakeClock) {
 	return l, clock
 }
 
-func TestLocalAlertRateLimiter_Take(t *testing.T) {
+func TestLocalAlertRateLimiter_TakeAll(t *testing.T) {
 	t.Parallel()
 
 	limit := config.RateLimitConfig{AlertsPerSecond: 1, AllowedBurst: 10}
@@ -52,7 +62,7 @@ func TestLocalAlertRateLimiter_Take(t *testing.T) {
 
 		l, _ := newTestLocalLimiter()
 
-		res, err := l.Take(t.Context(), "C1", 4, limit)
+		res, err := takeOne(t.Context(), l, "C1", 4, limit)
 
 		require.NoError(t, err)
 		assert.True(t, res.Allowed)
@@ -66,18 +76,18 @@ func TestLocalAlertRateLimiter_Take(t *testing.T) {
 
 		l, _ := newTestLocalLimiter()
 
-		res, err := l.Take(t.Context(), "C1", 8, limit)
+		res, err := takeOne(t.Context(), l, "C1", 8, limit)
 		require.NoError(t, err)
 		require.True(t, res.Allowed)
 
-		res, err = l.Take(t.Context(), "C1", 5, limit)
+		res, err = takeOne(t.Context(), l, "C1", 5, limit)
 		require.NoError(t, err)
 		assert.False(t, res.Allowed)
 		assert.Equal(t, 2, res.Remaining)
 		assert.Equal(t, 3*time.Second, res.RetryAfter)
 
 		// The denied request took no tokens.
-		res, err = l.Take(t.Context(), "C1", 2, limit)
+		res, err = takeOne(t.Context(), l, "C1", 2, limit)
 		require.NoError(t, err)
 		assert.True(t, res.Allowed)
 		assert.Equal(t, 0, res.Remaining)
@@ -88,12 +98,12 @@ func TestLocalAlertRateLimiter_Take(t *testing.T) {
 
 		l, clock := newTestLocalLimiter()
 
-		_, err := l.Take(t.Context(), "C1", 10, limit)
+		_, err := takeOne(t.Context(), l, "C1", 10, limit)
 		require.NoError(t, err)
 
 		clock.Advance(3 * time.Second)
 
-		res, err := l.Take(t.Context(), "C1", 3, limit)
+		res, err := takeOne(t.Context(), l, "C1", 3, limit)
 		require.NoError(t, err)
 		assert.True(t, res.Allowed)
 		assert.Equal(t, 0, res.Remaining)
@@ -104,7 +114,7 @@ func TestLocalAlertRateLimiter_Take(t *testing.T) {
 
 		l, _ := newTestLocalLimiter()
 
-		res, err := l.Take(t.Context(), "C1", 11, limit)
+		res, err := takeOne(t.Context(), l, "C1", 11, limit)
 
 		require.NoError(t, err)
 		assert.False(t, res.Allowed)
@@ -116,12 +126,66 @@ func TestLocalAlertRateLimiter_Take(t *testing.T) {
 
 		l, _ := newTestLocalLimiter()
 
-		_, err := l.Take(t.Context(), "C1", 10, limit)
+		_, err := takeOne(t.Context(), l, "C1", 10, limit)
 		require.NoError(t, err)
 
-		res, err := l.Take(t.Context(), "C2", 10, limit)
+		res, err := takeOne(t.Context(), l, "C2", 10, limit)
 		require.NoError(t, err)
 		assert.True(t, res.Allowed)
+	})
+
+	t.Run("takes the tokens of all channels", func(t *testing.T) {
+		t.Parallel()
+
+		l, _ := newTestLocalLimiter()
+
+		results, err := l.TakeAll(t.Context(), map[string]int{"C1": 3, "C2": 5}, limit)
+
+		require.NoError(t, err)
+		assert.Equal(t, map[string]RateLimitResult{
+			"C1": {Allowed: true, Remaining: 7, Reset: 3 * time.Second},
+			"C2": {Allowed: true, Remaining: 5, Reset: 5 * time.Second},
+		}, results)
+	})
+
+	t.Run("takes no tokens if one channel is limited", func(t *testing.T) {
+		t.Parallel()
+
+		l, _ := newTestLocalLimiter()
+
+		_, err := takeOne(t.Context(), l, "C2", 8, limit)
+		require.NoError(t, err)
+
+		results, err := l.TakeAll(t.Context(), map[string]int{"C1": 4, "C2": 5}, limit)
+
+		require.NoError(t, err)
+		assert.Equal(t, map[string]RateLimitResult{
+			"C1": {Allowed: false, Remaining: 10},
+			"C2": {Allowed: false, Remaining: 2, RetryAfter: 3 * time.Second, Reset: 8 * time.Second},
+		}, results)
+
+		// C1 still has all its tokens, and C2 has the tokens left after the first call.
+		res, err := takeOne(t.Context(), l, "C1", 10, limit)
+		require.NoError(t, err)
+		assert.True(t, res.Allowed)
+
+		res, err = takeOne(t.Context(), l, "C2", 2, limit)
+		require.NoError(t, err)
+		assert.True(t, res.Allowed)
+	})
+
+	t.Run("takes no tokens if one channel exceeds the burst", func(t *testing.T) {
+		t.Parallel()
+
+		l, _ := newTestLocalLimiter()
+
+		results, err := l.TakeAll(t.Context(), map[string]int{"C1": 4, "C2": 11}, limit)
+
+		require.NoError(t, err)
+		assert.False(t, results["C1"].Allowed)
+		assert.Equal(t, time.Duration(0), results["C1"].RetryAfter)
+		assert.Equal(t, 10, results["C1"].Remaining)
+		assert.Equal(t, maxRetryAfterDelay, results["C2"].RetryAfter)
 	})
 }
 
@@ -132,16 +196,16 @@ func TestLocalAlertRateLimiter_Sweep(t *testing.T) {
 
 	l, clock := newTestLocalLimiter()
 
-	_, err := l.Take(t.Context(), "C_IDLE", 1, limit)
+	_, err := takeOne(t.Context(), l, "C_IDLE", 1, limit)
 	require.NoError(t, err)
-	_, err = l.Take(t.Context(), "C_BUSY", 100, limit)
+	_, err = takeOne(t.Context(), l, "C_BUSY", 100, limit)
 	require.NoError(t, err)
 	require.Equal(t, 2, l.size())
 
 	// After the sweep interval, C_IDLE is full again (1 token refilled), C_BUSY is not (100 tokens missing).
 	clock.Advance(localLimiterSweepInterval)
 
-	_, err = l.Take(t.Context(), "C_OTHER", 1, limit)
+	_, err = takeOne(t.Context(), l, "C_OTHER", 1, limit)
 	require.NoError(t, err)
 
 	l.mu.Lock()
@@ -153,14 +217,14 @@ func TestLocalAlertRateLimiter_Sweep(t *testing.T) {
 	assert.True(t, busyExists, "partially drained bucket should be kept")
 
 	// Removing C_IDLE does not change its limit: a new bucket is full, just like the removed one.
-	res, err := l.Take(t.Context(), "C_IDLE", 120, limit)
+	res, err := takeOne(t.Context(), l, "C_IDLE", 120, limit)
 	require.NoError(t, err)
 	assert.True(t, res.Allowed)
 
 	// No sweep before the interval has passed again.
 	clock.Advance(localLimiterSweepInterval / 2)
 
-	_, err = l.Take(t.Context(), "C_OTHER", 1, limit)
+	_, err = takeOne(t.Context(), l, "C_OTHER", 1, limit)
 	require.NoError(t, err)
 	assert.Equal(t, 3, l.size())
 }
@@ -191,48 +255,79 @@ func (m *mockScripter) result(ctx context.Context, args mock.Arguments) *redis.C
 	return cmd
 }
 
-func TestRedisAlertRateLimiter_Take(t *testing.T) {
+func TestRedisAlertRateLimiter_TakeAll(t *testing.T) {
 	t.Parallel()
 
 	limit := config.RateLimitConfig{AlertsPerSecond: 2, AllowedBurst: 30}
-	wantArgs := []any{2.0, 30, 5}
 
 	tests := []struct {
-		name    string
-		reply   any
-		err     error
-		want    RateLimitResult
-		wantErr string
+		name     string
+		counts   map[string]int
+		wantKeys []string
+		wantArgs []any
+		reply    any
+		err      error
+		want     map[string]RateLimitResult
+		wantErr  string
 	}{
 		{
-			name:  "allowed",
-			reply: []any{int64(1), int64(25), int64(0), int64(2_500_000)},
-			want:  RateLimitResult{Allowed: true, Remaining: 25, Reset: 2500 * time.Millisecond},
+			name:     "allowed",
+			counts:   map[string]int{"C1": 5},
+			wantKeys: []string{"prefix:{alert-rate-limit}:C1"},
+			wantArgs: []any{2.0, 30, 5},
+			reply:    []any{int64(1), int64(25), int64(0), int64(2_500_000)},
+			want:     map[string]RateLimitResult{"C1": {Allowed: true, Remaining: 25, Reset: 2500 * time.Millisecond}},
 		},
 		{
-			name:  "denied",
-			reply: []any{int64(0), int64(3), int64(1_000_000), int64(13_500_000)},
-			want:  RateLimitResult{Allowed: false, Remaining: 3, RetryAfter: time.Second, Reset: 13500 * time.Millisecond},
+			name:     "denied",
+			counts:   map[string]int{"C1": 5},
+			wantKeys: []string{"prefix:{alert-rate-limit}:C1"},
+			wantArgs: []any{2.0, 30, 5},
+			reply:    []any{int64(0), int64(3), int64(1_000_000), int64(13_500_000)},
+			want:     map[string]RateLimitResult{"C1": {Allowed: false, Remaining: 3, RetryAfter: time.Second, Reset: 13500 * time.Millisecond}},
 		},
 		{
-			name:  "denied forever",
-			reply: []any{int64(0), int64(30), int64(-1), int64(0)},
-			want:  RateLimitResult{Allowed: false, Remaining: 30, RetryAfter: maxRetryAfterDelay},
+			name:     "denied forever",
+			counts:   map[string]int{"C1": 5},
+			wantKeys: []string{"prefix:{alert-rate-limit}:C1"},
+			wantArgs: []any{2.0, 30, 5},
+			reply:    []any{int64(0), int64(30), int64(-1), int64(0)},
+			want:     map[string]RateLimitResult{"C1": {Allowed: false, Remaining: 30, RetryAfter: maxRetryAfterDelay}},
 		},
 		{
-			name:    "redis error",
-			err:     errors.New("connection refused"),
-			wantErr: "connection refused",
+			name:     "several channels, sorted",
+			counts:   map[string]int{"C2": 7, "C1": 5},
+			wantKeys: []string{"prefix:{alert-rate-limit}:C1", "prefix:{alert-rate-limit}:C2"},
+			wantArgs: []any{2.0, 30, 5, 7},
+			reply:    []any{int64(0), int64(20), int64(0), int64(5_000_000), int64(3), int64(2_000_000), int64(13_500_000)},
+			want: map[string]RateLimitResult{
+				"C1": {Allowed: false, Remaining: 20, Reset: 5 * time.Second},
+				"C2": {Allowed: false, Remaining: 3, RetryAfter: 2 * time.Second, Reset: 13500 * time.Millisecond},
+			},
 		},
 		{
-			name:    "unexpected reply length",
-			reply:   []any{int64(1)},
-			wantErr: "unexpected reply length 1",
+			name:     "redis error",
+			counts:   map[string]int{"C1": 5},
+			wantKeys: []string{"prefix:{alert-rate-limit}:C1"},
+			wantArgs: []any{2.0, 30, 5},
+			err:      errors.New("connection refused"),
+			wantErr:  "connection refused",
 		},
 		{
-			name:    "unexpected reply type",
-			reply:   "OK",
-			wantErr: "redis alert rate limiter",
+			name:     "unexpected reply length",
+			counts:   map[string]int{"C1": 5},
+			wantKeys: []string{"prefix:{alert-rate-limit}:C1"},
+			wantArgs: []any{2.0, 30, 5},
+			reply:    []any{int64(1)},
+			wantErr:  "unexpected reply length 1",
+		},
+		{
+			name:     "unexpected reply type",
+			counts:   map[string]int{"C1": 5},
+			wantKeys: []string{"prefix:{alert-rate-limit}:C1"},
+			wantArgs: []any{2.0, 30, 5},
+			reply:    "OK",
+			wantErr:  "redis alert rate limiter",
 		},
 	}
 
@@ -241,10 +336,10 @@ func TestRedisAlertRateLimiter_Take(t *testing.T) {
 			t.Parallel()
 
 			client := &mockScripter{}
-			client.On("EvalSha", []string{"prefix:alert-rate-limit:C1"}, wantArgs).Return(tt.reply, tt.err)
+			client.On("EvalSha", tt.wantKeys, tt.wantArgs).Return(tt.reply, tt.err)
 
 			l := NewRedisAlertRateLimiter(client, "prefix:")
-			res, err := l.Take(t.Context(), "C1", 5, limit)
+			results, err := l.TakeAll(t.Context(), tt.counts, limit)
 
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)
@@ -252,10 +347,23 @@ func TestRedisAlertRateLimiter_Take(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, tt.want, res)
+			assert.Equal(t, tt.want, results)
 			client.AssertExpectations(t)
 		})
 	}
+}
+
+func TestRedisAlertRateLimiter_TakeAllEmpty(t *testing.T) {
+	t.Parallel()
+
+	client := &mockScripter{}
+	l := NewRedisAlertRateLimiter(client, "")
+
+	results, err := l.TakeAll(t.Context(), nil, config.RateLimitConfig{AlertsPerSecond: 1, AllowedBurst: 1})
+
+	require.NoError(t, err)
+	assert.Empty(t, results)
+	client.AssertNotCalled(t, "EvalSha", mock.Anything, mock.Anything)
 }
 
 func TestRedisAlertRateLimiter_LoadsScriptWhenMissing(t *testing.T) {
@@ -266,7 +374,7 @@ func TestRedisAlertRateLimiter_LoadsScriptWhenMissing(t *testing.T) {
 	client.On("Eval", mock.Anything, mock.Anything).Return([]any{int64(1), int64(0), int64(0), int64(0)}, nil)
 
 	l := NewRedisAlertRateLimiter(client, "")
-	res, err := l.Take(t.Context(), "C1", 1, config.RateLimitConfig{AlertsPerSecond: 1, AllowedBurst: 1})
+	res, err := takeOne(t.Context(), l, "C1", 1, config.RateLimitConfig{AlertsPerSecond: 1, AllowedBurst: 1})
 
 	require.NoError(t, err)
 	assert.True(t, res.Allowed)
@@ -277,5 +385,5 @@ func TestNewRedisAlertRateLimiter_DefaultKeyPrefix(t *testing.T) {
 	t.Parallel()
 
 	l := NewRedisAlertRateLimiter(nil, "")
-	assert.Equal(t, config.DefaultKeyPrefix+"alert-rate-limit:C1", l.key("C1"))
+	assert.Equal(t, config.DefaultKeyPrefix+"{alert-rate-limit}:C1", l.key("C1"))
 }

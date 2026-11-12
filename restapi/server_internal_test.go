@@ -187,8 +187,8 @@ func newTestServer(t *testing.T) (*Server, *mockFifoQueueProducer, *mockChannelI
 // failingAlertRateLimiter is an AlertRateLimiter that always fails.
 type failingAlertRateLimiter struct{}
 
-func (failingAlertRateLimiter) Take(_ context.Context, _ string, _ int, _ config.RateLimitConfig) (RateLimitResult, error) {
-	return RateLimitResult{}, errors.New("redis unavailable")
+func (failingAlertRateLimiter) TakeAll(_ context.Context, _ map[string]int, _ config.RateLimitConfig) (map[string]RateLimitResult, error) {
+	return nil, errors.New("redis unavailable")
 }
 
 // --- Tests ---
@@ -756,7 +756,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 		}, nil)
 
 		// Exhaust the rate limit
-		res, err := server.alertRateLimiter.Take(t.Context(), "C123", 1, *server.cfg.RateLimitPerAlertChannel)
+		res, err := takeOne(t.Context(), server.alertRateLimiter, "C123", 1, *server.cfg.RateLimitPerAlertChannel)
 		require.NoError(t, err)
 		require.True(t, res.Allowed)
 
@@ -797,7 +797,7 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 			UserCount:          10,
 		}, nil)
 
-		res, err := server.alertRateLimiter.Take(t.Context(), "C123", 1, *server.cfg.RateLimitPerAlertChannel)
+		res, err := takeOne(t.Context(), server.alertRateLimiter, "C123", 1, *server.cfg.RateLimitPerAlertChannel)
 		require.NoError(t, err)
 		require.True(t, res.Allowed)
 
@@ -1239,18 +1239,19 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 func TestServer_CheckRateLimit(t *testing.T) {
 	t.Parallel()
 
-	t.Run("returns limiter result", func(t *testing.T) {
+	t.Run("returns limiter results", func(t *testing.T) {
 		t.Parallel()
 
 		server, _, _ := newTestServer(t)
 		server.cfg.RateLimitPerAlertChannel.AlertsPerSecond = 100
 		server.cfg.RateLimitPerAlertChannel.AllowedBurst = 100
 
-		res, ok := server.checkRateLimit(t.Context(), "C123", 5)
+		results, ok := server.checkRateLimit(t.Context(), map[string]int{"C123": 5, "C456": 10})
 
 		assert.True(t, ok)
-		assert.True(t, res.Allowed)
-		assert.Equal(t, 95, res.Remaining)
+		assert.True(t, results["C123"].Allowed)
+		assert.Equal(t, 95, results["C123"].Remaining)
+		assert.Equal(t, 90, results["C456"].Remaining)
 	})
 
 	t.Run("fails open and counts the error when the limiter fails", func(t *testing.T) {
@@ -1261,12 +1262,55 @@ func TestServer_CheckRateLimit(t *testing.T) {
 		server.metrics = metrics
 		server.WithAlertRateLimiter(failingAlertRateLimiter{})
 
-		res, ok := server.checkRateLimit(t.Context(), "C123", 5)
+		results, ok := server.checkRateLimit(t.Context(), map[string]int{"C123": 5})
 
 		assert.False(t, ok)
-		assert.True(t, res.Allowed)
+		assert.Nil(t, results)
 		assert.InDelta(t, 1.0, metrics.counter(alertRateLimiterErrorsMetric), 0)
 	})
+}
+
+func TestMostLimitedChannel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		results     map[string]RateLimitResult
+		wantChannel string
+		wantLimited bool
+	}{
+		{name: "no results (fail open)", results: nil},
+		{name: "allowed", results: map[string]RateLimitResult{"C1": {Allowed: true}, "C2": {Allowed: true}}},
+		{
+			name:        "longest retry after",
+			results:     map[string]RateLimitResult{"C1": {RetryAfter: time.Second}, "C2": {RetryAfter: 3 * time.Second}, "C3": {}},
+			wantChannel: "C2",
+			wantLimited: true,
+		},
+		{
+			name:        "ties broken by channel ID",
+			results:     map[string]RateLimitResult{"C3": {RetryAfter: time.Second}, "C1": {RetryAfter: time.Second}, "C2": {}},
+			wantChannel: "C1",
+			wantLimited: true,
+		},
+		{
+			name:        "denied without retry after",
+			results:     map[string]RateLimitResult{"C2": {}, "C1": {}},
+			wantChannel: "C1",
+			wantLimited: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			channel, limited := mostLimitedChannel(tt.results)
+
+			assert.Equal(t, tt.wantChannel, channel)
+			assert.Equal(t, tt.wantLimited, limited)
+		})
+	}
 }
 
 func TestServer_WithAlertRateLimiter(t *testing.T) {
@@ -2841,4 +2885,75 @@ func TestRateLimitPolicy(t *testing.T) {
 			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestServer_HandleAlerts_RateLimitsAllChannelsAtOnce(t *testing.T) {
+	t.Parallel()
+
+	server, queue, channelInfo := newTestServer(t)
+	metrics := newRecordingMetrics()
+	server.metrics = metrics
+	server.cfg.RateLimitPerAlertChannel.AlertsPerSecond = 0.001
+	server.cfg.RateLimitPerAlertChannel.AllowedBurst = 5
+
+	for _, channel := range []string{"C1", "C2"} {
+		channelInfo.On("MapChannelNameToIDIfNeeded", channel).Return(channel)
+		channelInfo.On("GetChannelInfo", mock.Anything, channel).Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: true,
+			UserCount:          10,
+			Name:               "name-" + channel,
+		}, nil)
+	}
+
+	queue.On("Send", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+	// C2 has 1 token left, so a request with 2 alerts for it is rate limited.
+	res, err := takeOne(t.Context(), server.alertRateLimiter, "C2", 4, *server.cfg.RateLimitPerAlertChannel)
+	require.NoError(t, err)
+	require.True(t, res.Allowed)
+
+	router := gin.New()
+	router.POST("/alert", server.handleAlerts)
+
+	post := func(alerts []types.Alert) *httptest.ResponseRecorder {
+		body, err := json.Marshal(alerts)
+		require.NoError(t, err)
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		return w
+	}
+
+	w := post([]types.Alert{
+		{SlackChannelID: "C1", Header: "Alert 1"},
+		{SlackChannelID: "C1", Header: "Alert 2"},
+		{SlackChannelID: "C2", Header: "Alert 3"},
+		{SlackChannelID: "C2", Header: "Alert 4"},
+	})
+
+	// The whole request is rejected: no alert is queued, not even those for C1.
+	assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	assertJSONError(t, w, "C2")
+	assert.Equal(t, "1000", w.Header().Get("Retry-After"))
+	assert.Equal(t, "0", w.Header().Get("Ratelimit-Remaining"))
+	queue.AssertNotCalled(t, "Send", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+	assert.InDelta(t, 1.0, metrics.counter(httpAlertsRateLimitedMetric, "name-C2"), 0)
+	assert.InDelta(t, 0.0, metrics.counter(httpAlertsRateLimitedMetric, "name-C1"), 0)
+
+	// C1 kept all its tokens.
+	w = post([]types.Alert{
+		{SlackChannelID: "C1", Header: "Alert 1"},
+		{SlackChannelID: "C1", Header: "Alert 2"},
+		{SlackChannelID: "C1", Header: "Alert 3"},
+		{SlackChannelID: "C1", Header: "Alert 4"},
+		{SlackChannelID: "C1", Header: "Alert 5"},
+	})
+
+	assert.Equal(t, http.StatusAccepted, w.Code)
+	assert.Equal(t, "0", w.Header().Get("Ratelimit-Remaining"))
+	queue.AssertNumberOfCalls(t, "Send", 5)
 }
