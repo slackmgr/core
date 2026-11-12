@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `restapi.AlertRateLimiter` interface and `Server.WithAlertRateLimiter`, to replace the per-channel alert rate limiter
+- `restapi.RedisAlertRateLimiter`: Redis-backed alert rate limiter shared by all API instances, so `rateLimitPerAlertChannel` is the total cap per channel regardless of the number of instances. If Redis is unavailable, alerts are allowed (fail open)
+- `http_alert_rate_limiter_errors_total` metric, counting failed rate limit checks. Shown in the new "Alert Rate Limiter Errors (fail open)" panel in the REST API row of the Grafana dashboard
+
+### Changed
+- The default in-process alert rate limiter is now the exported `restapi.LocalAlertRateLimiter`. The `RateLimit-*` headers are computed from the same atomic check that takes the tokens
+
+### Fixed
+- The in-process alert rate limiter kept a limiter for every channel that ever received an alert, for the lifetime of the process. Limiters of idle channels are now removed once their bucket is full again
+
 ## [0.26.2] - 2026-11-11
 
 ### Fixed

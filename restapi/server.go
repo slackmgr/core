@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,13 +26,13 @@ import (
 	"github.com/slackmgr/core/internal"
 	"github.com/slackmgr/types"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/time/rate"
 )
 
 const (
-	httpRequestMetric           = "http_server_request_duration_seconds"
-	httpInFlightMetric          = "http_server_requests_in_flight"
-	httpAlertsRateLimitedMetric = "http_alerts_rate_limited_total"
+	httpRequestMetric            = "http_server_request_duration_seconds"
+	httpInFlightMetric           = "http_server_requests_in_flight"
+	httpAlertsRateLimitedMetric  = "http_alerts_rate_limited_total"
+	alertRateLimiterErrorsMetric = "http_alert_rate_limiter_errors_total"
 )
 
 const (
@@ -41,7 +40,7 @@ const (
 	readHeaderTimeout  = 5 * time.Second
 	timeoutBuffer      = time.Second // wiggle room added to HTTP server timeouts
 	idleTimeout        = 60 * time.Second
-	maxRetryAfterDelay = 24 * time.Hour // cap for rate.InfDuration from ReserveN
+	maxRetryAfterDelay = 24 * time.Hour // Retry-After when the requested tokens can never be available
 )
 
 // FifoQueueConsumer is the read side of a FIFO queue. It is used by the [Server] to
@@ -75,8 +74,7 @@ type SlackClient interface {
 type Server struct {
 	rawAlertConsumers   []FifoQueueConsumer
 	alertQueue          FifoQueueProducer
-	limitersByChannel   map[string]*rate.Limiter
-	limitersLock        *sync.Mutex
+	alertRateLimiter    AlertRateLimiter
 	cacheStore          cachestore.StoreInterface
 	slackClient         SlackClient
 	channelInfoProvider ChannelInfoProvider
@@ -95,17 +93,17 @@ type Server struct {
 // Optional dependencies can be configured via method chaining before calling [Server.Run]:
 //   - [Server.WithCacheStore] — sets the cache store (defaults to in-process go-cache, unsuitable for multi-instance)
 //   - [Server.WithMetrics] — sets the metrics implementation (defaults to no-op)
+//   - [Server.WithAlertRateLimiter] — sets the per-channel alert rate limiter (defaults to in-process, per instance)
 //   - [Server.WithSettings] — sets the initial API settings (defaults to zero-value)
 func New(alertQueue FifoQueueProducer, logger types.Logger, cfg *config.APIConfig) *Server {
 	logger = internal.NewUniqueFieldsLogger(logger)
 
 	s := &Server{
-		alertQueue:        alertQueue,
-		limitersByChannel: make(map[string]*rate.Limiter),
-		limitersLock:      &sync.Mutex{},
-		logger:            logger,
-		metrics:           &types.NoopMetrics{},
-		cfg:               cfg,
+		alertQueue:       alertQueue,
+		alertRateLimiter: NewLocalAlertRateLimiter(),
+		logger:           logger,
+		metrics:          &types.NoopMetrics{},
+		cfg:              cfg,
 	}
 
 	s.apiSettings.Store(&config.APISettings{})
@@ -135,6 +133,21 @@ func (s *Server) WithCacheStore(cacheStore cachestore.StoreInterface) *Server {
 		return s
 	}
 	s.cacheStore = cacheStore
+	return s
+}
+
+// WithAlertRateLimiter sets the per-channel alert rate limiter. If not called, a
+// [LocalAlertRateLimiter] is used, which limits each API instance separately. Use a
+// [RedisAlertRateLimiter] to make APIConfig.RateLimitPerAlertChannel the total cap per
+// channel across all API instances. Passing nil is a no-op.
+//
+// If the rate limiter returns an error, the alerts are allowed (fail open), the error is
+// logged, and the http_alert_rate_limiter_errors_total metric is incremented.
+func (s *Server) WithAlertRateLimiter(limiter AlertRateLimiter) *Server {
+	if limiter == nil {
+		return s
+	}
+	s.alertRateLimiter = limiter
 	return s
 }
 
@@ -273,6 +286,8 @@ func (s *Server) Run(ctx context.Context) error {
 	s.metrics.RegisterGauge(httpInFlightMetric, "Number of HTTP requests currently being processed")
 	s.metrics.GaugeSet(httpInFlightMetric, 0)
 	s.metrics.RegisterCounter(httpAlertsRateLimitedMetric, "Total alert requests rejected by the per-channel rate limiter", "channel")
+	s.metrics.RegisterCounter(alertRateLimiterErrorsMetric, "Total alert rate limit checks that failed (e.g. Redis unavailable). The alerts are allowed (fail open)")
+	s.metrics.CounterAdd(alertRateLimiterErrorsMetric, 0)
 	s.registerAlertIntakeMetrics()
 
 	// Set release mode to mute a few annoying startup logs.
@@ -649,20 +664,18 @@ func (s *Server) queueAlert(ctx context.Context, alert *types.Alert) error {
 	return nil
 }
 
-func (s *Server) checkRateLimit(channel string, count int) (bool, time.Duration) {
-	r := s.getRateLimiter(channel).ReserveN(time.Now(), count)
+// checkRateLimit takes count tokens from the rate limiter of channel. If the rate limiter fails,
+// the alerts are allowed (fail open), and the returned bool is false, since the result holds no limiter state.
+func (s *Server) checkRateLimit(ctx context.Context, channel string, count int) (RateLimitResult, bool) {
+	result, err := s.alertRateLimiter.Take(ctx, channel, count, *s.cfg.RateLimitPerAlertChannel)
+	if err != nil {
+		s.metrics.CounterInc(alertRateLimiterErrorsMetric)
+		s.logger.WithField("channel_id", channel).WithField("error", err.Error()).Errorf("Alert rate limit check failed, allowing %d alert(s)", count)
 
-	delay := r.Delay()
-
-	if delay == rate.InfDuration || delay > 0 {
-		r.Cancel()
-		if delay == rate.InfDuration {
-			delay = maxRetryAfterDelay
-		}
-		return false, delay
+		return RateLimitResult{Allowed: true}, false
 	}
 
-	return true, 0
+	return result, true
 }
 
 // rateLimitInfo holds a snapshot of the rate limiter state for RateLimit-* headers.
@@ -672,43 +685,15 @@ type rateLimitInfo struct {
 	resetSecs int
 }
 
-// getRateLimitInfo returns a post-reservation snapshot of the limiter for channel.
-// Call after a successful checkRateLimit so remaining reflects consumed tokens.
-func (s *Server) getRateLimitInfo(channel string) rateLimitInfo {
-	l := s.getRateLimiter(channel)
-	tokens := l.Tokens()
-	burst := l.Burst()
-
-	remaining := max(int(tokens), 0)
-
-	var resetSecs int
-	if lim := float64(l.Limit()); lim > 0 && tokens < float64(burst) {
-		deficit := float64(burst) - tokens
-		deficitDur := time.Duration(deficit / lim * float64(time.Second))
-		resetSecs = int((deficitDur + time.Second - 1) / time.Second)
-	}
-
-	return rateLimitInfo{limit: burst, remaining: remaining, resetSecs: resetSecs}
-}
-
 func (s *Server) setRateLimitHeaders(c *gin.Context, info rateLimitInfo) {
 	c.Header("Ratelimit-Limit", strconv.Itoa(info.limit))
 	c.Header("Ratelimit-Remaining", strconv.Itoa(info.remaining))
 	c.Header("Ratelimit-Reset", strconv.Itoa(info.resetSecs))
 }
 
-func (s *Server) getRateLimiter(channel string) *rate.Limiter {
-	s.limitersLock.Lock()
-	defer s.limitersLock.Unlock()
-
-	limiter, ok := s.limitersByChannel[channel]
-
-	if !ok {
-		limiter = rate.NewLimiter(rate.Limit(s.cfg.RateLimitPerAlertChannel.AlertsPerSecond), s.cfg.RateLimitPerAlertChannel.AllowedBurst)
-		s.limitersByChannel[channel] = limiter
-	}
-
-	return limiter
+// ceilSeconds rounds d up to whole seconds.
+func ceilSeconds(d time.Duration) int {
+	return int((d + time.Second - 1) / time.Second)
 }
 
 func (s *Server) debugLogRequest(c *gin.Context, body []byte) {

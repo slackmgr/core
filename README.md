@@ -203,8 +203,25 @@ Slack Events ──────────────────────�
   - `POST /slackalert[s]` are deprecated aliases for `POST /alert[s]`, kept for legacy clients
   - `GET /mappings` returns the routing rules in the legacy format, extended with `alertType`: `{"rules":[{"teamName", "description", "alertType", "equals", "hasPrefix", "matchesRegex", "channel", "matchAll"}]}`. An empty description falls back to the rule name. Legacy clients ignore `alertType`, so they may match typed rules that the API would not apply to their (untyped) alerts
 - Channel names in `slackChannelId` and in escalation `moveToChannel` are mapped to channel IDs (for channels the Slack Manager is a member of)
-- Per-channel rate limiting
+- Per-channel rate limiting (see [Alert Rate Limiting](#alert-rate-limiting))
 - Validates and enqueues alerts for the manager to process
+
+### Alert Rate Limiting
+
+The API limits the number of alerts accepted per Slack channel with a token bucket, configured by `rateLimitPerAlertChannel` (`alertsPerSecond`, default 1, and `allowedBurst`, default 30). A request with more alerts for a channel than it has tokens left is rejected with HTTP 429 and a `Retry-After` header, and takes no tokens. A request with more than `allowedBurst` alerts for a single channel is rejected with HTTP 400. Accepted requests get `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset` headers for the most constrained channel in the request. Alerts read from raw alert queues (`Server.WithRawAlertConsumer`) are not rate limited.
+
+By default (`restapi.LocalAlertRateLimiter`), each API instance has its own buckets, so with N instances a channel can receive up to N times the configured rate. To make the configured rate the total cap per channel across all instances, use the Redis rate limiter:
+
+```go
+server := restapi.New(alertQueue, logger, apiCfg).
+    WithAlertRateLimiter(restapi.NewRedisAlertRateLimiter(redisClient, apiCfg.CacheKeyPrefix))
+```
+
+`RedisAlertRateLimiter` stores the bucket of each channel under `<keyPrefix>alert-rate-limit:<channel>`, and checks and takes the tokens with a single atomic Lua script call (one round trip per channel per request). It uses the Redis server time, so clock skew between instances does not matter. A key expires when its bucket is full again. All instances must use the same Redis and key prefix. Requires Redis 5 or later (or a compatible server, such as Valkey).
+
+If the rate limit check fails (e.g. Redis is unavailable), the alerts are accepted (fail open), the error is logged, and `http_alert_rate_limiter_errors_total` is incremented. The `RateLimit-*` headers are omitted for such channels.
+
+The local rate limiter removes the buckets of channels that have been idle long enough for their bucket to be full again, so its memory use is bounded by the number of recently active channels.
 
 ### Manager (`manager`)
 
@@ -219,7 +236,7 @@ Slack Events ──────────────────────�
 
 Both packages can run in a single binary (as shown in the Quick Start), which is fine for development and low-traffic environments. In production, they should be deployed as separate services.
 
-The API server is stateless: it validates incoming alerts, applies rate limiting, and writes to the queue. It can be scaled horizontally behind a load balancer to absorb traffic spikes, and restarted or redeployed without consequence.
+The API server is stateless: it validates incoming alerts, applies rate limiting, and writes to the queue. It can be scaled horizontally behind a load balancer to absorb traffic spikes, and restarted or redeployed without consequence. When running more than one instance, use `RedisAlertRateLimiter` so that the per-channel rate limit applies to all instances combined (see [Alert Rate Limiting](#alert-rate-limiting)).
 
 The manager is stateful and long-running. It holds open Slack Socket Mode connections, maintains per-channel state in memory, owns the issue lifecycle, and coordinates distributed locking. Restarting the manager interrupts active processing, and running multiple instances requires a Redis-backed locker to prevent race conditions. Keeping the manager isolated from the API means that a spike in inbound alert volume, a bad deployment of the API tier, or a rolling restart of the ingestion layer has no effect on the manager's stability.
 
@@ -399,6 +416,7 @@ func main() {
 
     server := restapi.New(alertQueue, logger, apiCfg).
         WithCacheStore(cacheStore).
+        WithAlertRateLimiter(restapi.NewRedisAlertRateLimiter(redisClient, apiCfg.CacheKeyPrefix)). // shared by all API instances
         WithMetrics(metrics)
 
     mgr := manager.New(db, alertQueue, commandQueue, logger, managerCfg).

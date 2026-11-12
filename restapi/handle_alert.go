@@ -164,9 +164,11 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 
 		alertCount := len(channelAlerts)
 
-		if ok, retryAfter := s.checkRateLimit(channel, alertCount); !ok {
+		rl, rlOK := s.checkRateLimit(c.Request.Context(), channel, alertCount)
+
+		if !rl.Allowed {
 			err := fmt.Errorf("rate limit exceeded for %d alerts in channel %s", alertCount, channel)
-			retrySecs := int((retryAfter + time.Second - 1) / time.Second)
+			retrySecs := ceilSeconds(rl.RetryAfter)
 			c.Header("Retry-After", fmt.Sprintf("%d", retrySecs))
 			s.setRateLimitHeaders(c, rateLimitInfo{
 				limit:     s.cfg.RateLimitPerAlertChannel.AllowedBurst,
@@ -182,10 +184,16 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 			return
 		}
 
-		// Snapshot the limiter state after tokens are consumed.
-		info := s.getRateLimitInfo(channel)
-		if tightest == nil || info.remaining < tightest.remaining {
-			tightest = &info
+		// Track the limiter state after tokens are consumed. Skipped when the check failed open.
+		if rlOK {
+			info := rateLimitInfo{
+				limit:     s.cfg.RateLimitPerAlertChannel.AllowedBurst,
+				remaining: rl.Remaining,
+				resetSecs: ceilSeconds(rl.Reset),
+			}
+			if tightest == nil || info.remaining < tightest.remaining {
+				tightest = &info
+			}
 		}
 
 		for _, alert := range channelAlerts {

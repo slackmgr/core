@@ -184,6 +184,13 @@ func newTestServer(t *testing.T) (*Server, *mockFifoQueueProducer, *mockChannelI
 	return server, queue, channelInfo
 }
 
+// failingAlertRateLimiter is an AlertRateLimiter that always fails.
+type failingAlertRateLimiter struct{}
+
+func (failingAlertRateLimiter) Take(_ context.Context, _ string, _ int, _ config.RateLimitConfig) (RateLimitResult, error) {
+	return RateLimitResult{}, errors.New("redis unavailable")
+}
+
 // --- Tests ---
 
 func TestServer_HandlePing(t *testing.T) {
@@ -749,8 +756,9 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 		}, nil)
 
 		// Exhaust the rate limit
-		limiter := server.getRateLimiter("C123")
-		limiter.AllowN(time.Now(), 1)
+		res, err := server.alertRateLimiter.Take(t.Context(), "C123", 1, *server.cfg.RateLimitPerAlertChannel)
+		require.NoError(t, err)
+		require.True(t, res.Allowed)
 
 		router := gin.New()
 		router.POST("/alert", server.handleAlerts)
@@ -842,6 +850,35 @@ func TestServer_HandleAlerts_RateLimiting(t *testing.T) {
 		assert.Equal(t, "10", w.Header().Get("Ratelimit-Limit"))
 		assert.NotEmpty(t, w.Header().Get("Ratelimit-Remaining"))
 		assert.NotEmpty(t, w.Header().Get("Ratelimit-Reset"))
+	})
+
+	t.Run("accepts alerts without RateLimit headers when the limiter fails", func(t *testing.T) {
+		t.Parallel()
+
+		server, queue, channelInfo := newTestServer(t)
+		server.WithAlertRateLimiter(failingAlertRateLimiter{})
+
+		channelInfo.On("MapChannelNameToIDIfNeeded", "C123").Return("C123")
+		channelInfo.On("GetChannelInfo", mock.Anything, "C123").Return(&ChannelInfo{
+			ChannelExists:      true,
+			ManagerIsInChannel: true,
+			UserCount:          10,
+		}, nil)
+		queue.On("Send", mock.Anything, "C123", mock.Anything, mock.Anything).Return(nil)
+
+		router := gin.New()
+		router.POST("/alert", server.handleAlerts)
+
+		alert := types.Alert{SlackChannelID: "C123", Header: "Test Alert"}
+		body, _ := json.Marshal(alert)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusAccepted, w.Code)
+		assert.Empty(t, w.Header().Get("Ratelimit-Limit"))
+		queue.AssertNumberOfCalls(t, "Send", 1)
 	})
 
 	t.Run("handles multiple channels independently", func(t *testing.T) {
@@ -1164,77 +1201,64 @@ func TestServer_SetSlackChannelID(t *testing.T) {
 	})
 }
 
-func TestServer_GetRateLimiter(t *testing.T) {
-	t.Parallel()
-
-	t.Run("creates new limiter for channel", func(t *testing.T) {
-		t.Parallel()
-		server, _, _ := newTestServer(t)
-		limiter1 := server.getRateLimiter("C123")
-		require.NotNil(t, limiter1)
-	})
-
-	t.Run("returns same limiter for same channel", func(t *testing.T) {
-		t.Parallel()
-		server, _, _ := newTestServer(t)
-		limiter1 := server.getRateLimiter("C456")
-		limiter2 := server.getRateLimiter("C456")
-		assert.Same(t, limiter1, limiter2)
-	})
-
-	t.Run("returns different limiters for different channels", func(t *testing.T) {
-		t.Parallel()
-		server, _, _ := newTestServer(t)
-		limiter1 := server.getRateLimiter("C789")
-		limiter2 := server.getRateLimiter("C012")
-		assert.NotSame(t, limiter1, limiter2)
-	})
-}
-
 func TestServer_CheckRateLimit(t *testing.T) {
 	t.Parallel()
 
-	t.Run("returns true with zero delay when tokens available", func(t *testing.T) {
+	t.Run("returns limiter result", func(t *testing.T) {
 		t.Parallel()
 
 		server, _, _ := newTestServer(t)
 		server.cfg.RateLimitPerAlertChannel.AlertsPerSecond = 100
 		server.cfg.RateLimitPerAlertChannel.AllowedBurst = 100
 
-		ok, delay := server.checkRateLimit("C123", 5)
+		res, ok := server.checkRateLimit(t.Context(), "C123", 5)
 
 		assert.True(t, ok)
-		assert.Equal(t, time.Duration(0), delay)
+		assert.True(t, res.Allowed)
+		assert.Equal(t, 95, res.Remaining)
 	})
 
-	t.Run("returns false with positive delay when bucket is exhausted", func(t *testing.T) {
+	t.Run("fails open and counts the error when the limiter fails", func(t *testing.T) {
 		t.Parallel()
 
 		server, _, _ := newTestServer(t)
-		server.cfg.RateLimitPerAlertChannel.AlertsPerSecond = 0.001 // Very slow
-		server.cfg.RateLimitPerAlertChannel.AllowedBurst = 1
+		metrics := newRecordingMetrics()
+		server.metrics = metrics
+		server.WithAlertRateLimiter(failingAlertRateLimiter{})
 
-		// Exhaust the burst
-		limiter := server.getRateLimiter("C_EXHAUSTED")
-		limiter.AllowN(time.Now(), 1)
-
-		ok, delay := server.checkRateLimit("C_EXHAUSTED", 1)
+		res, ok := server.checkRateLimit(t.Context(), "C123", 5)
 
 		assert.False(t, ok)
-		assert.Greater(t, delay, time.Duration(0))
+		assert.True(t, res.Allowed)
+		assert.InDelta(t, 1.0, metrics.counter(alertRateLimiterErrorsMetric), 0)
 	})
+}
 
-	t.Run("caps delay at maxRetryAfterDelay when count exceeds burst", func(t *testing.T) {
+func TestServer_WithAlertRateLimiter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("defaults to local limiter", func(t *testing.T) {
 		t.Parallel()
 
 		server, _, _ := newTestServer(t)
-		server.cfg.RateLimitPerAlertChannel.AllowedBurst = 1
+		assert.IsType(t, &LocalAlertRateLimiter{}, server.alertRateLimiter)
+	})
 
-		// count=2 > burst=1 → ReserveN returns InfDuration
-		ok, delay := server.checkRateLimit("C_INF", 2)
+	t.Run("sets limiter", func(t *testing.T) {
+		t.Parallel()
 
-		assert.False(t, ok)
-		assert.Equal(t, maxRetryAfterDelay, delay)
+		server, _, _ := newTestServer(t)
+		limiter := failingAlertRateLimiter{}
+		assert.Same(t, server, server.WithAlertRateLimiter(limiter))
+		assert.Equal(t, limiter, server.alertRateLimiter)
+	})
+
+	t.Run("nil is a no-op", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.WithAlertRateLimiter(nil)
+		assert.IsType(t, &LocalAlertRateLimiter{}, server.alertRateLimiter)
 	})
 }
 
