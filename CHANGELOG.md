@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-12
+
 ### Added
 - `restapi.AlertRateLimiter` interface and `Server.WithAlertRateLimiter`, to replace the per-channel alert rate limiter
 - `restapi.RedisAlertRateLimiter`: Redis-backed alert rate limiter shared by all API instances, so `rateLimitPerAlertChannel` is the total cap per channel regardless of the number of instances. If Redis is unavailable, alerts are allowed (fail open)
@@ -622,7 +624,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.26.2...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/slackmgr/core/compare/v0.26.2...v0.27.0
 [0.26.2]: https://github.com/slackmgr/core/compare/v0.26.1...v0.26.2
 [0.26.1]: https://github.com/slackmgr/core/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/slackmgr/core/compare/v0.25.0...v0.26.0
