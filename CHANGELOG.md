@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-12
+
 ### Changed
 - **Breaking:** `AlertRateLimiter.Take` is replaced by `TakeAll(ctx, counts map[string]int, limit)`, which takes the tokens of all channels of a request at once: either all, or none. Custom `AlertRateLimiter` implementations must be updated
 - `POST /alert` validates all alerts and channels, encrypts webhook payloads and checks the rate limits of all channels before queuing any alert. A request is rate limited as a whole: previously, the alerts for some channels could be queued before another channel was rate limited, so that a client retrying the 429 duplicated them. `Retry-After` is the wait until all channels have enough tokens. `http_alerts_rate_limited_total` is incremented for each channel with too few tokens
@@ -637,7 +639,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/slackmgr/core/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/slackmgr/core/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/slackmgr/core/compare/v0.26.2...v0.27.0
 [0.26.2]: https://github.com/slackmgr/core/compare/v0.26.1...v0.26.2
