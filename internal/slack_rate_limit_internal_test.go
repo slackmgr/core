@@ -752,6 +752,21 @@ func TestGetUserIDsInChannel_Caching(t *testing.T) {
 	})
 }
 
+// blockingHandler returns a handler that does not respond until the request context is done or release is called.
+// Register release with t.Cleanup after the test server is created, so that it runs before the server is closed.
+func blockingHandler() (http.HandlerFunc, func()) {
+	ch := make(chan struct{})
+
+	handler := func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-ch:
+		}
+	}
+
+	return handler, func() { close(ch) }
+}
+
 func TestCachedLookup_TransientErrors(t *testing.T) {
 	t.Parallel()
 
@@ -769,6 +784,57 @@ func TestCachedLookup_TransientErrors(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "old-name", channel.Name)
 		assert.Equal(t, 1, metrics.counter(slackClientCacheRequestsTotalMetric, "conversations.info", "stale"))
+	})
+
+	t.Run("stale value is served when the context deadline passes", func(t *testing.T) {
+		t.Parallel()
+
+		block, release := blockingHandler()
+		c, metrics, _ := newRateLimitTestClient(t, block)
+		t.Cleanup(release)
+
+		seedStaleEntry(t, c, "GetChannelInfo:C1", &slack.Channel{GroupConversation: slack.GroupConversation{Name: "old-name"}})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		channel, err := c.GetChannelInfo(ctx, "C1")
+		require.NoError(t, err)
+		assert.Equal(t, "old-name", channel.Name)
+		assert.Equal(t, 1, metrics.counter(slackClientCacheRequestsTotalMetric, "conversations.info", "stale"))
+	})
+
+	t.Run("context deadline without stale value", func(t *testing.T) {
+		t.Parallel()
+
+		block, release := blockingHandler()
+		c, metrics, _ := newRateLimitTestClient(t, block)
+		t.Cleanup(release)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		_, err := c.GetChannelInfo(ctx, "C1")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.Equal(t, 1, metrics.counter(slackClientCacheRequestsTotalMetric, "conversations.info", "miss"))
+	})
+
+	t.Run("stale value is not served when the context is cancelled", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		block, release := blockingHandler()
+		c, _, _ := newRateLimitTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			cancel()
+			block(w, r)
+		})
+		t.Cleanup(release)
+
+		seedStaleEntry(t, c, "GetChannelInfo:C1", &slack.Channel{GroupConversation: slack.GroupConversation{Name: "old-name"}})
+
+		_, err := c.GetChannelInfo(ctx, "C1")
+		require.ErrorIs(t, err, context.Canceled)
 	})
 
 	t.Run("transient error without stale value", func(t *testing.T) {

@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math/rand/v2"
 	"time"
 
@@ -53,7 +54,9 @@ type lookupFetchFunc[T any] func(ctx context.Context, failFast bool) (value T, n
 
 // cachedLookup returns a Slack lookup result from the cache, or from Slack if the cached value is missing or no
 // longer fresh. A stale cached value is served instead of calling Slack while the method is backing off after a
-// 429, and instead of an error if the call fails with a rate limit or transient error.
+// 429, and instead of an error if the call fails with a rate limit or transient error, or because the context
+// deadline passed (e.g. a caller's lookup timeout during a slow Slack response). It is not served when the context
+// is cancelled.
 //
 // The returned notFound flag reports whether Slack reported that the item does not exist.
 func cachedLookup[T any](ctx context.Context, c *SlackAPIClient, logger types.Logger, p lookupPolicy, fetch lookupFetchFunc[T]) (T, bool, error) {
@@ -73,7 +76,7 @@ func cachedLookup[T any](ctx context.Context, c *SlackAPIClient, logger types.Lo
 
 	value, notFound, err := fetch(ctx, hasStale)
 	if err != nil {
-		if hasStale && ctx.Err() == nil && (IsRateLimitError(err) || IsTransientError(err)) {
+		if hasStale && serveStaleOnError(ctx, err) {
 			c.metrics.CounterInc(slackClientCacheRequestsTotalMetric, p.action, "stale")
 			logger.WithField("action", p.action).WithField("error", err).Info("Slack lookup failed, serving stale cached value")
 
@@ -109,6 +112,15 @@ func cachedLookup[T any](ctx context.Context, c *SlackAPIClient, logger types.Lo
 	}
 
 	return value, notFound, nil
+}
+
+// serveStaleOnError reports whether a stale cached value should be served instead of the given fetch error.
+func serveStaleOnError(ctx context.Context, err error) bool {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return true
+	}
+
+	return ctx.Err() == nil && (IsRateLimitError(err) || IsTransientError(err))
 }
 
 // getLookupCacheEntry reads and decodes a lookup cache entry. It returns false if the entry is missing or invalid.

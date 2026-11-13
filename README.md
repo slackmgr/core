@@ -156,7 +156,7 @@ Slack lookups are cached in the same cache store, and are shared the same way:
 | User info (`users.info`) | 1–2 hours | 24 hours |
 | Channel members (`conversations.members`), user group members (`usergroups.users.list`) | 1–1.5 minutes | 1 hour |
 
-A stale value is only served while the method is backing off, or when a call fails with a rate limit or transient error. With a 5 minute channel info TTL, each channel causes about one `conversations.info` call per 5 minutes in total, well below Slack's limit for the method (about 50 per minute).
+A stale value is only served while the method is backing off, when a call fails with a rate limit or transient error, or when the caller's context deadline passes (e.g. the 5 second channel name lookup timeout during a slow Slack response). It is not served when the context is cancelled. With a 5 minute channel info TTL, each channel causes about one `conversations.info` call per 5 minutes in total, well below Slack's limit for the method (about 50 per minute).
 
 Each channel manager keeps the channel name in memory, and looks it up at most once per `channelInfoCacheTtlSeconds` (once per minute after a failed lookup). A failed lookup keeps the last known name, so a rate limit never blanks the channel name on issues. The API refreshes the info of channels with alerts in the last 12 hours every `channelInfoRefreshIntervalSeconds` (default 300). The refresh interval must not be longer than the channel info cache TTL, so that refreshes are served from the shared cache, and only the first refresh after the TTL has expired calls Slack.
 

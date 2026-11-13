@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Slack lookups (e.g. `conversations.info`) serve a stale cached value when the caller's context deadline passes, as they already did for rate limit and transient errors. Previously, a slow Slack response during a channel name lookup (5 second timeout) discarded the stale name
+- A timed out Slack channel name lookup is logged at info level with a `channel_id` field, instead of as an error
+
 ## [0.29.0] - 2026-11-12
 
 ### Changed

@@ -454,7 +454,7 @@ func (c *SlackAPIClient) MessageHasReplies(ctx context.Context, channelID, ts st
 // GetChannelInfo returns the Slack channel info (conversations.info) for a channel. Results are cached for
 // [config.SlackClientConfig.ChannelInfoCacheTTL] (plus up to 20% jitter), and channel_not_found results for
 // [config.SlackClientConfig.ChannelNotFoundCacheTTL]. A stale value is served for up to [channelInfoMaxStale] while
-// conversations.info is rate limited. A missing channel is returned as an error with the text [SlackErrChannelNotFound].
+// conversations.info is rate limited or failing, or when the context deadline passes (see [cachedLookup]). A missing channel is returned as an error with the text [SlackErrChannelNotFound].
 func (c *SlackAPIClient) GetChannelInfo(ctx context.Context, channelID string) (*slack.Channel, error) {
 	if err := c.checkConnected(); err != nil {
 		return nil, err
