@@ -286,6 +286,23 @@ func TestServer_HandleChannels(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "[]", w.Body.String())
 	})
+
+	t.Run("returns empty array when channel list is not loaded", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, channelInfo := newTestServer(t)
+		channelInfo.On("ManagedChannels").Return(nil)
+
+		router := gin.New()
+		router.GET("/channels", server.handleChannels)
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/channels", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "[]", w.Body.String())
+	})
 }
 
 func TestServer_HandleMappings(t *testing.T) {
@@ -425,6 +442,7 @@ func TestServer_RegisterRoutes(t *testing.T) {
 		"GET /mappings",
 		"GET /channels",
 		"GET /ping",
+		"GET /openapi.yaml",
 	}
 
 	for _, route := range expected {

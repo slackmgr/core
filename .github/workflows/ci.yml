@@ -8,6 +8,8 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '.golangci.yaml'
+      - 'restapi/openapi.yaml'
+      - 'redocly.yaml'
       - '.github/workflows/ci.yml'
   pull_request:
     branches: [ main ]
@@ -16,6 +18,8 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '.golangci.yaml'
+      - 'restapi/openapi.yaml'
+      - 'redocly.yaml'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
 
@@ -98,6 +102,14 @@ jobs:
       with:
         version: latest
         args: --timeout=5m
+
+    - name: Set up Node
+      uses: actions/setup-node@v7.1.0
+      with:
+        node-version: lts/*
+
+    - name: Lint OpenAPI spec
+      run: npx --yes @redocly/cli@2.78.0 lint
 
   security:
     name: Security

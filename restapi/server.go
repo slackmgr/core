@@ -479,6 +479,9 @@ func (s *Server) registerRoutes(engine *gin.Engine) {
 
 	// Ping
 	engine.GET("/ping", s.ping)
+
+	// OpenAPI specification of this API (see openapi.yaml)
+	engine.GET("/openapi.yaml", s.handleOpenAPISpec)
 }
 
 // setChannelInfoProvider allows tests to inject a mock ChannelInfoProvider.

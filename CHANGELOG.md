@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- OpenAPI 3.1 specification of the REST API in `restapi/openapi.yaml`, served at `GET /openapi.yaml` and exposed as `restapi.OpenAPISpec()`. `POST /alert` and `POST /slackalert[s]` are documented as deprecated aliases of `POST /alerts`
+- Contract tests checking the spec against the registered routes, the server's alert validation and its responses, and Redocly CLI linting of the spec in CI
+- `API docs` workflow publishing a Redoc API reference to GitHub Pages
+
+### Changed
+- `GET /openapi.yaml` adds a new `path` label value to `http_server_request_duration_seconds` (the dashboard panels group by path generically, so no dashboard change is needed)
+
+### Fixed
+- `GET /channels` returns `[]` instead of `null` before the managed channel list is loaded
+
 ## [0.29.1] - 2026-11-13
 
 ### Fixed

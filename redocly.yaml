@@ -1,0 +1,19 @@
+# Redocly CLI config for linting restapi/openapi.yaml (npx @redocly/cli lint).
+extends:
+  - recommended
+
+apis:
+  core:
+    root: restapi/openapi.yaml
+
+rules:
+  # The API has no built-in authentication; it is added by the host application, if any.
+  security-defined: off
+  # GET /ping and GET /openapi.yaml have no client errors.
+  operation-4xx-response: off
+  # The only server is the default local port; the real base URL depends on the deployment.
+  no-server-example.com: off
+  # The default (false) rejects properties declared only in sibling schemas (e.g. the Alert anyOf/if branches).
+  no-invalid-media-type-examples:
+    severity: error
+    allowAdditionalProperties: true

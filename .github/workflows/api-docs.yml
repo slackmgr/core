@@ -1,0 +1,69 @@
+name: API docs
+
+# Builds the REST API reference from restapi/openapi.yaml with Redoc, and publishes it to GitHub Pages.
+# Requires Pages to be enabled for the repository, with "GitHub Actions" as the source.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'restapi/openapi.yaml'
+      - 'redocly.yaml'
+      - '.github/workflows/api-docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7.0.1
+
+    - name: Set up Node
+      uses: actions/setup-node@v7.1.0
+      with:
+        node-version: lts/*
+
+    - name: Lint OpenAPI spec
+      run: npx --yes @redocly/cli@2.78.0 lint
+
+    - name: Build docs
+      run: |
+        mkdir -p _site
+        npx --yes @redocly/cli@2.78.0 build-docs restapi/openapi.yaml --output _site/index.html
+        cp restapi/openapi.yaml _site/openapi.yaml
+
+    - name: Configure Pages
+      uses: actions/configure-pages@v6.0.0
+
+    - name: Upload Pages artifact
+      uses: actions/upload-pages-artifact@v5.0.0
+      with:
+        path: _site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v5.0.1

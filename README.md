@@ -199,12 +199,20 @@ Slack Events ──────────────────────�
 ### API Server (`restapi`)
 
 - REST server on port 8080 accepting alerts
-- Endpoints: `POST /alert[s]`, `POST /prometheus-alert`, `GET /mappings`, `GET /channels`, `GET /ping`
-  - `POST /slackalert[s]` are deprecated aliases for `POST /alert[s]`, kept for legacy clients
+- Endpoints: `POST /alerts`, `POST /prometheus-alert`, `POST /alerts-test`, `GET /mappings`, `GET /channels`, `GET /ping`, `GET /openapi.yaml`
+  - `POST /alert` and `POST /slackalert[s]` are deprecated aliases for `POST /alerts`, kept for legacy clients
   - `GET /mappings` returns the routing rules in the legacy format, extended with `alertType`: `{"rules":[{"teamName", "description", "alertType", "equals", "hasPrefix", "matchesRegex", "channel", "matchAll"}]}`. An empty description falls back to the rule name. Legacy clients ignore `alertType`, so they may match typed rules that the API would not apply to their (untyped) alerts
 - Channel names in `slackChannelId` and in escalation `moveToChannel` are mapped to channel IDs (for channels the Slack Manager is a member of)
 - Per-channel rate limiting (see [Alert Rate Limiting](#alert-rate-limiting))
 - Validates and enqueues alerts for the manager to process
+
+#### API specification
+
+The REST API is described by an OpenAPI 3.1 document, [`restapi/openapi.yaml`](restapi/openapi.yaml), which is the source of truth for the API contract:
+
+- Rendered reference: [slackmgr.github.io/core](https://slackmgr.github.io/core/) (published by the `API docs` workflow on changes to the spec)
+- Served by the API at `GET /openapi.yaml` (`application/yaml`), and available in Go as `restapi.OpenAPISpec()`
+- Tests check that the spec documents exactly the registered routes, that the server and spec agree on which alert payloads are valid, and that the server's responses conform to the spec. CI lints the spec with Redocly CLI (`redocly.yaml`)
 
 ### Alert Rate Limiting
 

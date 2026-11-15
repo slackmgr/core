@@ -1,0 +1,1140 @@
+openapi: 3.1.0
+
+info:
+  title: Slack Manager REST API
+  version: 0.30.0
+  summary: Send alerts to Slack Manager, which groups them into issues in Slack channels.
+  description: |
+    The REST API of the Slack Manager core library (`github.com/slackmgr/core/restapi`). It accepts alerts
+    from monitoring systems and other clients, validates and routes them to a Slack channel, and queues them
+    for the manager, which creates and updates issues in Slack.
+
+    The API is embedded in a host application, so the base URL, port and any authentication depend on the
+    deployment. The default port is 8080.
+
+    ## Routing
+
+    The Slack channel of an alert is determined in this order:
+
+    1. The `slackChannelId` field in the alert body
+    2. The `slackChannelId` path parameter (for the endpoints that have one)
+    3. A routing rule matching the alert `routeKey` (and `type`)
+    4. The fallback routing rule, if the alert has no route key
+
+    Channel names are accepted in place of channel IDs, and are mapped to IDs by the API (for channels that
+    the Slack Manager integration is a member of).
+
+    ## Rate limiting
+
+    Alerts are rate limited per Slack channel with a token bucket. A request is accepted or rejected as a
+    whole: if any channel in the request has too few tokens left, the request is rejected with HTTP 429 and
+    no alert is queued. All alerts and channels are validated before the rate limit is checked, so a
+    rejected request can be retried without duplicating alerts. Accepted and rate limited requests get
+    `RateLimit-*` headers (IETF `draft-ietf-httpapi-ratelimit-headers-11`) for the most constrained channel
+    in the request.
+
+    ## Errors
+
+    All error responses have a JSON body with a single `error` field. Requests that take longer than 30
+    seconds are aborted with HTTP 503.
+
+    This document is the source of truth for the API contract. It is served by the API itself at
+    `GET /openapi.yaml`.
+  license:
+    name: MIT
+    identifier: MIT
+  contact:
+    name: Slack Manager
+    url: https://github.com/slackmgr/core
+
+externalDocs:
+  description: Slack Manager core README
+  url: https://github.com/slackmgr/core#readme
+
+servers:
+  - url: http://localhost:8080
+    description: Local instance on the default port
+
+tags:
+  - name: Alerts
+    description: Send alerts in the native Slack Manager format.
+  - name: Prometheus
+    description: Receive Prometheus Alertmanager webhooks.
+  - name: Testing
+    description: Endpoints for testing clients and integrations. Nothing is sent to Slack.
+  - name: Information
+    description: Read routing rules and managed channels.
+  - name: Operations
+    description: Health checks and API metadata.
+
+paths:
+  /alerts:
+    post:
+      tags: [Alerts]
+      operationId: sendAlerts
+      summary: Send alerts
+      description: |
+        Validates, routes and queues one or more alerts. The body is a single alert, an array of alerts,
+        or an object with an `alerts` array.
+
+        The request is accepted or rejected as a whole: if any alert fails validation, routing or the rate
+        limit, no alert in the request is queued. Only a queue error can fail a request after some of its
+        alerts have been queued.
+      requestBody:
+        $ref: '#/components/requestBodies/Alerts'
+      responses:
+        '202':
+          $ref: '#/components/responses/Accepted'
+        '204':
+          $ref: '#/components/responses/AllIgnored'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+  /alerts/{slackChannelId}:
+    post:
+      tags: [Alerts]
+      operationId: sendAlertsToChannel
+      summary: Send alerts to a channel
+      description: |
+        Same as `POST /alerts`, but alerts without a `slackChannelId` in the body are sent to the channel in
+        the path, instead of being routed by their route key.
+      parameters:
+        - $ref: '#/components/parameters/SlackChannelID'
+      requestBody:
+        $ref: '#/components/requestBodies/Alerts'
+      responses:
+        '202':
+          $ref: '#/components/responses/Accepted'
+        '204':
+          $ref: '#/components/responses/AllIgnored'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+
+  /alert:
+    post:
+      tags: [Alerts]
+      operationId: sendAlertsLegacyAlert
+      summary: Send alerts (deprecated alias)
+      description: Deprecated alias for `POST /alerts`, kept for legacy clients.
+      deprecated: true
+      requestBody:
+        $ref: '#/components/requestBodies/Alerts'
+      responses:
+        '202':
+          $ref: '#/components/responses/Accepted'
+        '204':
+          $ref: '#/components/responses/AllIgnored'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+  /alert/{slackChannelId}:
+    post:
+      tags: [Alerts]
+      operationId: sendAlertsToChannelLegacyAlert
+      summary: Send alerts to a channel (deprecated alias)
+      description: Deprecated alias for `POST /alerts/{slackChannelId}`, kept for legacy clients.
+      deprecated: true
+      parameters:
+        - $ref: '#/components/parameters/SlackChannelID'
+      requestBody:
+        $ref: '#/components/requestBodies/Alerts'
+      responses:
+        '202':
+          $ref: '#/components/responses/Accepted'
+        '204':
+          $ref: '#/components/responses/AllIgnored'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+  /slackalert:
+    post:
+      tags: [Alerts]
+      operationId: sendAlertsLegacySlackAlert
+      summary: Send alerts (deprecated alias)
+      description: Deprecated alias for `POST /alerts`, kept for legacy clients.
+      deprecated: true
+      requestBody:
+        $ref: '#/components/requestBodies/Alerts'
+      responses:
+        '202':
+          $ref: '#/components/responses/Accepted'
+        '204':
+          $ref: '#/components/responses/AllIgnored'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+  /slackalert/{slackChannelId}:
+    post:
+      tags: [Alerts]
+      operationId: sendAlertsToChannelLegacySlackAlert
+      summary: Send alerts to a channel (deprecated alias)
+      description: Deprecated alias for `POST /alerts/{slackChannelId}`, kept for legacy clients.
+      deprecated: true
+      parameters:
+        - $ref: '#/components/parameters/SlackChannelID'
+      requestBody:
+        $ref: '#/components/requestBodies/Alerts'
+      responses:
+        '202':
+          $ref: '#/components/responses/Accepted'
+        '204':
+          $ref: '#/components/responses/AllIgnored'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+  /slackalerts:
+    post:
+      tags: [Alerts]
+      operationId: sendAlertsLegacySlackAlerts
+      summary: Send alerts (deprecated alias)
+      description: Deprecated alias for `POST /alerts`, kept for legacy clients.
+      deprecated: true
+      requestBody:
+        $ref: '#/components/requestBodies/Alerts'
+      responses:
+        '202':
+          $ref: '#/components/responses/Accepted'
+        '204':
+          $ref: '#/components/responses/AllIgnored'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+  /slackalerts/{slackChannelId}:
+    post:
+      tags: [Alerts]
+      operationId: sendAlertsToChannelLegacySlackAlerts
+      summary: Send alerts to a channel (deprecated alias)
+      description: Deprecated alias for `POST /alerts/{slackChannelId}`, kept for legacy clients.
+      deprecated: true
+      parameters:
+        - $ref: '#/components/parameters/SlackChannelID'
+      requestBody:
+        $ref: '#/components/requestBodies/Alerts'
+      responses:
+        '202':
+          $ref: '#/components/responses/Accepted'
+        '204':
+          $ref: '#/components/responses/AllIgnored'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+
+  /prometheus-alert:
+    post:
+      tags: [Prometheus]
+      operationId: sendPrometheusWebhook
+      summary: Receive a Prometheus Alertmanager webhook
+      description: |
+        Maps each alert in an Alertmanager webhook (version 4) to a Slack Manager alert, and processes them
+        like `POST /alerts`.
+
+        Alert fields are read from the annotations and labels of each Prometheus alert (case-insensitive,
+        annotations take precedence over labels). The first key found is used:
+
+        | Alert field | Keys |
+        |---|---|
+        | `correlationId` | `correlationId`, `correlation_id` (default: a hash of selected labels, or of the group key and start time) |
+        | `type` | `alertType`, `alert_type`, `type` |
+        | `header` | `header`, `title`, `summary` (default: `Prometheus alert`) |
+        | `text` | `text`, `description`, `body` |
+        | `fallbackText` | `fallbackText` (default: the header) |
+        | `author`, `host`, `footer`, `link`, `username` | same name |
+        | `client` | `slackmgrClient`, `slackmgr_client` |
+        | `iconEmoji` | `iconEmoji`, `icon` |
+        | `severity` | `severity`, `level` (default and `critical`: `error`; `resolved` if the alert status is resolved) |
+        | `slackChannelId` | `slackChannelId`, `channel`, `slackChannel`, `channelId`, `slack_channel_id`, `slack_channel`, `channel_id` |
+        | `routeKey` | `routeKey`, `route`, `route_key` |
+        | `autoResolveSeconds` | `autoResolveSeconds` (default and below 30: 3600) |
+        | `autoResolveAsInconclusive` | `autoResolveAsInconclusive` (default: `true`) |
+        | `issueFollowUpEnabled` | `issueFollowUpEnabled` (default: `true`) |
+        | `notificationDelaySeconds` | `notificationDelaySeconds` (default: 0) |
+        | `archivingDelaySeconds` | `archivingDelaySeconds`, `deletionDelaySeconds` (default: 21600) |
+        | `ignoreIfTextContains` | `ignoreIfTextContains` (a single term) |
+
+        If neither the header nor the text contains `:status:`, it is prepended to the header.
+      requestBody:
+        $ref: '#/components/requestBodies/PrometheusWebhook'
+      responses:
+        '202':
+          $ref: '#/components/responses/Accepted'
+        '204':
+          $ref: '#/components/responses/AllIgnored'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+  /prometheus-alert/{slackChannelId}:
+    post:
+      tags: [Prometheus]
+      operationId: sendPrometheusWebhookToChannel
+      summary: Receive a Prometheus Alertmanager webhook for a channel
+      description: |
+        Same as `POST /prometheus-alert`, but alerts without a channel in their annotations or labels are
+        sent to the channel in the path, instead of being routed by their route key.
+      parameters:
+        - $ref: '#/components/parameters/SlackChannelID'
+      requestBody:
+        $ref: '#/components/requestBodies/PrometheusWebhook'
+      responses:
+        '202':
+          $ref: '#/components/responses/Accepted'
+        '204':
+          $ref: '#/components/responses/AllIgnored'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+
+  /alerts-test:
+    post:
+      tags: [Testing]
+      operationId: testAlerts
+      summary: Test sending alerts
+      description: |
+        Parses and routes the alerts like `POST /alerts`, and logs the result at info level. The alerts are
+        not validated, rate limited or queued, and nothing is sent to Slack.
+      requestBody:
+        $ref: '#/components/requestBodies/Alerts'
+      responses:
+        '204':
+          $ref: '#/components/responses/TestAccepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+  /alerts-test/{slackChannelId}:
+    post:
+      tags: [Testing]
+      operationId: testAlertsToChannel
+      summary: Test sending alerts to a channel
+      description: Same as `POST /alerts-test`, with the channel in the path used like in `POST /alerts/{slackChannelId}`.
+      parameters:
+        - $ref: '#/components/parameters/SlackChannelID'
+      requestBody:
+        $ref: '#/components/requestBodies/Alerts'
+      responses:
+        '204':
+          $ref: '#/components/responses/TestAccepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+
+  /mappings:
+    get:
+      tags: [Information]
+      operationId: getMappings
+      summary: List routing rules
+      description: |
+        Returns the routing rules in the legacy Slack Manager mappings format, extended with `alertType`.
+        Legacy clients ignore `alertType`, so they may match typed rules that the API would not apply to
+        their (untyped) alerts.
+      responses:
+        '200':
+          description: The routing rules, in the order they are evaluated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mappings'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+
+  /channels:
+    get:
+      tags: [Information]
+      operationId: getChannels
+      summary: List managed channels
+      description: Returns the Slack channels that the Slack Manager integration is a member of.
+      responses:
+        '200':
+          description: The managed channels.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ChannelSummary'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Timeout'
+
+  /ping:
+    get:
+      tags: [Operations]
+      operationId: ping
+      summary: Health check
+      description: Returns `pong`. Can be used as a liveness probe.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: |
+            The HTTP status code of the response, for testing clients. Values outside 100-599 are ignored.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: The API is up.
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: pong
+        default:
+          description: The status code requested with the `status` query parameter.
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: pong
+
+  /openapi.yaml:
+    get:
+      tags: [Operations]
+      operationId: getOpenAPISpec
+      summary: Get the OpenAPI specification
+      description: Returns this document.
+      responses:
+        '200':
+          description: The OpenAPI specification of the API.
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+components:
+  parameters:
+    SlackChannelID:
+      name: slackChannelId
+      in: path
+      required: true
+      description: |
+        The ID or name of the Slack channel for alerts that have no `slackChannelId` in the body.
+      schema:
+        type: string
+        pattern: '^[0-9a-zA-Z_-]{1,80}$'
+      example: C0123456789
+
+  headers:
+    RetryAfter:
+      description: Seconds until all channels in the request have enough tokens for the request.
+      schema:
+        type: integer
+        minimum: 0
+    RateLimitPolicy:
+      description: |
+        The per-channel quota, as `"channel";q=<quota>;w=<window seconds>`. The window is the time to refill
+        an empty bucket, and `q/w` is the refill rate.
+      schema:
+        type: string
+      example: '"channel";q=30;w=30'
+    RateLimitLimit:
+      description: The maximum number of alerts per channel in a burst (the bucket size).
+      schema:
+        type: integer
+        minimum: 0
+    RateLimitRemaining:
+      description: The number of alerts left for the most constrained channel in the request.
+      schema:
+        type: integer
+        minimum: 0
+    RateLimitReset:
+      description: Seconds until the bucket of the most constrained channel in the request is full again.
+      schema:
+        type: integer
+        minimum: 0
+
+  requestBodies:
+    Alerts:
+      required: true
+      description: |
+        A single alert, an array of alerts, or an object with an `alerts` array. If the object has a
+        non-empty `alerts` array, any other fields at the root level are ignored.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AlertsRequest'
+          examples:
+            single:
+              summary: A single alert
+              value:
+                correlationId: app-foo-errors
+                header: ':status: App foo is failing'
+                text: Error rate is above 5%
+                fallbackText: App foo is failing
+                severity: error
+                routeKey: team-a
+                issueFollowUpEnabled: true
+                autoResolveSeconds: 3600
+            batch:
+              summary: Multiple alerts in an `alerts` array
+              value:
+                alerts:
+                  - correlationId: app-foo-errors
+                    header: ':status: App foo is failing'
+                    severity: error
+                    slackChannelId: C0123456789
+                    issueFollowUpEnabled: true
+                    autoResolveSeconds: 3600
+                  - correlationId: app-bar-latency
+                    header: ':status: App bar is slow'
+                    severity: warning
+                    slackChannelId: C0123456789
+                    issueFollowUpEnabled: true
+                    autoResolveSeconds: 3600
+            array:
+              summary: Multiple alerts in a root level array
+              value:
+                - correlationId: app-foo-errors
+                  header: ':status: App foo has recovered'
+                  severity: resolved
+                  slackChannelId: alerts-team-a
+                  issueFollowUpEnabled: true
+                  autoResolveSeconds: 3600
+    PrometheusWebhook:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/PrometheusWebhook'
+
+  responses:
+    Accepted:
+      description: |
+        All alerts were queued, except any alerts dropped by `ignoreIfTextContains`. The `RateLimit-*`
+        headers are omitted if the rate limit check failed (the alerts are then accepted).
+      headers:
+        RateLimit-Policy:
+          $ref: '#/components/headers/RateLimitPolicy'
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitRemaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimitReset'
+    AllIgnored:
+      description: All alerts were dropped by `ignoreIfTextContains`. Nothing was queued.
+    BadRequest:
+      description: |
+        The request is invalid, e.g. the body cannot be parsed, an alert fails validation, no channel can
+        be determined for an alert, the channel does not exist, is archived or read-only, the Slack Manager
+        integration is not in the channel, or the request has more alerts for a single channel than the
+        burst size. No alert was queued.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: 'input validation failed: header and text cannot both be empty'
+    TooManyRequests:
+      description: |
+        A channel in the request has fewer tokens left than the request has alerts for it. No alert was
+        queued, and no tokens were taken. Retry after `Retry-After` seconds.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+        RateLimit-Policy:
+          $ref: '#/components/headers/RateLimitPolicy'
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitRemaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimitReset'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: rate limit exceeded for 5 alerts in channel C0123456789
+    InternalError:
+      description: |
+        An internal error, e.g. a failed Slack channel lookup or queue error. Alerts queued before a queue
+        error are not rolled back.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Internal server error
+    Timeout:
+      description: The request took longer than 30 seconds to process.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: Request timeout
+    TestAccepted:
+      description: The alerts were parsed and routed, and logged.
+
+  schemas:
+    ErrorResponse:
+      type: object
+      description: The body of all error responses.
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: A human-readable description of the error.
+
+    AlertsRequest:
+      description: A single alert, an array of alerts, or an object with an `alerts` array.
+      anyOf:
+        - $ref: '#/components/schemas/AlertBatch'
+        - type: array
+          items:
+            $ref: '#/components/schemas/Alert'
+        - $ref: '#/components/schemas/Alert'
+
+    AlertBatch:
+      type: object
+      description: Multiple alerts in an `alerts` array.
+      required: [alerts]
+      properties:
+        alerts:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Alert'
+
+    Alert:
+      type: object
+      description: |
+        A single alert. Alerts with the same correlation ID are grouped into one issue per channel.
+
+        All fields are optional, but `header` and `text` cannot both be empty. String fields are trimmed,
+        and some are truncated to a maximum length rather than rejected (noted per field). The API ignores
+        unknown fields.
+      anyOf:
+        - required: [header]
+          properties:
+            header:
+              minLength: 1
+        - required: [text]
+          properties:
+            text:
+              minLength: 1
+      if:
+        required: [issueFollowUpEnabled]
+        properties:
+          issueFollowUpEnabled:
+            const: true
+      then:
+        required: [autoResolveSeconds]
+        properties:
+          autoResolveSeconds:
+            minimum: 30
+            maximum: 63113851
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: |
+            When the alert was created. Missing values and values older than 7 days are replaced with the
+            current time.
+        correlationId:
+          type: string
+          maxLength: 500
+          description: |
+            Groups related alerts into one issue. If empty, a hash of header, author, host, text and channel
+            is used. Set an explicit value, so that the header and text can change without creating a new
+            issue.
+        type:
+          type: string
+          description: The case-insensitive alert type, e.g. `security`, used by routing rules.
+        header:
+          type: string
+          description: |
+            The header (title) of the alert. Truncated at 130 characters. `:status:` is replaced with the
+            emoji for the issue severity.
+        headerWhenResolved:
+          type: string
+          description: The header when the issue is resolved or info. Truncated at 130 characters.
+        text:
+          type: string
+          description: |
+            The text (body) of the alert, in Slack markdown. Truncated at 10000 characters. `:status:` is
+            replaced with the emoji for the issue severity.
+        textWhenResolved:
+          type: string
+          description: The text when the issue is resolved or info. Truncated at 10000 characters.
+        fallbackText:
+          type: string
+          description: |
+            A short plain text summary, shown in Slack notifications. Truncated at 150 characters.
+        author:
+          type: string
+          description: Shown as context in the Slack post. Truncated at 100 characters.
+        host:
+          type: string
+          description: The host on which the alert originated. Truncated at 100 characters.
+        footer:
+          type: string
+          description: Shown at the bottom of the Slack post. Truncated at 300 characters.
+        link:
+          description: A link to more information. Must be an absolute URL if set.
+          anyOf:
+            - type: string
+              const: ''
+            - type: string
+              format: uri
+        issueFollowUpEnabled:
+          type: boolean
+          description: |
+            If true, an issue is tracked: it is resolved after `autoResolveSeconds` (or immediately for
+            severity `resolved`), and can be managed with Slack reactions. If false, the alert is a
+            fire-and-forget notification. Ignored for severity `info`.
+        autoResolveSeconds:
+          type: integer
+          description: |
+            Seconds until the issue is resolved automatically. Required, and between 30 and 63113851, when
+            `issueFollowUpEnabled` is true.
+        autoResolveAsInconclusive:
+          type: boolean
+          description: Resolve the issue as inconclusive instead of resolved when it is auto-resolved.
+        severity:
+          type: string
+          enum: ['', panic, error, warning, resolved, info]
+          description: |
+            The severity, which determines the status emoji. Case-insensitive. Empty means `error`. The
+            legacy values `critical` (as `error`) and `resolve`, `recover` and `recovered` (as `resolved`)
+            are also accepted.
+        slackChannelId:
+          type: string
+          pattern: '^([0-9a-zA-Z_-]{1,80})?$'
+          description: |
+            The ID or name of the Slack channel. Takes precedence over the path parameter and `routeKey`.
+            The Slack Manager integration must be a member of the channel.
+        routeKey:
+          type: string
+          maxLength: 1000
+          description: The case-insensitive route key, matched against the routing rules.
+        username:
+          type: string
+          description: The username to post as. Truncated at 100 characters.
+        client:
+          type: string
+          description: |
+            The client that produced the alert, e.g. `prometheus`. Used for insights and reporting only.
+            Truncated at 100 characters. If empty, `username` is used.
+        iconEmoji:
+          type: string
+          pattern: '^(:[^:]{1,50}:)?$'
+          description: The emoji to post with, as `:emoji:`.
+        fields:
+          type: [array, 'null']
+          maxItems: 20
+          description: Fields shown in two columns in the Slack post.
+          items:
+            $ref: '#/components/schemas/Field'
+        notificationDelaySeconds:
+          type: integer
+          description: |
+            Seconds to wait before posting to Slack. If the issue is resolved before then, nothing is
+            posted. Only used when `issueFollowUpEnabled` is true. Negative values are treated as 0.
+        archivingDelaySeconds:
+          type: integer
+          description: |
+            Seconds to wait after the issue is resolved before archiving it. A new alert with the same
+            correlation ID reopens a resolved issue until it is archived. Negative values are treated as 0.
+        escalation:
+          type: [array, 'null']
+          maxItems: 3
+          description: Escalation points, triggered in order of `delaySeconds` while the issue is unresolved.
+          items:
+            $ref: '#/components/schemas/Escalation'
+        ignoreIfTextContains:
+          type: [array, 'null']
+          maxItems: 20
+          description: The alert is dropped if its text contains any of these terms (case-insensitive).
+          items:
+            type: string
+            maxLength: 1000
+        webhooks:
+          type: [array, 'null']
+          maxItems: 5
+          description: Interactive buttons on the Slack post. Requires an encryption key in the API config.
+          items:
+            $ref: '#/components/schemas/Webhook'
+        metadata:
+          type: [object, 'null']
+          description: Arbitrary data stored with the alert. Not interpreted by the Slack Manager.
+          additionalProperties: true
+        failOnRateLimitError:
+          type: boolean
+          deprecated: true
+          description: No longer used.
+        deletionDelaySeconds:
+          type: integer
+          deprecated: true
+          description: |
+            Legacy alias for `archivingDelaySeconds`. Ignored unless the manager runs with legacy features
+            enabled.
+
+    Field:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Truncated at 30 characters.
+        value:
+          type: string
+          description: Truncated at 200 characters.
+
+    Escalation:
+      type: object
+      required: [severity, delaySeconds]
+      properties:
+        severity:
+          type: string
+          enum: [panic, error, warning]
+          description: The new severity of the issue. Case-insensitive.
+        delaySeconds:
+          type: integer
+          minimum: 30
+          description: |
+            Seconds after the issue was created. Must be at least 30 seconds after the previous escalation.
+        slackMentions:
+          type: [array, 'null']
+          maxItems: 10
+          description: Mentions added to the Slack post, e.g. `<!here>` or `<@U0123456789>`.
+          items:
+            type: string
+            pattern: '^((<!here>)|(<!channel>)|(<@[^>\s]{1,20}>))$'
+        moveToChannel:
+          type: string
+          pattern: '^([0-9a-zA-Z_-]{1,80})?$'
+          description: The ID or name of a Slack channel to move the issue to.
+
+    Webhook:
+      type: object
+      description: |
+        An interactive button on the Slack post. When clicked, the payload is posted to the URL (or passed
+        to a custom webhook handler in the host application).
+      required: [id, url, buttonText]
+      if:
+        required: [skipConfirmationDialog]
+        properties:
+          skipConfirmationDialog:
+            const: true
+      then:
+        description: Destructive buttons and buttons with inputs require the confirmation dialog.
+        properties:
+          buttonStyle:
+            not:
+              const: danger
+          plainTextInput:
+            maxItems: 0
+          checkboxInput:
+            maxItems: 0
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Unique among the webhooks of the alert.
+        url:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: |
+            An absolute http(s) URL, or the printable ASCII identifier of a custom webhook handler.
+        confirmationText:
+          type: string
+          maxLength: 1000
+          description: The header of the confirmation dialog.
+        skipConfirmationDialog:
+          type: boolean
+          description: |
+            Fire the webhook without a confirmation dialog. Not allowed for `danger` buttons or with inputs.
+        buttonText:
+          type: string
+          minLength: 1
+          maxLength: 25
+        buttonStyle:
+          type: string
+          enum: ['', default, primary, danger]
+          description: Empty means `default`.
+        accessLevel:
+          type: string
+          enum: ['', global_admins, channel_admins, channel_members]
+          description: Who can click the button. Empty means `global_admins`.
+        displayMode:
+          type: string
+          enum: ['', always, open_issue, resolved_issue]
+          description: When the button is shown. Empty means `open_issue`.
+        payload:
+          type: [object, 'null']
+          maxProperties: 50
+          additionalProperties: true
+          description: Static data posted back when the webhook fires.
+        plainTextInput:
+          type: [array, 'null']
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/WebhookPlainTextInput'
+        checkboxInput:
+          type: [array, 'null']
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/WebhookCheckboxInput'
+        afterClick:
+          $ref: '#/components/schemas/WebhookAfterClick'
+
+    WebhookPlainTextInput:
+      type: object
+      description: A text input in the confirmation dialog. Input IDs must be unique within the webhook.
+      required: [id]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 200
+        minLength:
+          type: integer
+          minimum: 0
+          maximum: 3000
+          description: 0 makes the input optional.
+        maxLength:
+          type: integer
+          minimum: 0
+          maximum: 3000
+          description: Must be at least `minLength`.
+        multiline:
+          type: boolean
+        initialValue:
+          type: string
+          maxLength: 3000
+          description: Cannot be longer than `maxLength`.
+
+    WebhookCheckboxInput:
+      type: object
+      description: A checkbox group in the confirmation dialog. Input IDs must be unique within the webhook.
+      required: [id]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        label:
+          type: string
+          maxLength: 200
+        options:
+          type: [array, 'null']
+          maxItems: 5
+          items:
+            $ref: '#/components/schemas/WebhookCheckboxOption'
+
+    WebhookCheckboxOption:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Unique within the checkbox group.
+        text:
+          type: string
+          maxLength: 50
+        selected:
+          type: boolean
+
+    WebhookAfterClick:
+      type: [object, 'null']
+      description: How the Slack post changes after the button was clicked, until the next alert for the issue.
+      properties:
+        hideButtons:
+          type: string
+          enum: ['', none, clicked, all]
+          description: Which buttons to hide. Empty means `none`.
+        hideWebhookIds:
+          type: [array, 'null']
+          maxItems: 5
+          description: Additional webhooks (by ID) to hide.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+        statusText:
+          type: string
+          maxLength: 200
+          description: A text shown on the Slack post, with the clicking user and time.
+        resetAfterSeconds:
+          type: integer
+          minimum: 0
+          maximum: 86400
+          description: Seconds until the post-click state is reset if no new alert arrives. 0 means 300.
+
+    PrometheusWebhook:
+      type: object
+      description: An Alertmanager webhook (version 4). Only the documented fields are used.
+      required: [alerts]
+      properties:
+        version:
+          type: string
+        groupKey:
+          type: string
+        truncatedAlerts:
+          type: integer
+        status:
+          type: string
+        receiver:
+          type: string
+        groupLabels:
+          type: object
+          additionalProperties:
+            type: string
+        commonLabels:
+          type: object
+          additionalProperties:
+            type: string
+        commonAnnotations:
+          type: object
+          additionalProperties:
+            type: string
+        externalURL:
+          type: string
+        alerts:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PrometheusAlert'
+
+    PrometheusAlert:
+      type: object
+      properties:
+        status:
+          type: string
+          description: '`firing` or `resolved`.'
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        generatorURL:
+          type: string
+        fingerprint:
+          type: string
+
+    Mappings:
+      type: object
+      required: [rules]
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/MappingRule'
+
+    MappingRule:
+      type: object
+      description: A routing rule. A rule matches a route key if any of its conditions match.
+      required: [teamName, description, alertType, equals, hasPrefix, matchesRegex, channel, matchAll]
+      properties:
+        teamName:
+          type: string
+          description: The rule name.
+        description:
+          type: string
+          description: The rule description, or the rule name if it has none.
+        alertType:
+          type: string
+          description: The alert type the rule applies to. Empty means all types.
+        equals:
+          type: [array, 'null']
+          items:
+            type: string
+        hasPrefix:
+          type: [array, 'null']
+          items:
+            type: string
+        matchesRegex:
+          type: [array, 'null']
+          items:
+            type: string
+        channel:
+          type: string
+          description: The Slack channel ID.
+        matchAll:
+          type: boolean
+          description: The rule matches all route keys (the fallback rule).
+
+    ChannelSummary:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          example: C0123456789
+        name:
+          type: string
+          example: alerts-team-a
