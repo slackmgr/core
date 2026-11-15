@@ -734,11 +734,11 @@ components:
           description: Resolve the issue as inconclusive instead of resolved when it is auto-resolved.
         severity:
           type: string
-          enum: ['', panic, error, warning, resolved, info]
+          enum: [panic, error, warning, resolved, info]
           description: |
-            The severity, which determines the status emoji. Case-insensitive. Empty means `error`. The
-            legacy values `critical` (as `error`) and `resolve`, `recover` and `recovered` (as `resolved`)
-            are also accepted.
+            The severity, which determines the status emoji. Omit for `error`. For compatibility, the API
+            also accepts any casing, an empty string (as `error`), and the legacy values `critical` (as
+            `error`) and `resolve`, `recover` and `recovered` (as `resolved`).
         slackChannelId:
           type: string
           pattern: '^([0-9a-zA-Z_-]{1,80})?$'
@@ -881,16 +881,16 @@ components:
           maxLength: 25
         buttonStyle:
           type: string
-          enum: ['', default, primary, danger]
-          description: Empty means `default`.
+          enum: [default, primary, danger]
+          description: Omit for `default`. The API also accepts an empty string.
         accessLevel:
           type: string
-          enum: ['', global_admins, channel_admins, channel_members]
-          description: Who can click the button. Empty means `global_admins`.
+          enum: [global_admins, channel_admins, channel_members]
+          description: Who can click the button. Omit for `global_admins`. The API also accepts an empty string.
         displayMode:
           type: string
-          enum: ['', always, open_issue, resolved_issue]
-          description: When the button is shown. Empty means `open_issue`.
+          enum: [always, open_issue, resolved_issue]
+          description: When the button is shown. Omit for `open_issue`. The API also accepts an empty string.
         payload:
           type: [object, 'null']
           maxProperties: 50
@@ -977,8 +977,8 @@ components:
       properties:
         hideButtons:
           type: string
-          enum: ['', none, clicked, all]
-          description: Which buttons to hide. Empty means `none`.
+          enum: [none, clicked, all]
+          description: Which buttons to hide. Omit for `none`. The API also accepts an empty string.
         hideWebhookIds:
           type: [array, 'null']
           maxItems: 5

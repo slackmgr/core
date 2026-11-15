@@ -235,11 +235,13 @@ func TestOpenAPISpec_AlertRequests(t *testing.T) {
 
 	// valid is whether the server accepts the body. serverOnly marks rules across fields, which are
 	// described in the spec, but validated only by the server (to keep the schemas plain for code generators).
+	// lenient marks values that the server accepts for compatibility, but the spec does not (e.g. empty enums).
 	tests := []struct {
 		name       string
 		body       any
 		valid      bool
 		serverOnly bool
+		lenient    bool
 	}{
 		{
 			name:  "minimal single alert",
@@ -298,6 +300,42 @@ func TestOpenAPISpec_AlertRequests(t *testing.T) {
 			name:  "alerts in an alerts field",
 			body:  map[string]any{"alerts": []any{clientAlert(nil), clientAlert(nil)}},
 			valid: true,
+		},
+		{
+			name:    "empty severity",
+			body:    map[string]any{"header": "Header", "slackChannelId": "C123", "severity": ""},
+			valid:   true,
+			lenient: true,
+		},
+		{
+			name:    "upper case severity",
+			body:    map[string]any{"header": "Header", "slackChannelId": "C123", "severity": "Error"},
+			valid:   true,
+			lenient: true,
+		},
+		{
+			name:    "legacy severity",
+			body:    map[string]any{"header": "Header", "slackChannelId": "C123", "severity": "critical"},
+			valid:   true,
+			lenient: true,
+		},
+		{
+			name: "omitted webhook enums",
+			body: clientAlert(func(a *types.Alert) {
+				a.Webhooks = webhook(func(w *types.Webhook) {
+					w.AfterClick = &types.WebhookAfterClick{StatusText: "Restarting"}
+				})
+			}),
+			valid: true,
+		},
+		{
+			name: "explicitly empty webhook enums",
+			body: map[string]any{"header": "Header", "slackChannelId": "C123", "webhooks": []any{map[string]any{
+				"id": "restart", "url": "https://example.com/restart", "buttonText": "Restart",
+				"buttonStyle": "", "accessLevel": "", "displayMode": "", "afterClick": map[string]any{"hideButtons": ""},
+			}}},
+			valid:   true,
+			lenient: true,
 		},
 		{
 			name:       "header and text both missing",
@@ -474,7 +512,7 @@ func TestOpenAPISpec_AlertRequests(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 
 			specValid, errs := v.ValidateHttpRequestSync(req)
-			assert.Equal(t, tt.valid || tt.serverOnly, specValid, "spec validation: %s", formatValidationErrors(errs))
+			assert.Equal(t, (tt.valid && !tt.lenient) || tt.serverOnly, specValid, "spec validation: %s", formatValidationErrors(errs))
 
 			// The server must agree with the spec.
 			serverErr := serverValidateAlerts(body)
