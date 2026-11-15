@@ -74,14 +74,16 @@ paths:
       operationId: sendAlerts
       summary: Send alerts
       description: |
-        Validates, routes and queues one or more alerts. The body is a single alert, an array of alerts,
-        or an object with an `alerts` array.
+        Validates, routes and queues one or more alerts, sent in an `alerts` array.
+
+        For compatibility, the API also accepts a single alert or a root level array of alerts here, as
+        documented for the deprecated aliases (e.g. `POST /alert`). New clients should use the `alerts` array.
 
         The request is accepted or rejected as a whole: if any alert fails validation, routing or the rate
         limit, no alert in the request is queued. Only a queue error can fail a request after some of its
         alerts have been queued.
       requestBody:
-        $ref: '#/components/requestBodies/Alerts'
+        $ref: '#/components/requestBodies/AlertBatch'
       responses:
         '202':
           $ref: '#/components/responses/Accepted'
@@ -106,7 +108,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SlackChannelID'
       requestBody:
-        $ref: '#/components/requestBodies/Alerts'
+        $ref: '#/components/requestBodies/AlertBatch'
       responses:
         '202':
           $ref: '#/components/responses/Accepted'
@@ -501,6 +503,32 @@ components:
         minimum: 0
 
   requestBodies:
+    AlertBatch:
+      required: true
+      description: One or more alerts in an `alerts` array.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AlertBatch'
+          examples:
+            batch:
+              summary: Multiple alerts
+              value:
+                alerts:
+                  - correlationId: app-foo-errors
+                    header: ':status: App foo is failing'
+                    text: Error rate is above 5%
+                    fallbackText: App foo is failing
+                    severity: error
+                    routeKey: team-a
+                    issueFollowUpEnabled: true
+                    autoResolveSeconds: 3600
+                  - correlationId: app-bar-latency
+                    header: ':status: App bar is slow'
+                    severity: warning
+                    slackChannelId: C0123456789
+                    issueFollowUpEnabled: true
+                    autoResolveSeconds: 3600
     Alerts:
       required: true
       description: |
@@ -636,8 +664,9 @@ components:
 
     AlertsRequest:
       description: |
-        A single alert, an array of alerts, or an object with an `alerts` array. New clients should send an
-        `AlertBatch` (like the Go client); the other forms are accepted for compatibility.
+        A single alert, an array of alerts, or an object with an `alerts` array. Accepted by the deprecated
+        aliases and `POST /alerts-test` (and, for compatibility, by `POST /alerts`). New clients should send an
+        `AlertBatch` to `POST /alerts`, like the Go client.
       anyOf:
         - $ref: '#/components/schemas/AlertBatch'
         - type: array

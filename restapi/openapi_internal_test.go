@@ -201,6 +201,7 @@ func TestServer_HandleOpenAPISpec(t *testing.T) {
 }
 
 // TestOpenAPISpec_AlertRequests checks that the spec and the server agree on which alert request bodies are valid.
+// It uses the deprecated POST /alert alias, which accepts all body forms in the spec (see TestOpenAPISpec_AlertBodyForms).
 func TestOpenAPISpec_AlertRequests(t *testing.T) {
 	t.Parallel()
 
@@ -508,7 +509,7 @@ func TestOpenAPISpec_AlertRequests(t *testing.T) {
 			body, err := json.Marshal(tt.body)
 			require.NoError(t, err)
 
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alerts", bytes.NewReader(body))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/alert", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 
 			specValid, errs := v.ValidateHttpRequestSync(req)
@@ -522,6 +523,55 @@ func TestOpenAPISpec_AlertRequests(t *testing.T) {
 				assert.Error(t, serverErr, "server validation")
 			}
 		})
+	}
+}
+
+// TestOpenAPISpec_AlertBodyForms checks which alert body forms each path accepts in the spec. POST /alerts only
+// accepts an alerts array (AlertBatch), so that generated clients get a plain request type. The server accepts all
+// forms on all paths.
+func TestOpenAPISpec_AlertBodyForms(t *testing.T) {
+	t.Parallel()
+
+	alert := `{"header":"Header","slackChannelId":"C123"}`
+
+	forms := map[string]string{
+		"batch":  `{"alerts":[` + alert + `]}`,
+		"single": alert,
+		"array":  `[` + alert + `]`,
+	}
+
+	tests := []struct {
+		path  string
+		forms []string
+	}{
+		{path: "/alerts", forms: []string{"batch"}},
+		{path: "/alerts/C123", forms: []string{"batch"}},
+		{path: "/alert", forms: []string{"batch", "single", "array"}},
+		{path: "/alert/C123", forms: []string{"batch", "single", "array"}},
+		{path: "/slackalert", forms: []string{"batch", "single", "array"}},
+		{path: "/slackalert/C123", forms: []string{"batch", "single", "array"}},
+		{path: "/slackalerts", forms: []string{"batch", "single", "array"}},
+		{path: "/slackalerts/C123", forms: []string{"batch", "single", "array"}},
+		{path: "/alerts-test", forms: []string{"batch", "single", "array"}},
+		{path: "/alerts-test/C123", forms: []string{"batch", "single", "array"}},
+	}
+
+	v := newOpenAPIValidator(t)
+
+	for _, tt := range tests {
+		for form, body := range forms {
+			t.Run(tt.path+" "+form, func(t *testing.T) {
+				t.Parallel()
+
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tt.path, strings.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+
+				valid, errs := v.ValidateHttpRequestSync(req)
+				assert.Equal(t, slices.Contains(tt.forms, form), valid, formatValidationErrors(errs))
+
+				assert.NoError(t, serverValidateAlerts([]byte(body)), "the server accepts all forms")
+			})
+		}
 	}
 }
 
@@ -551,7 +601,7 @@ func serverValidateAlerts(body []byte) error {
 func TestOpenAPISpec_Responses(t *testing.T) {
 	t.Parallel()
 
-	validAlert := `{"header":"Header","slackChannelId":"C123"}`
+	validAlert := `{"alerts":[{"header":"Header","slackChannelId":"C123"}]}`
 
 	prometheusWebhook := `{"version":"4","groupKey":"g","status":"firing","receiver":"slackmgr","alerts":[` +
 		`{"status":"firing","labels":{"alertname":"HighLatency","channel":"C123"},"annotations":{"summary":"Latency is high"},` +
@@ -569,18 +619,18 @@ func TestOpenAPISpec_Responses(t *testing.T) {
 			name: "send alerts", method: http.MethodPost, path: "/alerts", body: validAlert, wantStatus: http.StatusAccepted,
 		},
 		{
-			name: "send alerts to channel", method: http.MethodPost, path: "/alerts/C123", body: `{"header":"Header"}`, wantStatus: http.StatusAccepted,
+			name: "send alerts to channel", method: http.MethodPost, path: "/alerts/C123", body: `{"alerts":[{"header":"Header"}]}`, wantStatus: http.StatusAccepted,
 		},
 		{
 			name: "send alerts with deprecated alias", method: http.MethodPost, path: "/slackalerts", body: validAlert, wantStatus: http.StatusAccepted,
 		},
 		{
 			name: "send alerts that are all ignored", method: http.MethodPost, path: "/alerts",
-			body:       `{"text":"some noise","slackChannelId":"C123","ignoreIfTextContains":["noise"]}`,
+			body:       `{"alerts":[{"text":"some noise","slackChannelId":"C123","ignoreIfTextContains":["noise"]}]}`,
 			wantStatus: http.StatusNoContent,
 		},
 		{
-			name: "send invalid alert", method: http.MethodPost, path: "/alerts", body: `{"slackChannelId":"C123"}`, wantStatus: http.StatusBadRequest,
+			name: "send invalid alert", method: http.MethodPost, path: "/alerts", body: `{"alerts":[{"slackChannelId":"C123"}]}`, wantStatus: http.StatusBadRequest,
 		},
 		{
 			name: "send unparseable body", method: http.MethodPost, path: "/alerts", body: `{`, wantStatus: http.StatusBadRequest,

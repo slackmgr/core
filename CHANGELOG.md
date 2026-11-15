@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Bumped `github.com/slackmgr/types` to v0.13.0: alerts written to the queue and database omit zero-valued fields
+- The OpenAPI spec documents only the `alerts` array (`AlertBatch`) as the request body of `POST /alerts` and `POST /alerts/{slackChannelId}`, so that generated clients get a plain request type. The API still accepts a single alert or a root level array there; these forms stay documented on the deprecated aliases and `POST /alerts-test`
 - The OpenAPI spec no longer lists empty strings in enums (`severity`, `buttonStyle`, `accessLevel`, `displayMode`, `hideButtons`). The API still accepts them, as described in the field descriptions
 - `GET /openapi.yaml` adds a new `path` label value to `http_server_request_duration_seconds` (the dashboard panels group by path generically, so no dashboard change is needed)
 
