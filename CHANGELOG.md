@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-15
+
 ### Added
 - OpenAPI 3.1 specification of the REST API in `restapi/openapi.yaml`, served at `GET /openapi.yaml` and exposed as `restapi.OpenAPISpec()`. `POST /alert` and `POST /slackalert[s]` are documented as deprecated aliases of `POST /alerts`
 - Contract tests checking the spec against the registered routes, the JSON fields of the Go types (`types.Alert` and nested types, Prometheus webhook, responses), the server's alert validation and its responses, and Redocly CLI linting of the spec in CI
@@ -659,7 +661,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.29.1...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/slackmgr/core/compare/v0.29.1...v0.30.0
 [0.29.1]: https://github.com/slackmgr/core/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/slackmgr/core/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/slackmgr/core/compare/v0.27.0...v0.28.0
