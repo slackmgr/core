@@ -635,7 +635,9 @@ components:
           description: A human-readable description of the error.
 
     AlertsRequest:
-      description: A single alert, an array of alerts, or an object with an `alerts` array.
+      description: |
+        A single alert, an array of alerts, or an object with an `alerts` array. New clients should send an
+        `AlertBatch` (like the Go client); the other forms are accepted for compatibility.
       anyOf:
         - $ref: '#/components/schemas/AlertBatch'
         - type: array
@@ -659,29 +661,13 @@ components:
       description: |
         A single alert. Alerts with the same correlation ID are grouped into one issue per channel.
 
-        All fields are optional, but `header` and `text` cannot both be empty. String fields are trimmed,
-        and some are truncated to a maximum length rather than rejected (noted per field). The API ignores
-        unknown fields.
-      anyOf:
-        - required: [header]
-          properties:
-            header:
-              minLength: 1
-        - required: [text]
-          properties:
-            text:
-              minLength: 1
-      if:
-        required: [issueFollowUpEnabled]
-        properties:
-          issueFollowUpEnabled:
-            const: true
-      then:
-        required: [autoResolveSeconds]
-        properties:
-          autoResolveSeconds:
-            minimum: 30
-            maximum: 63113851
+        All fields are optional, with these rules across fields (validated by the API, not by this schema):
+
+        - `header` and `text` cannot both be empty
+        - `autoResolveSeconds` must be between 30 and 63113851 when `issueFollowUpEnabled` is true
+
+        String fields are trimmed, and some are truncated to a maximum length rather than rejected (noted per
+        field). The API ignores unknown fields.
       properties:
         timestamp:
           type: string
@@ -729,12 +715,9 @@ components:
           type: string
           description: Shown at the bottom of the Slack post. Truncated at 300 characters.
         link:
-          description: A link to more information. Must be an absolute URL if set.
-          anyOf:
-            - type: string
-              const: ''
-            - type: string
-              format: uri
+          type: string
+          pattern: '^([a-zA-Z][a-zA-Z0-9+.-]*:\S+)?$'
+          description: A link to more information. Must be an absolute URL (with a scheme) if set.
         issueFollowUpEnabled:
           type: boolean
           description: |
@@ -868,22 +851,10 @@ components:
       description: |
         An interactive button on the Slack post. When clicked, the payload is posted to the URL (or passed
         to a custom webhook handler in the host application).
+
+        `skipConfirmationDialog` must be false for `danger` buttons and for buttons with inputs (validated by
+        the API, not by this schema).
       required: [id, url, buttonText]
-      if:
-        required: [skipConfirmationDialog]
-        properties:
-          skipConfirmationDialog:
-            const: true
-      then:
-        description: Destructive buttons and buttons with inputs require the confirmation dialog.
-        properties:
-          buttonStyle:
-            not:
-              const: danger
-          plainTextInput:
-            maxItems: 0
-          checkboxInput:
-            maxItems: 0
       properties:
         id:
           type: string

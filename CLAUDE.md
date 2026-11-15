@@ -75,6 +75,7 @@ Dashboard conventions:
 **CRITICAL:** `restapi/openapi.yaml` (OpenAPI 3.1) is the source of truth for the REST API contract. Any change to routes, request or response bodies, status codes, headers, or alert validation (including `types.Alert` fields and limits) MUST update the spec in the same commit.
 
 - `restapi/openapi_internal_test.go` enforces it: routes vs. spec paths, deprecated flags, server vs. spec agreement on alert payloads, and response conformance. Add cases there for new behavior
+- Keep schemas plain for code generators: no `anyOf`/`oneOf`/`if`/`then` in model schemas. Describe rules across fields in the schema description, and mark their test cases `serverOnly`
 - Lint with `npx @redocly/cli lint` (config in `redocly.yaml`); CI runs it in the `Lint` job
 - On release, set `info.version` in the spec to the new version
 

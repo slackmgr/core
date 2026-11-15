@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - OpenAPI 3.1 specification of the REST API in `restapi/openapi.yaml`, served at `GET /openapi.yaml` and exposed as `restapi.OpenAPISpec()`. `POST /alert` and `POST /slackalert[s]` are documented as deprecated aliases of `POST /alerts`
-- Contract tests checking the spec against the registered routes, the server's alert validation and its responses, and Redocly CLI linting of the spec in CI
+- Contract tests checking the spec against the registered routes, the JSON fields of the Go types (`types.Alert` and nested types, Prometheus webhook, responses), the server's alert validation and its responses, and Redocly CLI linting of the spec in CI
 - `API docs` workflow publishing a Redoc API reference to GitHub Pages
 
 ### Changed

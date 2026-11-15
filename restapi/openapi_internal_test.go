@@ -6,12 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pb33f/libopenapi"
@@ -230,10 +233,13 @@ func TestOpenAPISpec_AlertRequests(t *testing.T) {
 		return []*types.Webhook{w}
 	}
 
+	// valid is whether the server accepts the body. serverOnly marks rules across fields, which are
+	// described in the spec, but validated only by the server (to keep the schemas plain for code generators).
 	tests := []struct {
-		name  string
-		body  any
-		valid bool
+		name       string
+		body       any
+		valid      bool
+		serverOnly bool
 	}{
 		{
 			name:  "minimal single alert",
@@ -294,14 +300,16 @@ func TestOpenAPISpec_AlertRequests(t *testing.T) {
 			valid: true,
 		},
 		{
-			name:  "header and text both missing",
-			body:  map[string]any{"slackChannelId": "C123"},
-			valid: false,
+			name:       "header and text both missing",
+			body:       map[string]any{"slackChannelId": "C123"},
+			valid:      false,
+			serverOnly: true,
 		},
 		{
-			name:  "header and text both empty",
-			body:  clientAlert(func(a *types.Alert) { a.Header = "" }),
-			valid: false,
+			name:       "header and text both empty",
+			body:       clientAlert(func(a *types.Alert) { a.Header = "" }),
+			valid:      false,
+			serverOnly: true,
 		},
 		{
 			name:  "invalid severity",
@@ -329,9 +337,10 @@ func TestOpenAPISpec_AlertRequests(t *testing.T) {
 			valid: false,
 		},
 		{
-			name:  "issue follow-up without auto resolve",
-			body:  clientAlert(func(a *types.Alert) { a.IssueFollowUpEnabled = true }),
-			valid: false,
+			name:       "issue follow-up without auto resolve",
+			body:       clientAlert(func(a *types.Alert) { a.IssueFollowUpEnabled = true }),
+			valid:      false,
+			serverOnly: true,
 		},
 		{
 			name: "auto resolve too high",
@@ -339,7 +348,8 @@ func TestOpenAPISpec_AlertRequests(t *testing.T) {
 				a.IssueFollowUpEnabled = true
 				a.AutoResolveSeconds = types.MaxAutoResolveSeconds + 1
 			}),
-			valid: false,
+			valid:      false,
+			serverOnly: true,
 		},
 		{
 			name: "too many fields",
@@ -417,7 +427,8 @@ func TestOpenAPISpec_AlertRequests(t *testing.T) {
 					w.SkipConfirmationDialog = true
 				})
 			}),
-			valid: false,
+			valid:      false,
+			serverOnly: true,
 		},
 		{
 			name: "webhook with inputs without confirmation dialog",
@@ -427,7 +438,8 @@ func TestOpenAPISpec_AlertRequests(t *testing.T) {
 					w.PlainTextInput = []*types.WebhookPlainTextInput{{ID: "reason", MaxLength: 100}}
 				})
 			}),
-			valid: false,
+			valid:      false,
+			serverOnly: true,
 		},
 		{
 			name: "webhook after click reset too high",
@@ -462,7 +474,7 @@ func TestOpenAPISpec_AlertRequests(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 
 			specValid, errs := v.ValidateHttpRequestSync(req)
-			assert.Equal(t, tt.valid, specValid, "spec validation: %s", formatValidationErrors(errs))
+			assert.Equal(t, tt.valid || tt.serverOnly, specValid, "spec validation: %s", formatValidationErrors(errs))
 
 			// The server must agree with the spec.
 			serverErr := serverValidateAlerts(body)
@@ -631,4 +643,124 @@ func TestOpenAPISpec_Responses(t *testing.T) {
 			assert.True(t, valid, formatValidationErrors(errs))
 		})
 	}
+}
+
+// TestOpenAPISpec_SchemaFields checks that the schemas in the spec have exactly the JSON fields of the Go types
+// they describe, so that a field added to (or removed from) a type cannot be missed in the spec.
+func TestOpenAPISpec_SchemaFields(t *testing.T) {
+	t.Parallel()
+
+	schemaTypes := map[string]reflect.Type{
+		"Alert":                 reflect.TypeFor[types.Alert](),
+		"Field":                 reflect.TypeFor[types.Field](),
+		"Escalation":            reflect.TypeFor[types.Escalation](),
+		"Webhook":               reflect.TypeFor[types.Webhook](),
+		"WebhookPlainTextInput": reflect.TypeFor[types.WebhookPlainTextInput](),
+		"WebhookCheckboxInput":  reflect.TypeFor[types.WebhookCheckboxInput](),
+		"WebhookCheckboxOption": reflect.TypeFor[types.WebhookCheckboxOption](),
+		"WebhookAfterClick":     reflect.TypeFor[types.WebhookAfterClick](),
+		"PrometheusWebhook":     reflect.TypeFor[PrometheusWebhook](),
+		"PrometheusAlert":       reflect.TypeFor[PrometheusAlert](),
+		"Mappings":              reflect.TypeFor[legacyAlertMappings](),
+		"MappingRule":           reflect.TypeFor[legacyMappingRule](),
+		"ChannelSummary":        reflect.TypeFor[internal.ChannelSummary](),
+		"ErrorResponse":         reflect.TypeFor[errorResponse](),
+	}
+
+	t.Run("every struct type in an alert has a schema", func(t *testing.T) {
+		t.Parallel()
+
+		mapped := make(map[reflect.Type]bool, len(schemaTypes))
+		for _, typ := range schemaTypes {
+			mapped[typ] = true
+		}
+
+		for _, typ := range nestedStructTypes(reflect.TypeFor[types.Alert]()) {
+			assert.True(t, mapped[typ], "%s is used in types.Alert, but is not mapped to a schema in this test", typ)
+		}
+	})
+
+	model, _ := openAPI()
+
+	for name, typ := range schemaTypes {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			proxy := model.Components.Schemas.GetOrZero(name)
+			require.NotNil(t, proxy, "schema %s not found", name)
+
+			schema := proxy.Schema()
+			require.NotNil(t, schema, "schema %s cannot be built", name)
+
+			var properties []string
+			if schema.Properties != nil {
+				for prop := range schema.Properties.KeysFromOldest() {
+					properties = append(properties, prop)
+				}
+			}
+
+			fields := jsonFieldNames(typ)
+
+			slices.Sort(properties)
+			slices.Sort(fields)
+
+			assert.Equal(t, fields, properties, "the properties of schema %s must match the JSON fields of %s", name, typ)
+		})
+	}
+}
+
+// jsonFieldNames returns the JSON field names of a struct type.
+func jsonFieldNames(typ reflect.Type) []string {
+	names := make([]string, 0, typ.NumField())
+
+	for field := range typ.Fields() {
+		if !field.IsExported() {
+			continue
+		}
+
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+
+		switch name {
+		case "-":
+			continue
+		case "":
+			name = field.Name
+		}
+
+		names = append(names, name)
+	}
+
+	return names
+}
+
+// nestedStructTypes returns the struct types used by the fields of a struct type, recursively.
+func nestedStructTypes(typ reflect.Type) []reflect.Type {
+	seen := map[reflect.Type]bool{}
+
+	var visit func(t reflect.Type)
+
+	visit = func(t reflect.Type) {
+		for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice || t.Kind() == reflect.Array || t.Kind() == reflect.Map {
+			t = t.Elem()
+		}
+
+		// time.Time is a string in JSON.
+		if t.Kind() != reflect.Struct || seen[t] || t == reflect.TypeFor[time.Time]() {
+			return
+		}
+
+		seen[t] = true
+
+		for field := range t.Fields() {
+			if field.IsExported() {
+				visit(field.Type)
+			}
+		}
+	}
+
+	visit(typ)
+
+	delete(seen, typ)
+
+	return slices.Collect(maps.Keys(seen))
 }
