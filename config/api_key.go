@@ -7,12 +7,18 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/slackmgr/types"
 )
 
-// MaxAPIKeyIDLength is the maximum length of [APIKey.ID].
-const MaxAPIKeyIDLength = 100
+// MaxAPIKeyIDLength is the maximum length of [APIKey.ID]. It is the maximum length of an alert client
+// (types.MaxClientLength), since the ID can be bound to the client of alerts ([AuthConfig.ClientBinding]).
+const MaxAPIKeyIDLength = types.MaxClientLength
+
+// apiKeyIDReservedChar is reserved for the principal IDs of other authenticators, so that they never collide with
+// API key IDs (e.g. the "oidc:" prefix of the oidc plugin).
+const apiKeyIDReservedChar = ":"
 
 // APIKey is an API key accepted by the built-in API key authentication of the REST API (see
 // [APISettings.APIKeys]). Clients send the key as a bearer token (`Authorization: Bearer <key>`) or as the
@@ -32,6 +38,8 @@ const MaxAPIKeyIDLength = 100
 type APIKey struct {
 	// ID identifies the client using the key, e.g. "alertmanager-prod". It is the ID of the authenticated
 	// principal, and is logged with each request. Required, unique, and at most [MaxAPIKeyIDLength] characters.
+	// It cannot contain ":", which is reserved for the principal IDs of other authenticators (such as the
+	// "oidc:" prefix of the oidc plugin), so that access rules can never confuse them with API keys.
 	ID string `json:"id" mapstructure:"id" yaml:"id"`
 
 	// Description provides human-readable documentation for the key. Optional.
@@ -111,8 +119,12 @@ func (k *APIKey) init() error {
 		return errors.New("id cannot be empty")
 	}
 
-	if len(k.ID) > MaxAPIKeyIDLength {
+	if utf8.RuneCountInString(k.ID) > MaxAPIKeyIDLength {
 		return fmt.Errorf("id cannot be longer than %d characters", MaxAPIKeyIDLength)
+	}
+
+	if strings.Contains(k.ID, apiKeyIDReservedChar) {
+		return fmt.Errorf("id cannot contain %q, which is reserved for other authenticators", apiKeyIDReservedChar)
 	}
 
 	k.Description = strings.TrimSpace(k.Description)

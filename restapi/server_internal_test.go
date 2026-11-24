@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/slack-go/slack"
@@ -2194,6 +2195,41 @@ func TestServer_CreateClientErrorAlert(t *testing.T) {
 		assert.NotContains(t, alert.Text, "`code`")
 	})
 
+	t.Run("sanitizes the error and the target", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.cfg.ErrorReportChannelID = "C-errors"
+
+		alert := server.createClientErrorAlert(
+			errors.New("channel `<@U0ADMIN>` :status: <https://evil.example|click>\nnext"),
+			400,
+			nil,
+			"<!channel> `x` (route key)",
+		)
+
+		assert.NotContains(t, alert.Text, "<")
+		assert.NotContains(t, alert.Text, ">")
+		assert.NotContains(t, alert.Text, ":status:")
+		assert.Equal(t, 4, strings.Count(alert.Text, "`"), "only the backticks of the two code spans")
+		assert.Contains(t, alert.Text, "@U0ADMIN")
+		assert.Contains(t, alert.Text, "!channel x (route key)")
+		assert.NotContains(t, alert.CorrelationID, "<")
+	})
+
+	t.Run("truncates a long error", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		server.cfg.ErrorReportChannelID = "C-errors"
+
+		alert := server.createClientErrorAlert(errors.New(strings.Repeat("é", 2000)), 400, nil, "C123")
+
+		assert.Less(t, len(alert.Text), maxErrorReportErrorLength+100)
+		assert.True(t, utf8.ValidString(alert.Text))
+		assert.Contains(t, alert.Text, "...")
+	})
+
 	t.Run("truncates long debug field values", func(t *testing.T) {
 		t.Parallel()
 
@@ -2276,7 +2312,53 @@ func TestServer_UpdateSettings(t *testing.T) {
 		err := server.UpdateSettings(newSettings)
 
 		require.NoError(t, err)
-		assert.Same(t, newSettings, server.apiSettings.Load())
+
+		active := server.apiSettings.Load()
+		assert.NotSame(t, newSettings, active, "the server uses a copy")
+		channel, ok := active.Match("test-key", "", &mockLogger{})
+		assert.True(t, ok)
+		assert.Equal(t, "C123ABC456", channel)
+
+		// Later changes to the passed struct have no effect.
+		newSettings.RoutingRules[0].Channel = "C999999999"
+		channel, _ = server.apiSettings.Load().Match("test-key", "", &mockLogger{})
+		assert.Equal(t, "C123ABC456", channel)
+	})
+
+	t.Run("applies changes to a struct that was passed before", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+
+		settings := &config.APISettings{
+			APIKeys:     []*config.APIKey{{ID: "client", KeySHA256: config.HashAPIKey("old-key"), Scopes: []string{types.ScopeAlertsWrite}}},
+			AccessRules: []*config.AccessRule{{Name: "client", Principals: []string{"client"}, Channels: []string{"C1111111111"}}},
+		}
+		require.NoError(t, server.UpdateSettings(settings))
+		require.NotNil(t, server.apiSettings.Load().LookupAPIKey("old-key"))
+
+		// Rotate the key and restrict the default access on the same struct, and update again.
+		settings.APIKeys[0].KeySHA256 = config.HashAPIKey("new-key")
+		settings.DefaultChannelAccess = " Deny "
+		require.NoError(t, server.UpdateSettings(settings))
+
+		active := server.apiSettings.Load()
+		assert.Nil(t, active.LookupAPIKey("old-key"), "the rotated key must be revoked")
+		assert.NotNil(t, active.LookupAPIKey("new-key"))
+		assert.Equal(t, config.ChannelAccessDeny, active.DefaultChannelAccess)
+		assert.False(t, active.ChannelAccessAllowed("other", "C1111111111"))
+	})
+
+	t.Run("keeps the existing settings if the update is invalid", func(t *testing.T) {
+		t.Parallel()
+
+		server, _, _ := newTestServer(t)
+		before := server.apiSettings.Load()
+
+		err := server.UpdateSettings(&config.APISettings{DefaultChannelAccess: "maybe"})
+
+		require.Error(t, err)
+		assert.Same(t, before, server.apiSettings.Load())
 	})
 
 	t.Run("handles nil settings", func(t *testing.T) {

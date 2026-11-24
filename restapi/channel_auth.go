@@ -39,12 +39,19 @@ func (s *Server) effectiveChannelAuthorizer(settings *config.APISettings) types.
 // after the channels have been resolved by setSlackChannelID. Requests without a principal (authentication
 // disabled, or anonymous in permissive mode) are not restricted.
 //
+// The channels are validated first (see validateAlertChannels), so that the authorizer only gets well-formed
+// channel IDs, and error messages never echo raw input.
+//
 // It returns the first alert that is not allowed, and an *alertRejectionError with the reason
-// rejectReasonForbiddenChannel, or rejectReasonAuthorizationFailed if the authorizer failed.
+// rejectReasonValidation, rejectReasonForbiddenChannel, or rejectReasonAuthorizationFailed if the authorizer failed.
 func (s *Server) authorizeAlertChannels(c *gin.Context, alerts []*types.Alert) (*types.Alert, error) {
 	principal := principalFromContext(c)
 	if principal == nil {
 		return nil, nil
+	}
+
+	if alert, err := validateAlertChannels(alerts); err != nil {
+		return alert, err
 	}
 
 	authorizer := s.effectiveChannelAuthorizer(s.apiSettings.Load())
@@ -82,6 +89,40 @@ func (s *Server) authorizeAlertChannels(c *gin.Context, alerts []*types.Alert) (
 	return nil, nil
 }
 
+// validateAlertChannels checks that the channel of each alert, and the escalation moveToChannel values, are valid
+// Slack channel IDs or names (see [types.SlackChannelIDOrNameRegex]), and that no alert has more than
+// [types.MaxEscalationCount] escalations. This bounds the number of channels per alert, and the input of the
+// channel authorizer. It returns the first invalid alert, and an *alertRejectionError with the reason
+// rejectReasonValidation, whose message does not include the invalid value.
+func validateAlertChannels(alerts []*types.Alert) (*types.Alert, error) {
+	for i, alert := range alerts {
+		if !validChannelIDOrName(alert.SlackChannelID) {
+			return alert, newAlertRejection(rejectReasonValidation, "input validation failed: alerts[%d].slackChannelId is not a valid Slack channel ID or name", i)
+		}
+
+		if len(alert.Escalation) > types.MaxEscalationCount {
+			return alert, newAlertRejection(rejectReasonValidation, "input validation failed: alerts[%d] has too many escalation points, expected <=%d", i, types.MaxEscalationCount)
+		}
+
+		for j, e := range alert.Escalation {
+			if e == nil || e.MoveToChannel == "" {
+				continue
+			}
+
+			if !validChannelIDOrName(e.MoveToChannel) {
+				return alert, newAlertRejection(rejectReasonValidation, "input validation failed: alerts[%d].escalation[%d].moveToChannel is not a valid Slack channel ID or name", i, j)
+			}
+		}
+	}
+
+	return nil, nil
+}
+
+// validChannelIDOrName reports whether the trimmed channel is a valid Slack channel ID or name.
+func validChannelIDOrName(channel string) bool {
+	return types.SlackChannelIDOrNameRegex.MatchString(strings.TrimSpace(channel))
+}
+
 // channelAuthorizationError returns an *alertRejectionError for a failed channel authorization: forbidden, with
 // the given message, if err is [types.ErrForbidden], and an authorization failure otherwise.
 func channelAuthorizationError(err error, format string, a ...any) error {
@@ -94,11 +135,14 @@ func channelAuthorizationError(err error, format string, a ...any) error {
 
 // channelAuthorizationStatus returns the HTTP status code of an error returned by authorizeAlertChannels.
 func channelAuthorizationStatus(err error) int {
-	if rejectReasonOf(err, rejectReasonForbiddenChannel) == rejectReasonAuthorizationFailed {
+	switch rejectReasonOf(err, rejectReasonForbiddenChannel) {
+	case rejectReasonAuthorizationFailed:
 		return http.StatusInternalServerError
+	case rejectReasonValidation:
+		return http.StatusBadRequest
+	default:
+		return http.StatusForbidden
 	}
-
-	return http.StatusForbidden
 }
 
 // applyClientBinding sets the client of the alerts to the ID of the authenticated principal of the request,

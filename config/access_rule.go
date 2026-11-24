@@ -60,8 +60,12 @@ type AccessRule struct {
 //   - If no rule matches the principal, [APISettings.DefaultChannelAccess] decides
 //
 // The channel ID is matched case-insensitively. The settings must be initialized with
-// [APISettings.InitAndValidate].
+// [APISettings.InitAndValidate]; uninitialized settings allow no access (fail closed).
 func (s *APISettings) ChannelAccessAllowed(principalID, channelID string) bool {
+	if !s.initialized {
+		return false
+	}
+
 	channelID = strings.ToUpper(strings.TrimSpace(channelID))
 	matched := false
 
@@ -81,7 +85,7 @@ func (s *APISettings) ChannelAccessAllowed(principalID, channelID string) bool {
 		return false
 	}
 
-	return s.DefaultChannelAccess != ChannelAccessDeny
+	return s.DefaultChannelAccess == ChannelAccessAllow
 }
 
 func (r *AccessRule) matchesPrincipal(principalID string) bool {

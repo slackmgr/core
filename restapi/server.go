@@ -170,8 +170,8 @@ func (s *Server) WithMetrics(metrics types.Metrics) *Server {
 }
 
 // WithSettings sets the initial API settings. If not called, zero-value settings
-// are used. For runtime updates after [Server.Run] is started, use
-// [Server.UpdateSettings] instead. Passing nil is a no-op.
+// are used. The settings are copied and validated by [Server.Run]. For runtime updates after [Server.Run] is
+// started, use [Server.UpdateSettings] instead. Passing nil is a no-op.
 func (s *Server) WithSettings(settings *config.APISettings) *Server {
 	if settings == nil {
 		return s
@@ -225,9 +225,12 @@ func (s *Server) Run(ctx context.Context) error {
 		s.logger.Error("No encryption key configured. The server will start, but alerts with webhook payloads will be rejected with HTTP 400.")
 	}
 
-	if err := s.apiSettings.Load().InitAndValidate(s.logger); err != nil {
+	settings, err := s.initSettings(s.apiSettings.Load())
+	if err != nil {
 		return fmt.Errorf("failed to initialize API settings: %w", err)
 	}
+
+	s.apiSettings.Store(settings)
 
 	if s.cacheStore == nil {
 		gocacheClient := gocache.New(5*time.Minute, time.Minute)
@@ -438,12 +441,13 @@ func (s *Server) Run(ctx context.Context) error {
 // concurrently with request handling. The new settings are validated before being applied; if validation fails the existing settings remain
 // active and an error is returned. Passing nil replaces the current settings with
 // zero-value defaults.
+//
+// The server uses a copy of the settings, so later changes to the passed struct have no effect until it is
+// passed to UpdateSettings again. Passing the same struct again after changing it (e.g. to rotate an API key)
+// applies the changes.
 func (s *Server) UpdateSettings(settings *config.APISettings) error {
-	if settings == nil {
-		settings = &config.APISettings{}
-	}
-
-	if err := settings.InitAndValidate(s.logger); err != nil {
+	settings, err := s.initSettings(settings)
+	if err != nil {
 		return fmt.Errorf("failed to initialize updated API settings (the existing settings will continue to be used): %w", err)
 	}
 
@@ -453,6 +457,26 @@ func (s *Server) UpdateSettings(settings *config.APISettings) error {
 	s.logAPIKeyState()
 
 	return nil
+}
+
+// initSettings returns an initialized and validated copy of the settings (zero-value settings if nil). The copy
+// isolates the running server from later changes to the passed struct, and makes sure that every update is
+// initialized from scratch, even if the passed struct was initialized before.
+func (s *Server) initSettings(settings *config.APISettings) (*config.APISettings, error) {
+	if settings == nil {
+		settings = &config.APISettings{}
+	}
+
+	clone, err := settings.Clone()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := clone.InitAndValidate(s.logger); err != nil {
+		return nil, err
+	}
+
+	return clone, nil
 }
 
 // registerRoutes registers all HTTP routes on the engine. All routes except GET /ping and GET /openapi.yaml
@@ -629,6 +653,8 @@ func (s *Server) createClientErrorAlert(err error, statusCode int, debugFields m
 		severity = types.AlertError
 	}
 
+	targetChannel = sanitizeErrorReportCode(targetChannel, maxErrorReportTargetLength)
+
 	if targetChannel == "" {
 		targetChannel = NA
 	}
@@ -644,7 +670,7 @@ func (s *Server) createClientErrorAlert(err error, statusCode int, debugFields m
 	alert.AutoResolveSeconds = 3600
 	alert.ArchivingDelaySeconds = 24 * 3600
 
-	alert.Text = fmt.Sprintf("*Target*: `%s`\n*Error*: `%s`", targetChannel, err.Error())
+	alert.Text = fmt.Sprintf("*Target*: `%s`\n*Error*: `%s`", targetChannel, sanitizeErrorReportCode(err.Error(), maxErrorReportErrorLength))
 
 	for k, v := range debugFields {
 		v = strings.ReplaceAll(v, "`", "")
@@ -665,6 +691,27 @@ func (s *Server) createClientErrorAlert(err error, statusCode int, debugFields m
 	}
 
 	return alert
+}
+
+// Maximum lengths of the target and the error in client error alerts (see createClientErrorAlert).
+const (
+	maxErrorReportTargetLength = 200
+	maxErrorReportErrorLength  = 1000
+)
+
+// sanitizeErrorReportCode prepares a value that may hold client input (an error message or a target channel or
+// route key) for an inline code span in a client error alert: it removes backticks (which would end the code
+// span), angle brackets (Slack mentions and links), the :status: placeholder and newlines, and truncates the
+// value to maxLen bytes.
+func sanitizeErrorReportCode(v string, maxLen int) string {
+	v = strings.NewReplacer("`", "", "<", "", ">", "", ":status:", "", "\r", " ", "\n", " ").Replace(v)
+	v = strings.TrimSpace(v)
+
+	if len(v) > maxLen {
+		v = strings.ToValidUTF8(v[:maxLen-3], "") + "..."
+	}
+
+	return v
 }
 
 // queueAlert serializes the alert and sends it to the alert queue.

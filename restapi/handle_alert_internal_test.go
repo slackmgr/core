@@ -53,4 +53,23 @@ func TestAlertInputParser(t *testing.T) {
 		assert.Equal(t, "foo", alerts[0].Header)
 		assert.Equal(t, "bar", alerts[1].Header)
 	})
+
+	t.Run("null alerts should return an error", func(t *testing.T) {
+		t.Parallel()
+
+		for _, input := range []string{`[null]`, `[{"header":"foo"}, null]`, `{"alerts":[null]}`, `{"alerts":[{"header":"foo"}, null]}`} {
+			alerts, err := parseAlertInput([]byte(input))
+			require.Error(t, err, input)
+			assert.Contains(t, err.Error(), "cannot be null", input)
+			assert.Nil(t, alerts, input)
+		}
+	})
+
+	t.Run("null body is a single empty alert", func(t *testing.T) {
+		t.Parallel()
+		alerts, err := parseAlertInput([]byte(`null`))
+		require.NoError(t, err)
+		require.Len(t, alerts, 1)
+		assert.NotNil(t, alerts[0])
+	})
 }

@@ -124,7 +124,7 @@ func (m *Manager) WithMetrics(metrics types.Metrics) *Manager {
 }
 
 // WithSettings sets the initial manager settings. If not called, zero-value
-// settings are used. For runtime updates after [Manager.Run] is started, use
+// settings are used. The settings are copied and validated by [Manager.Run]. For runtime updates after [Manager.Run] is started, use
 // [Manager.UpdateSettings] instead. Passing nil is a no-op.
 func (m *Manager) WithSettings(settings *config.ManagerSettings) *Manager {
 	if settings == nil {
@@ -203,9 +203,12 @@ func (m *Manager) Run(ctx context.Context) error {
 		m.logger.Error("No encryption key configured. The manager will start, but alerts with webhook payloads will be dropped.")
 	}
 
-	if err := m.managerSettings.GetSettings().InitAndValidate(); err != nil {
+	settings, err := initManagerSettings(m.managerSettings.GetSettings())
+	if err != nil {
 		return fmt.Errorf("failed to initialize channel settings: %w", err)
 	}
+
+	m.managerSettings.SetSettings(settings)
 
 	if m.alertQueue.Name() == m.commandQueue.Name() {
 		return errors.New("alert queue and command queue must have different names")
@@ -305,12 +308,13 @@ func (m *Manager) Run(ctx context.Context) error {
 // are validated before being applied; if validation fails the existing settings remain
 // active and an error is returned. Passing nil replaces the current settings with
 // zero-value defaults.
+//
+// The manager uses a copy of the settings, so later changes to the passed struct have no effect until it is
+// passed to UpdateSettings again. Passing the same struct again after changing it (e.g. to remove a global
+// admin) applies the changes.
 func (m *Manager) UpdateSettings(settings *config.ManagerSettings) error {
-	if settings == nil {
-		settings = &config.ManagerSettings{}
-	}
-
-	if err := settings.InitAndValidate(); err != nil {
+	settings, err := initManagerSettings(settings)
+	if err != nil {
 		return fmt.Errorf("failed to initialize updated manager settings (the existing settings will continue to be used): %w", err)
 	}
 
@@ -319,6 +323,26 @@ func (m *Manager) UpdateSettings(settings *config.ManagerSettings) error {
 	m.logger.Infof("Manager settings updated")
 
 	return nil
+}
+
+// initManagerSettings returns an initialized and validated copy of the settings (zero-value settings if nil). The
+// copy isolates the running manager from later changes to the passed struct, and makes sure that every update is
+// initialized from scratch, even if the passed struct was initialized before.
+func initManagerSettings(settings *config.ManagerSettings) (*config.ManagerSettings, error) {
+	if settings == nil {
+		settings = &config.ManagerSettings{}
+	}
+
+	clone, err := settings.Clone()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := clone.InitAndValidate(); err != nil {
+		return nil, err
+	}
+
+	return clone, nil
 }
 
 // insightsConfig returns the insights config, with defaults applied. It never returns nil.

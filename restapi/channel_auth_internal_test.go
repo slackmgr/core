@@ -62,7 +62,11 @@ func newChannelAuthTestServer(t *testing.T, defaultAccess string) *channelAuthTe
 	require.NoError(t, settings.InitAndValidate(&mockLogger{}))
 	server.apiSettings.Store(settings)
 
-	for _, channel := range []string{allowedChannel, forbiddenChannel, strings.ToLower(allowedChannel), "alerts-team-a"} {
+	// Channel names are not mapped; the invalid values are used by the validation tests.
+	for _, channel := range []string{
+		allowedChannel, forbiddenChannel, strings.ToLower(allowedChannel), "alerts-team-a",
+		"a1", "a2", "a3", "a4", "bad channel", "<!channel>", "<@U0ADMIN> <https://evil.example|click>",
+	} {
 		channelInfo.On("MapChannelNameToIDIfNeeded", channel).Return(channel)
 	}
 
@@ -181,6 +185,24 @@ func TestServer_ChannelAuthorization(t *testing.T) {
 			wantStatus: http.StatusForbidden, wantRejected: 1,
 		},
 		{name: "rule, default deny", defaultAccess: config.ChannelAccessDeny, path: "/alerts", body: `{"alerts":[` + alert + `]}`, authorization: bearer(testKeyRestricted), wantStatus: http.StatusAccepted},
+		{
+			name: "invalid escalation channel is not echoed", path: "/alerts",
+			body:          `{"alerts":[{"header":"h","slackChannelId":"` + allowedChannel + `","escalation":[{"delaySeconds":60,"severity":"panic","moveToChannel":"<@U0ADMIN> <https://evil.example|click>"}]}]}`,
+			authorization: bearer(testKeyRestricted), wantStatus: http.StatusBadRequest,
+			wantError: "Input validation failed: alerts[0].escalation[0].moveToChannel is not a valid Slack channel ID or name",
+		},
+		{
+			name: "invalid channel is not echoed", path: "/alerts", body: `{"alerts":[` + alert + `,{"header":"h","slackChannelId":"<!channel>"}]}`,
+			authorization: bearer(testKeyRestricted), wantStatus: http.StatusBadRequest,
+			wantError: "Input validation failed: alerts[1].slackChannelId is not a valid Slack channel ID or name",
+		},
+		{
+			name: "too many escalations", path: "/alerts",
+			body: `{"alerts":[{"header":"h","slackChannelId":"` + allowedChannel + `","escalation":[` +
+				`{"delaySeconds":60,"moveToChannel":"a1"},{"delaySeconds":120,"moveToChannel":"a2"},{"delaySeconds":180,"moveToChannel":"a3"},{"delaySeconds":240,"moveToChannel":"a4"}]}]}`,
+			authorization: bearer(testKeyRestricted), wantStatus: http.StatusBadRequest,
+			wantError: "Input validation failed: alerts[0] has too many escalation points, expected <=3",
+		},
 		{name: "anonymous in permissive mode is not restricted", defaultAccess: config.ChannelAccessDeny, permissive: true, path: "/alerts", body: `{"alerts":[` + forbidden + `]}`, wantStatus: http.StatusAccepted},
 		{name: "auth disabled is not restricted", defaultAccess: config.ChannelAccessDeny, authDisabled: true, path: "/alerts", body: `{"alerts":[` + forbidden + `]}`, authorization: bearer(testKeyRestricted), wantStatus: http.StatusAccepted},
 	}
@@ -201,7 +223,7 @@ func TestServer_ChannelAuthorization(t *testing.T) {
 				assert.JSONEq(t, `{"error":"`+tt.wantError+`"}`, w.Body.String())
 			}
 
-			if tt.wantStatus == http.StatusForbidden {
+			if tt.wantStatus == http.StatusForbidden || tt.wantStatus == http.StatusBadRequest {
 				assert.Empty(t, ts.queuedAlerts(), "nothing may be queued")
 			}
 
@@ -257,6 +279,27 @@ func TestServer_ChannelAuthorization_CustomAuthorizer(t *testing.T) {
 		authorizer.mu.Lock()
 		defer authorizer.mu.Unlock()
 		assert.Equal(t, []string{"restricted:" + allowedChannel, "restricted:" + forbiddenChannel}, authorizer.calls)
+	})
+
+	t.Run("is not called for invalid channels", func(t *testing.T) {
+		t.Parallel()
+
+		ts := newChannelAuthTestServer(t, "")
+		authorizer := &channelAuthorizerStub{}
+		ts.WithAuthorizer(authorizer)
+
+		body := `{"alerts":[{"header":"h","slackChannelId":"` + allowedChannel + `","escalation":[{"delaySeconds":60,"severity":"panic","moveToChannel":"bad channel"}]}]}`
+
+		w := ts.post(t, "/alerts", body, bearer(testKeyRestricted))
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.InDelta(t, 1.0, ts.metrics.counter(alertsRejectedTotalMetric, rejectReasonValidation), 0)
+
+		w = ts.post(t, "/alerts-test", body, bearer(testKeyRestricted))
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+
+		authorizer.mu.Lock()
+		defer authorizer.mu.Unlock()
+		assert.Empty(t, authorizer.calls)
 	})
 
 	t.Run("forbidden", func(t *testing.T) {
@@ -354,22 +397,34 @@ func TestServer_ClientBinding(t *testing.T) {
 		})
 	}
 
-	t.Run("too long principal ID is truncated", func(t *testing.T) {
+	t.Run("principal IDs are never truncated", func(t *testing.T) {
 		t.Parallel()
 
-		ts := newChannelAuthTestServer(t, "")
-		ts.apiKeyAuth = false
-		ts.WithAuthenticator(types.AuthenticatorFunc(func(*http.Request) (*types.Principal, error) {
-			return &types.Principal{ID: strings.Repeat("p", types.MaxClientLength+1), Scopes: []string{types.ScopeAll}}, nil
-		}))
+		for _, tc := range []struct {
+			id         string
+			wantStatus int
+		}{
+			{id: strings.Repeat("p", types.MaxClientLength), wantStatus: http.StatusAccepted},
+			{id: strings.Repeat("p", types.MaxClientLength+1), wantStatus: http.StatusUnauthorized},
+		} {
+			ts := newChannelAuthTestServer(t, "")
+			ts.apiKeyAuth = false
+			ts.cfg.Auth = &config.AuthConfig{ClientBinding: config.ClientBindingOverride}
+			ts.WithAuthenticator(types.AuthenticatorFunc(func(*http.Request) (*types.Principal, error) {
+				return &types.Principal{ID: tc.id, Scopes: []string{types.ScopeAll}}, nil
+			}))
 
-		w := ts.post(t, "/alerts", `{"alerts":[{"header":"h","slackChannelId":"`+allowedChannel+`"}]}`, bearer("x"))
-		require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+			w := ts.post(t, "/alerts", `{"alerts":[{"header":"h","slackChannelId":"`+allowedChannel+`"}]}`, bearer("x"))
+			require.Equal(t, tc.wantStatus, w.Code, w.Body.String())
 
-		queued := ts.queuedAlerts()
-		require.Len(t, queued, 1)
-		assert.Len(t, queued[0].Client, types.MaxClientLength)
-		assert.True(t, strings.HasPrefix(queued[0].Client, "ppp"))
+			if tc.wantStatus == http.StatusAccepted {
+				queued := ts.queuedAlerts()
+				require.Len(t, queued, 1)
+				assert.Equal(t, tc.id, queued[0].Client)
+			} else {
+				assert.Empty(t, ts.queuedAlerts())
+			}
+		}
 	})
 
 	t.Run("binds clients on the test endpoint", func(t *testing.T) {

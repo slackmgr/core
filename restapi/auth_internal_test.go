@@ -278,7 +278,9 @@ func TestServer_AuthMiddleware_APIKeys(t *testing.T) {
 		{name: "openapi spec is public", method: http.MethodGet, path: "/openapi.yaml", wantStatus: http.StatusOK},
 		{name: "ping ignores invalid credentials", method: http.MethodGet, path: "/ping", authorization: bearer("unknown"), wantStatus: http.StatusOK},
 		{name: "missing credentials", method: http.MethodGet, path: "/mappings", wantStatus: http.StatusUnauthorized, wantResult: authResultMissingCredentials, wantError: "Authentication required"},
-		{name: "unsupported scheme", method: http.MethodGet, path: "/mappings", authorization: "Digest username=x", wantStatus: http.StatusUnauthorized, wantResult: authResultMissingCredentials},
+		{name: "unsupported scheme", method: http.MethodGet, path: "/mappings", authorization: "Digest username=x", wantStatus: http.StatusUnauthorized, wantResult: authResultInvalidCredentials, wantError: "Invalid credentials"},
+		{name: "permissive rejects unsupported scheme", method: http.MethodGet, path: "/mappings", authorization: "Digest username=x", permissive: true, wantStatus: http.StatusUnauthorized, wantResult: authResultInvalidCredentials},
+		{name: "permissive allows blank authorization header", method: http.MethodGet, path: "/mappings", authorization: "   ", permissive: true, wantStatus: http.StatusOK, wantResult: authResultAnonymous},
 		{name: "unknown key", method: http.MethodGet, path: "/mappings", authorization: bearer("unknown"), wantStatus: http.StatusUnauthorized, wantResult: authResultInvalidCredentials, wantError: "Invalid credentials"},
 		{name: "malformed basic credentials", method: http.MethodGet, path: "/mappings", authorization: "Basic !!!", wantStatus: http.StatusUnauthorized, wantResult: authResultInvalidCredentials},
 		{name: "reader reads config", method: http.MethodGet, path: "/mappings", authorization: bearer(testKeyReader), wantStatus: http.StatusOK, wantResult: authResultAuthenticated},
@@ -367,6 +369,16 @@ func TestServer_AuthMiddleware_CustomAuthenticator(t *testing.T) {
 			return nil, errors.New("identity provider unavailable")
 		case bearer("nil-nil"):
 			return nil, nil //nolint:nilnil // tests a misbehaving authenticator
+		case bearer("empty-id"):
+			return &types.Principal{ID: "", Scopes: []string{types.ScopeConfigRead}}, nil
+		case bearer("padded-id"):
+			return &types.Principal{ID: " oidc:x ", Scopes: []string{types.ScopeConfigRead}}, nil
+		case bearer("long-id"):
+			return &types.Principal{ID: strings.Repeat("a", types.MaxClientLength+1), Scopes: []string{types.ScopeConfigRead}}, nil
+		case bearer("max-id"):
+			return &types.Principal{ID: strings.Repeat("é", types.MaxClientLength), Scopes: []string{types.ScopeConfigRead}}, nil
+		case bearer("opaque"), "Basic dXNlcjpwYXNz":
+			return nil, types.ErrNoCredentials // not a JWT, or another scheme, like the OIDC authenticator
 		default:
 			return nil, types.ErrInvalidCredentials
 		}
@@ -375,6 +387,7 @@ func TestServer_AuthMiddleware_CustomAuthenticator(t *testing.T) {
 	tests := []struct {
 		name          string
 		apiKeys       bool
+		permissive    bool
 		authorization string
 		wantStatus    int
 		wantResult    string
@@ -389,6 +402,14 @@ func TestServer_AuthMiddleware_CustomAuthenticator(t *testing.T) {
 		{name: "chained, invalid token", apiKeys: true, authorization: bearer("unknown"), wantStatus: http.StatusUnauthorized, wantResult: authResultInvalidCredentials},
 		{name: "chained, no credentials", apiKeys: true, wantStatus: http.StatusUnauthorized, wantResult: authResultMissingCredentials},
 		{name: "chained, internal error", apiKeys: true, authorization: bearer("idp-down"), wantStatus: http.StatusInternalServerError, wantResult: authResultError},
+		{name: "custom only, empty principal ID", authorization: bearer("empty-id"), wantStatus: http.StatusUnauthorized, wantResult: authResultInvalidCredentials},
+		{name: "custom only, padded principal ID", authorization: bearer("padded-id"), wantStatus: http.StatusUnauthorized, wantResult: authResultInvalidCredentials},
+		{name: "custom only, too long principal ID", authorization: bearer("long-id"), wantStatus: http.StatusUnauthorized, wantResult: authResultInvalidCredentials},
+		{name: "custom only, max length principal ID", authorization: bearer("max-id"), wantStatus: http.StatusOK, wantResult: authResultAuthenticated},
+		{name: "custom only, unrecognized token", authorization: bearer("opaque"), wantStatus: http.StatusUnauthorized, wantResult: authResultInvalidCredentials},
+		{name: "permissive, unrecognized token", permissive: true, authorization: bearer("opaque"), wantStatus: http.StatusUnauthorized, wantResult: authResultInvalidCredentials},
+		{name: "permissive, unrecognized scheme", permissive: true, authorization: "Basic dXNlcjpwYXNz", wantStatus: http.StatusUnauthorized, wantResult: authResultInvalidCredentials},
+		{name: "permissive, no credentials", permissive: true, wantStatus: http.StatusOK, wantResult: authResultAnonymous},
 	}
 
 	for _, tt := range tests {
@@ -397,6 +418,7 @@ func TestServer_AuthMiddleware_CustomAuthenticator(t *testing.T) {
 
 			server, metrics := newAuthTestServer(t)
 			server.apiKeyAuth = tt.apiKeys
+			server.cfg.Auth = &config.AuthConfig{Permissive: tt.permissive}
 			server.WithAuthenticator(oidc)
 
 			w := serve(t, server, http.MethodGet, "/mappings", tt.authorization)

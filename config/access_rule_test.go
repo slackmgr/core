@@ -137,10 +137,11 @@ func TestAPISettings_ChannelAccessAllowed(t *testing.T) {
 		assert.False(t, settings.ChannelAccessAllowed("anyone", "C2222222222"))
 	})
 
-	t.Run("uninitialized settings allow all", func(t *testing.T) {
+	t.Run("uninitialized settings allow nothing", func(t *testing.T) {
 		t.Parallel()
 
-		assert.True(t, (&config.APISettings{}).ChannelAccessAllowed("anyone", "C1111111111"))
+		assert.False(t, (&config.APISettings{}).ChannelAccessAllowed("anyone", "C1111111111"))
+		assert.False(t, (&config.APISettings{DefaultChannelAccess: config.ChannelAccessAllow}).ChannelAccessAllowed("anyone", "C1111111111"))
 	})
 }
 

@@ -38,6 +38,8 @@ func TestAPISettings_InitAndValidate_APIKeys(t *testing.T) {
 		{name: "empty id", keys: []*config.APIKey{{ID: "  ", KeySHA256: hashA, Scopes: []string{"*"}}}, wantErr: "apiKeys[0] is invalid: id cannot be empty"},
 		{name: "too long id", keys: []*config.APIKey{{ID: strings.Repeat("a", config.MaxAPIKeyIDLength+1), KeySHA256: hashA, Scopes: []string{"*"}}}, wantErr: "id cannot be longer than 100 characters"},
 		{name: "max length id", keys: []*config.APIKey{{ID: strings.Repeat("a", config.MaxAPIKeyIDLength), KeySHA256: hashA, Scopes: []string{"*"}}}},
+		{name: "max length id in characters", keys: []*config.APIKey{{ID: strings.Repeat("é", config.MaxAPIKeyIDLength), KeySHA256: hashA, Scopes: []string{"*"}}}},
+		{name: "id with reserved colon", keys: []*config.APIKey{{ID: "oidc:client", KeySHA256: hashA, Scopes: []string{"*"}}}, wantErr: `id cannot contain ":"`},
 		{name: "missing hash", keys: []*config.APIKey{{ID: "a", Scopes: []string{"*"}}}, wantErr: "keySha256 must be a hex encoded SHA-256 hash (64 hex characters)"},
 		{name: "non-hex hash", keys: []*config.APIKey{{ID: "a", KeySHA256: strings.Repeat("z", 64), Scopes: []string{"*"}}}, wantErr: "keySha256 must be a hex encoded SHA-256 hash"},
 		{name: "short hash", keys: []*config.APIKey{{ID: "a", KeySHA256: hashA[:62], Scopes: []string{"*"}}}, wantErr: "keySha256 must be a hex encoded SHA-256 hash"},

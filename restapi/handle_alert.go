@@ -520,13 +520,13 @@ func parseAlertInput(body []byte) ([]*types.Alert, error) {
 			return nil, fmt.Errorf("failed to json unmarshal input: %w", err)
 		}
 
-		return alerts, nil
+		return checkNoNullAlerts(alerts)
 	}
 
 	// Scenario 2: the root level is an object.
 	// In this case, we may still have multiple alerts (see alertsInput struct for details)
 	// Yes, this is a bit of a hack, but backwards compatibility...
-	var input *alertsInput
+	var input alertsInput
 
 	if err := json.Unmarshal(body, &input); err != nil {
 		return nil, fmt.Errorf("failed to json unmarshal input: %w", err)
@@ -535,11 +535,22 @@ func parseAlertInput(body []byte) ([]*types.Alert, error) {
 	// If the input contains an array of alerts, return that.
 	// Any other fields on the root level are ignored (we can't have it both ways).
 	if len(input.Alerts) > 0 {
-		return input.Alerts, nil
+		return checkNoNullAlerts(input.Alerts)
 	}
 
 	// Nothing in the alerts array -> assume the input is a single alert, with all fields at the root level.
 	return []*types.Alert{&input.Alert}, nil
+}
+
+// checkNoNullAlerts returns the alerts, or an error if any of them is null.
+func checkNoNullAlerts(alerts []*types.Alert) ([]*types.Alert, error) {
+	for i, alert := range alerts {
+		if alert == nil {
+			return nil, fmt.Errorf("alerts[%d] cannot be null", i)
+		}
+	}
+
+	return alerts, nil
 }
 
 // mostLimitedChannel returns the rate limited channel with the longest RetryAfter, i.e. the wait until the whole

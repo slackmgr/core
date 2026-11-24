@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/slackmgr/types"
@@ -196,6 +197,11 @@ func apiKeyFromRequest(r *http.Request) (string, error) {
 // principal for scope with authorizer. A nil authenticator means that authentication is disabled, and the
 // middleware lets all requests through.
 //
+// A principal with an invalid ID (see validatePrincipalID) is rejected as having invalid credentials.
+//
+// A request with an Authorization header that the authenticator does not understand ([types.ErrNoCredentials])
+// is rejected as having invalid credentials, also in permissive mode.
+//
 // Auth failures are not reported to the error report channel, since unauthenticated callers could flood it.
 func (s *Server) authMiddleware(scope string, authenticator types.Authenticator, authorizer types.Authorizer) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -208,7 +214,19 @@ func (s *Server) authMiddleware(scope string, authenticator types.Authenticator,
 
 		switch {
 		case err == nil && principal != nil:
+			if idErr := validatePrincipalID(principal.ID); idErr != nil {
+				s.abortAuth(c, http.StatusUnauthorized, authResultInvalidCredentials, "Invalid credentials", idErr)
+				return
+			}
 		case errors.Is(err, types.ErrNoCredentials):
+			// An Authorization header that no authenticator understands (e.g. an unsupported scheme, or a
+			// non-JWT bearer token with only OIDC enabled) means credentials were sent, but are invalid. Such
+			// requests are never let through anonymously, also not in permissive mode.
+			if strings.TrimSpace(c.GetHeader("Authorization")) != "" {
+				s.abortAuth(c, http.StatusUnauthorized, authResultInvalidCredentials, "Invalid credentials", err)
+				return
+			}
+
 			if s.authPermissive() {
 				s.metrics.CounterInc(httpAuthRequestsMetric, authResultAnonymous)
 				c.Next()
@@ -277,6 +295,23 @@ func (s *Server) abortAuth(c *gin.Context, status int, result, message string, e
 	}
 
 	c.AbortWithStatusJSON(status, errorResponse{Error: message})
+}
+
+// validatePrincipalID checks that a principal ID can be used as is in access rules and as the client of alerts
+// (see config.AuthConfig.ClientBinding): it must be non-empty, without leading or trailing whitespace, and at most
+// [types.MaxClientLength] characters, so that it is never trimmed or truncated (which could make two principals
+// share a client). It returns an error wrapping [types.ErrInvalidCredentials] otherwise.
+func validatePrincipalID(id string) error {
+	switch {
+	case id == "":
+		return fmt.Errorf("principal ID is empty: %w", types.ErrInvalidCredentials)
+	case strings.TrimSpace(id) != id:
+		return fmt.Errorf("principal ID has leading or trailing whitespace: %w", types.ErrInvalidCredentials)
+	case utf8.RuneCountInString(id) > types.MaxClientLength:
+		return fmt.Errorf("principal ID is longer than %d characters: %w", types.MaxClientLength, types.ErrInvalidCredentials)
+	default:
+		return nil
+	}
 }
 
 // principalFromContext returns the authenticated principal of the request, or nil if there is none

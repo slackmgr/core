@@ -222,3 +222,64 @@ func TestManager_Run_RejectInMemoryCacheStore(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid cache store for multi-instance deployment")
 }
+
+func TestManager_UpdateSettings(t *testing.T) {
+	t.Parallel()
+
+	newManager := func() *Manager {
+		return New(&stubDB{}, &stubFifoQueue{name: "alerts"}, &stubFifoQueue{name: "commands"}, &mockLogger{}, config.NewDefaultManagerConfig())
+	}
+
+	t.Run("uses a validated copy", func(t *testing.T) {
+		t.Parallel()
+
+		m := newManager()
+		settings := &config.ManagerSettings{GlobalAdmins: []string{"U0ADMIN"}}
+
+		require.NoError(t, m.UpdateSettings(settings))
+
+		active := m.managerSettings.GetSettings()
+		assert.NotSame(t, settings, active)
+		assert.True(t, active.UserIsGlobalAdmin("U0ADMIN"))
+
+		// Later changes to the passed struct have no effect.
+		settings.GlobalAdmins = []string{"U0OTHER"}
+		assert.True(t, m.managerSettings.GetSettings().UserIsGlobalAdmin("U0ADMIN"))
+		assert.False(t, m.managerSettings.GetSettings().UserIsGlobalAdmin("U0OTHER"))
+	})
+
+	t.Run("applies changes to a struct that was passed before", func(t *testing.T) {
+		t.Parallel()
+
+		m := newManager()
+		settings := &config.ManagerSettings{GlobalAdmins: []string{"U0ADMIN"}}
+		require.NoError(t, m.UpdateSettings(settings))
+
+		// Remove the global admin on the same struct, and update again.
+		settings.GlobalAdmins = nil
+		require.NoError(t, m.UpdateSettings(settings))
+
+		assert.False(t, m.managerSettings.GetSettings().UserIsGlobalAdmin("U0ADMIN"), "the removed admin must lose admin rights")
+	})
+
+	t.Run("handles nil settings", func(t *testing.T) {
+		t.Parallel()
+
+		m := newManager()
+
+		require.NoError(t, m.UpdateSettings(nil))
+		assert.NotNil(t, m.managerSettings.GetSettings())
+	})
+
+	t.Run("keeps the existing settings if the update is invalid", func(t *testing.T) {
+		t.Parallel()
+
+		m := newManager()
+		before := m.managerSettings.GetSettings()
+
+		err := m.UpdateSettings(&config.ManagerSettings{DefaultAlertSeverity: "bogus"})
+
+		require.Error(t, err)
+		assert.Same(t, before, m.managerSettings.GetSettings())
+	})
+}

@@ -19,7 +19,9 @@ const (
 type AuthConfig struct {
 	// Permissive lets requests without credentials through anonymously, instead of rejecting them with HTTP
 	// 401. Requests with credentials are still authenticated and authorized: invalid credentials get HTTP 401,
-	// and missing scopes get HTTP 403.
+	// and missing scopes get HTTP 403. A request with an Authorization header counts as having credentials,
+	// even if no authenticator understands it (e.g. an unsupported scheme, or a non-JWT bearer token with only
+	// OIDC enabled): it gets HTTP 401.
 	//
 	// Use it to roll out authentication without a hard cutover: enable it, migrate the clients one by one,
 	// and disable it when the http_auth_requests_total{result="anonymous"} metric has dropped to zero.
@@ -33,8 +35,8 @@ type AuthConfig struct {
 	//   - [ClientBindingOverride]: all alerts get the principal ID, so that clients cannot be spoofed
 	//   - [ClientBindingOff]: the client is left as sent
 	//
-	// Alerts from unauthenticated requests (anonymous in permissive mode) are never changed. Like any client, a
-	// principal ID longer than types.MaxClientLength is truncated.
+	// Alerts from unauthenticated requests (anonymous in permissive mode) are never changed. Principal IDs are
+	// never truncated: the API rejects principals with IDs longer than types.MaxClientLength (HTTP 401).
 	//
 	// Default: "" (which means [ClientBindingFill]).
 	ClientBinding string `json:"clientBinding" mapstructure:"clientBinding" yaml:"clientBinding"`

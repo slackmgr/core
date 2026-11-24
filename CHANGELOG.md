@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Principal IDs from any authenticator must be non-empty, without leading or trailing whitespace, and at most `types.MaxClientLength` (100) characters; otherwise the request gets HTTP 401 (`invalid_credentials`). Before, client binding truncated long IDs, so that different principals could share a client
+- API key IDs cannot contain `:`, which is reserved for the principal IDs of other authenticators (the `oidc` plugin prefixes its IDs with `oidc:`), so that access rules cannot confuse an OIDC client with an API key. `config.MaxAPIKeyIDLength` is now `types.MaxClientLength`, and counts characters instead of bytes
+- Permissive mode: a request with an `Authorization` header that no authenticator accepts (e.g. an unsupported scheme, or a non-JWT bearer token with only OIDC enabled) gets HTTP 401 instead of being let through anonymously. Without permissive mode, such requests now count as `invalid_credentials` instead of `missing_credentials`
+- `config.APISettings.ChannelAccessAllowed` allows nothing on uninitialized settings, and only allows principals without a matching rule when `DefaultChannelAccess` is exactly `allow` (fail closed)
+
+### Fixed
+- `Manager.UpdateSettings` (and `Manager.Run`) use a validated copy of the settings. Before, passing a struct that had been passed before, after changing it, applied nothing (e.g. a removed global admin kept admin rights)
+- `Server.UpdateSettings` (and `Server.Run`) use a validated copy of the settings. Before, passing a struct that had been passed before, after changing it, applied nothing: a rotated or revoked API key kept working, and changed access rules were not normalized
+- For authenticated requests, the channel and escalation `moveToChannel` values are validated (format, and the escalation count) before the channel authorization, with HTTP 400. Before, a forbidden but malformed `moveToChannel` was echoed in the HTTP 403 message and in the alert to `ErrorReportChannelID`, and custom `types.ChannelAuthorizer`s got unvalidated input
+- Alerts to `ErrorReportChannelID` strip backticks, angle brackets (Slack mentions and links), `:status:` and newlines from the error and target, and truncate the error
+- A `null` alert in the request (e.g. `[null]` or `{"alerts":[null]}`), or a `null` body, crashed the handler (HTTP 500). Null alerts now get HTTP 400
+
 ## [0.31.0] - 2026-11-24
 
 ### Added

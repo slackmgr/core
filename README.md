@@ -238,11 +238,11 @@ When enabled, all endpoints except `GET /ping` and `GET /openapi.yaml` require c
 
 Requests without valid credentials get HTTP 401 (with `WWW-Authenticate: Bearer realm="slackmgr"`), requests whose credentials lack the scope get HTTP 403, and a failing custom authenticator or authorizer gets HTTP 500 (fail closed). Authentication failures are logged (never with the credentials) and counted in `http_auth_requests_total{result}`, but not reported to `ErrorReportChannelID`. The principal ID of authenticated requests is added to the request log as `principal`. Authentication is decided at startup: it cannot be disabled by a settings update.
 
-**API keys** are configured in the API settings (`apiKeys`), and can be added, rotated and revoked at runtime with `Server.UpdateSettings`. Only the SHA-256 hash of each key is stored:
+**API keys** are configured in the API settings (`apiKeys`), and can be added, rotated and revoked at runtime with `Server.UpdateSettings` (the server keeps a validated copy of the settings, so pass them again after any change). Only the SHA-256 hash of each key is stored:
 
 ```yaml
 apiKeys:
-  - id: alertmanager-prod            # principal ID, logged with each request
+  - id: alertmanager-prod            # principal ID, logged with each request (max 100 characters, no ":")
     description: Prometheus Alertmanager in the prod cluster
     keySha256: "<64 hex characters>"  # printf '%s' "$KEY" | sha256sum, or config.HashAPIKey
     scopes: [alerts:write]
@@ -250,7 +250,7 @@ apiKeys:
 
 Generate keys with at least 32 random bytes, e.g. `openssl rand -hex 32`. Clients send a key as a bearer token (`Authorization: Bearer <key>`), or as the password of HTTP basic authentication (the username is ignored). Prometheus Alertmanager supports both (`http_config.authorization` or `http_config.basic_auth`).
 
-**OIDC/OAuth2 access tokens** are supported by the [`oidc` plugin](https://github.com/slackmgr/plugins/tree/main/oidc) (`WithAuthenticator(oidcAuthenticator)`), e.g. for clients using the client credentials flow. **Custom authenticators** implement `types.Authenticator` and return a `types.Principal` with an ID and scopes, `types.ErrNoCredentials` if the request has no credentials they handle, or `types.ErrInvalidCredentials`. Combine several with `types.ChainAuthenticators`. A custom `types.Authorizer` replaces the scope check, e.g. to delegate decisions to a policy engine.
+**OIDC/OAuth2 access tokens** are supported by the [`oidc` plugin](https://github.com/slackmgr/plugins/tree/main/oidc) (`WithAuthenticator(oidcAuthenticator)`), e.g. for clients using the client credentials flow. Its principal IDs have the prefix `oidc:` by default (e.g. `oidc:my-client`), and API key IDs cannot contain `:`, so access rules never confuse the two (match all OIDC clients with `oidc:*`). **Custom authenticators** implement `types.Authenticator` and return a `types.Principal` with an ID and scopes, `types.ErrNoCredentials` if the request has no credentials they handle, or `types.ErrInvalidCredentials`. Combine several with `types.ChainAuthenticators`. Principal IDs must be non-empty, without leading or trailing whitespace, and at most `types.MaxClientLength` (100) characters, otherwise the request gets HTTP 401: they are used as is in access rules and client binding, never trimmed or truncated. A custom `types.Authorizer` replaces the scope check, e.g. to delegate decisions to a policy engine.
 
 **Channel access rules** restrict the Slack channels that authenticated principals may send alerts to. They are configured in the API settings (hot-reloaded), and apply to all principals, whatever authenticator produced them:
 
@@ -262,11 +262,11 @@ accessRules:
     channels: [C0123456789, C0234567890]                    # channel IDs (not names), or *
 ```
 
-If rules match the principal, the channel must be listed in one of them. Otherwise, `defaultChannelAccess` decides (default `allow`, so restrictions are opt-in per principal). The check applies to the channel of each alert after routing (whether it came from the body, the path or a route key) and to every escalation `moveToChannel`, since an escalation could otherwise move an issue into a forbidden channel. If any alert is forbidden, the whole request is rejected with HTTP 403 before validation and rate limiting, and the alerts are counted as `alerts_rejected_total{reason="forbidden_channel"}`. A custom `Authorizer` that also implements `types.ChannelAuthorizer` replaces the rules (a failure gets HTTP 500, reason `authorization_failed`). Unauthenticated requests (authentication disabled, or anonymous in permissive mode) are not restricted.
+If rules match the principal, the channel must be listed in one of them. Otherwise, `defaultChannelAccess` decides (default `allow`, so restrictions are opt-in per principal). The check applies to the channel of each alert after routing (whether it came from the body, the path or a route key) and to every escalation `moveToChannel`, since an escalation could otherwise move an issue into a forbidden channel. The channels are first checked for a valid format (and the escalation count for its limit), with HTTP 400 on failure, so authorizers only see well-formed channel IDs. If any alert is forbidden, the whole request is rejected with HTTP 403 before the remaining validation and rate limiting, and the alerts are counted as `alerts_rejected_total{reason="forbidden_channel"}`. A custom `Authorizer` that also implements `types.ChannelAuthorizer` replaces the rules (a failure gets HTTP 500, reason `authorization_failed`). Unauthenticated requests (authentication disabled, or anonymous in permissive mode) are not restricted.
 
 **Client binding** (`APIConfig.Auth.ClientBinding`) sets the `client` of alerts from authenticated requests to the principal ID, which makes insights attribution trustworthy: `fill` (default) only sets empty clients, `override` always replaces the client (so it cannot be spoofed), and `off` leaves it as sent.
 
-**Permissive mode** (`APIConfig.Auth.Permissive`) lets requests without credentials through anonymously, while requests with credentials are still checked. Use it to migrate existing clients without a hard cutover: enable authentication in permissive mode, move clients to credentials one by one, and switch to strict mode when `http_auth_requests_total{result="anonymous"}` stays at zero.
+**Permissive mode** (`APIConfig.Auth.Permissive`) lets requests without credentials (no `Authorization` header) through anonymously, while requests with credentials are still checked. An `Authorization` header that no authenticator accepts, e.g. an unsupported scheme or a non-JWT token with only OIDC enabled, gets HTTP 401. Use it to migrate existing clients without a hard cutover: enable authentication in permissive mode, move clients to credentials one by one, and switch to strict mode when `http_auth_requests_total{result="anonymous"}` stays at zero.
 
 Alerts read from raw alert queues (`Server.WithRawAlertConsumer`) bypass the HTTP API, and are not authenticated: secure those queues with the access control of the queue service.
 

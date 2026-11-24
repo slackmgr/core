@@ -26,11 +26,13 @@ info:
     alerts), `alerts:test` (test alerts) or `config:read` (read routing rules and channels). The scope `*`
     grants all scopes. Requests without valid credentials are rejected with HTTP 401, and requests whose
     credentials lack the scope with HTTP 403. In permissive mode (used while migrating clients), requests
-    without any credentials are let through.
+    without any credentials (no `Authorization` header) are let through. An `Authorization` header that the
+    server does not accept, including an unsupported scheme, always gets HTTP 401.
 
     The deployment may also restrict the Slack channels an authenticated caller may send alerts to. The
     channel of each alert (after routing) and every escalation `moveToChannel` must be allowed, otherwise the
-    whole request is rejected with HTTP 403 and no alert is queued.
+    whole request is rejected with HTTP 403 and no alert is queued. Malformed channels, and more escalations
+    than allowed, are rejected with HTTP 400 before this check.
 
     ## Routing
 
