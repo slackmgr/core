@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Documented that channel access rules are checked when an alert is received: alerts for an issue that was moved out of an allowed channel still update it in its new channel (`config.AccessRule`, README, OpenAPI spec)
+
 ## [0.32.0] - 2026-11-24
 
 ### Changed

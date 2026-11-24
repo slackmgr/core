@@ -24,6 +24,12 @@ const accessRuleWildcard = "*"
 // escalations may move issues to (escalation moveToChannel). See [APISettings.ChannelAccessAllowed] for how rules
 // are evaluated.
 //
+// Rules are checked when the API receives an alert, against the channel it is sent to. An issue that was moved
+// out of that channel (by a Slack user, or by an escalation) keeps receiving the alerts with its correlation ID in
+// its new channel. So a principal allowed in a channel can update issues that started there, also after they were
+// moved to a channel it is not allowed. Like any principal allowed in a channel, it can also update or resolve
+// the issues of other principals in that channel, by correlation ID.
+//
 // # Example Configuration
 //
 //	defaultChannelAccess: allow

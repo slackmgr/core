@@ -33,6 +33,8 @@ info:
     channel of each alert (after routing) and every escalation `moveToChannel` must be allowed, otherwise the
     whole request is rejected with HTTP 403 and no alert is queued. Malformed channels, and more escalations
     than allowed, are rejected with HTTP 400 before this check.
+    The check applies when an alert is received: alerts for an issue that was moved out of an allowed channel
+    (by a Slack user or an escalation) still update the issue in its new channel.
 
     ## Routing
 
