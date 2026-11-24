@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenAPI spec: `bearerAuth` and `basicAuth` security schemes, the scope of each operation in its security requirements, an Authentication section, and 401/403 responses for the protected operations. A contract test checks the documented scopes against the server
 
 ### Changed
-- Requires `github.com/slackmgr/types` with the authentication types (`types.Principal`, `types.Authenticator`, `types.Authorizer`, scopes)
+- Bumped `github.com/slackmgr/types` to v0.14.0, which adds the authentication types (`types.Principal`, `types.Authenticator`, `types.Authorizer`, scopes)
 
 ## [0.30.0] - 2026-11-15
 
