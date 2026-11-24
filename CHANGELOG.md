@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `alerts_rejected_total` reasons `forbidden_channel` and `authorization_failed` (the dashboard panel description is updated)
 - `APIConfig.Auth.ClientBinding` (`fill`, the default, `override` or `off`): sets the client of alerts from authenticated requests to the principal ID
 - OpenAPI spec: channel restrictions and client binding are documented (Authentication section, 403 response, `client` field)
+- README: the new `oidc` plugin (`github.com/slackmgr/plugins/oidc`) for OIDC/OAuth2 access token authentication
 
 ### Changed
 - Bumped `github.com/slackmgr/types` to v0.15.0, which adds the authentication types (`types.Principal`, `types.Authenticator`, `types.Authorizer`, `types.ChannelAuthorizer`, scopes)

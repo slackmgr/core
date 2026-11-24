@@ -250,7 +250,7 @@ apiKeys:
 
 Generate keys with at least 32 random bytes, e.g. `openssl rand -hex 32`. Clients send a key as a bearer token (`Authorization: Bearer <key>`), or as the password of HTTP basic authentication (the username is ignored). Prometheus Alertmanager supports both (`http_config.authorization` or `http_config.basic_auth`).
 
-**Custom authenticators** implement `types.Authenticator` (e.g. to validate OIDC tokens) and return a `types.Principal` with an ID and scopes, `types.ErrNoCredentials` if the request has no credentials they handle, or `types.ErrInvalidCredentials`. Combine several with `types.ChainAuthenticators`. A custom `types.Authorizer` replaces the scope check, e.g. to delegate decisions to a policy engine.
+**OIDC/OAuth2 access tokens** are supported by the [`oidc` plugin](https://github.com/slackmgr/plugins/tree/main/oidc) (`WithAuthenticator(oidcAuthenticator)`), e.g. for clients using the client credentials flow. **Custom authenticators** implement `types.Authenticator` and return a `types.Principal` with an ID and scopes, `types.ErrNoCredentials` if the request has no credentials they handle, or `types.ErrInvalidCredentials`. Combine several with `types.ChainAuthenticators`. A custom `types.Authorizer` replaces the scope check, e.g. to delegate decisions to a policy engine.
 
 **Channel access rules** restrict the Slack channels that authenticated principals may send alerts to. They are configured in the API settings (hot-reloaded), and apply to all principals, whatever authenticator produced them:
 
@@ -501,7 +501,7 @@ func main() {
 
 ## Plugins
 
-The [`slackmgr/plugins`](https://github.com/slackmgr/plugins) repository provides ready-made implementations of the database and queue interfaces required by this library. Each plugin is a separate Go module versioned independently.
+The [`slackmgr/plugins`](https://github.com/slackmgr/plugins) repository provides ready-made implementations of the database and queue interfaces required by this library, and an OIDC authenticator for the REST API. Each plugin is a separate Go module versioned independently.
 
 | Plugin | Module | Provides |
 |--------|--------|----------|
@@ -509,6 +509,7 @@ The [`slackmgr/plugins`](https://github.com/slackmgr/plugins) repository provide
 | [dynamodb](https://github.com/slackmgr/plugins/tree/main/dynamodb) | `github.com/slackmgr/plugins/dynamodb` | AWS DynamoDB storage backend (`types.DB`) |
 | [sqs](https://github.com/slackmgr/plugins/tree/main/sqs) | `github.com/slackmgr/plugins/sqs` | AWS SQS queue consumer and webhook handler |
 | [pubsub](https://github.com/slackmgr/plugins/tree/main/pubsub) | `github.com/slackmgr/plugins/pubsub` | Google Cloud Pub/Sub queue consumer and webhook handler |
+| [oidc](https://github.com/slackmgr/plugins/tree/main/oidc) | `github.com/slackmgr/plugins/oidc` | OIDC/OAuth2 access token authentication (`types.Authenticator`) |
 
 For Redis-backed queues and channel locking (used in the Quick Start above), no additional plugin is needed — these are included in this library's `manager` package.
 
