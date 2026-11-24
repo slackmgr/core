@@ -2,7 +2,7 @@ openapi: 3.1.0
 
 info:
   title: Slack Manager REST API
-  version: 0.30.0
+  version: 0.31.0
   summary: Send alerts to Slack Manager, which groups them into issues in Slack channels.
   description: |
     The REST API of the Slack Manager core library (`github.com/slackmgr/core/restapi`). It accepts alerts

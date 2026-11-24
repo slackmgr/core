@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-11-24
+
 ### Added
 - Optional authentication and authorization for the REST API, disabled by default (all endpoints stay open):
   - `Server.WithAPIKeyAuth()` enables built-in API keys, configured as SHA-256 hashes with scopes in `APISettings.APIKeys` (`config.APIKey`, `config.HashAPIKey`). Keys can be rotated and revoked at runtime with `Server.UpdateSettings`. Clients send a key as a bearer token or as the password of HTTP basic authentication
@@ -16,7 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The request log includes the `principal` of authenticated requests
 - `http_auth_requests_total{result}` metric (`authenticated`, `anonymous`, `missing_credentials`, `invalid_credentials`, `forbidden`, `error`), registered when authentication is enabled. Dashboard: new "Authentication Results" and "Anonymous Requests (window total)" panels in the REST API row
 - OpenAPI spec: `bearerAuth` and `basicAuth` security schemes, the scope of each operation in its security requirements, an Authentication section, and 401/403 responses for the protected operations. A contract test checks the documented scopes against the server
-
 - Channel access rules for authenticated principals in the API settings: `APISettings.AccessRules` (`config.AccessRule`, matching principal IDs exactly, by prefix or `*`, and channel IDs or `*`) and `APISettings.DefaultChannelAccess` (`allow`, the default, or `deny`), evaluated by `APISettings.ChannelAccessAllowed`. The channel of each alert after routing and every escalation `moveToChannel` must be allowed, otherwise the request is rejected as a whole with HTTP 403. A custom authorizer implementing `types.ChannelAuthorizer` replaces the rules. Applies to `POST /alerts` (and aliases), `POST /prometheus-alert` and `POST /alerts-test`
 - New `alerts_rejected_total` reasons `forbidden_channel` and `authorization_failed` (the dashboard panel description is updated)
 - `APIConfig.Auth.ClientBinding` (`fill`, the default, `override` or `off`): sets the client of alerts from authenticated requests to the principal ID
@@ -684,7 +685,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/slackmgr/core/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/slackmgr/core/compare/v0.29.1...v0.30.0
 [0.29.1]: https://github.com/slackmgr/core/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/slackmgr/core/compare/v0.28.0...v0.29.0
