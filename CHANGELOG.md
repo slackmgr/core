@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenAPI spec: channel restrictions and client binding are documented (Authentication section, 403 response, `client` field)
 
 ### Changed
-- Bumped `github.com/slackmgr/types` to v0.14.0, which adds the authentication types (`types.Principal`, `types.Authenticator`, `types.Authorizer`, scopes)
+- Bumped `github.com/slackmgr/types` to v0.15.0, which adds the authentication types (`types.Principal`, `types.Authenticator`, `types.Authorizer`, `types.ChannelAuthorizer`, scopes)
 
 ## [0.30.0] - 2026-11-15
 
