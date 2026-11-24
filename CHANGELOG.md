@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-24
+
 ### Changed
 - Principal IDs from any authenticator must be non-empty, without leading or trailing whitespace, and at most `types.MaxClientLength` (100) characters; otherwise the request gets HTTP 401 (`invalid_credentials`). Before, client binding truncated long IDs, so that different principals could share a client
 - API key IDs cannot contain `:`, which is reserved for the principal IDs of other authenticators (the `oidc` plugin prefixes its IDs with `oidc:`), so that access rules cannot confuse an OIDC client with an API key. `config.MaxAPIKeyIDLength` is now `types.MaxClientLength`, and counts characters instead of bytes
@@ -698,7 +700,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 See git history for changes in v0.0.62 and earlier versions.
 
-[Unreleased]: https://github.com/slackmgr/core/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/slackmgr/core/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/slackmgr/core/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/slackmgr/core/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/slackmgr/core/compare/v0.29.1...v0.30.0
 [0.29.1]: https://github.com/slackmgr/core/compare/v0.29.0...v0.29.1
