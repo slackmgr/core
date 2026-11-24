@@ -89,6 +89,9 @@ type Server struct {
 	hooks               Hooks
 	insightsSink        types.InsightsSink
 	insights            *insights.Recorder
+	apiKeyAuth          bool
+	authenticator       types.Authenticator
+	authorizer          types.Authorizer
 }
 
 // New creates a [Server] with the three required dependencies.
@@ -98,6 +101,8 @@ type Server struct {
 //   - [Server.WithMetrics] — sets the metrics implementation (defaults to no-op)
 //   - [Server.WithAlertRateLimiter] — sets the per-channel alert rate limiter (defaults to in-process, per instance)
 //   - [Server.WithSettings] — sets the initial API settings (defaults to zero-value)
+//   - [Server.WithAPIKeyAuth], [Server.WithAuthenticator], [Server.WithAuthorizer] — enable authentication and
+//     authorization (defaults to none: all endpoints are open)
 func New(alertQueue FifoQueueProducer, logger types.Logger, cfg *config.APIConfig) *Server {
 	logger = internal.NewUniqueFieldsLogger(logger)
 
@@ -292,6 +297,8 @@ func (s *Server) Run(ctx context.Context) error {
 	s.metrics.RegisterCounter(alertRateLimiterErrorsMetric, "Total alert rate limit checks that failed (e.g. Redis unavailable). The alerts are allowed (fail open)")
 	s.metrics.CounterAdd(alertRateLimiterErrorsMetric, 0)
 	s.registerAlertIntakeMetrics()
+	s.registerAuthMetrics()
+	s.logAuthState()
 
 	// Set release mode to mute a few annoying startup logs.
 	// The actual runtime mode is set below, depending on config.
@@ -339,7 +346,7 @@ func (s *Server) Run(ctx context.Context) error {
 		timeout.WithResponse(timeoutResponse),
 	))
 
-	s.registerRoutes(engine)
+	s.registerRoutes(engine) //nolint:contextcheck // Request handlers (including the auth middleware) use the request context.
 
 	// Calculate timeouts for the HTTP server and handler middleware.
 	readTimeout := readHeaderTimeout + handlerTimeout + timeoutBuffer
@@ -443,44 +450,53 @@ func (s *Server) UpdateSettings(settings *config.APISettings) error {
 	s.apiSettings.Store(settings)
 
 	s.logger.Infof("API settings updated")
+	s.logAPIKeyState()
 
 	return nil
 }
 
-// registerRoutes registers all HTTP routes on the engine.
+// registerRoutes registers all HTTP routes on the engine. All routes except GET /ping and GET /openapi.yaml
+// require a scope, which is checked when authentication is enabled (see [Server.WithAPIKeyAuth]).
 func (s *Server) registerRoutes(engine *gin.Engine) {
+	authenticator := s.effectiveAuthenticator()
+	authorizer := s.effectiveAuthorizer()
+
+	alertsWrite := engine.Group("", s.authMiddleware(types.ScopeAlertsWrite, authenticator, authorizer))
+	alertsTest := engine.Group("", s.authMiddleware(types.ScopeAlertsTest, authenticator, authorizer))
+	configRead := engine.Group("", s.authMiddleware(types.ScopeConfigRead, authenticator, authorizer))
+
 	// We support both /alert and /alerts endpoints for backwards compatibility.
 	// Input is either a single alert (types.Alert), or an array of alerts.
-	engine.POST("/alert", s.handleAlerts)
-	engine.POST("/alert/:slackChannelId", s.handleAlerts)
-	engine.POST("/alerts", s.handleAlerts)
-	engine.POST("/alerts/:slackChannelId", s.handleAlerts)
+	alertsWrite.POST("/alert", s.handleAlerts)
+	alertsWrite.POST("/alert/:slackChannelId", s.handleAlerts)
+	alertsWrite.POST("/alerts", s.handleAlerts)
+	alertsWrite.POST("/alerts/:slackChannelId", s.handleAlerts)
 
 	// Deprecated aliases, kept for compatibility with legacy clients.
-	engine.POST("/slackalert", s.handleAlerts)
-	engine.POST("/slackalert/:slackChannelId", s.handleAlerts)
-	engine.POST("/slackalerts", s.handleAlerts)
-	engine.POST("/slackalerts/:slackChannelId", s.handleAlerts)
+	alertsWrite.POST("/slackalert", s.handleAlerts)
+	alertsWrite.POST("/slackalert/:slackChannelId", s.handleAlerts)
+	alertsWrite.POST("/slackalerts", s.handleAlerts)
+	alertsWrite.POST("/slackalerts/:slackChannelId", s.handleAlerts)
 
 	// Webhooks from Prometheus alert manager.
 	// The alert format is defined in PrometheusWebhook.
-	engine.POST("/prometheus-alert", s.handlePrometheusWebhook)
-	engine.POST("/prometheus-alert/:slackChannelId", s.handlePrometheusWebhook)
+	alertsWrite.POST("/prometheus-alert", s.handlePrometheusWebhook)
+	alertsWrite.POST("/prometheus-alert/:slackChannelId", s.handlePrometheusWebhook)
 
 	// Test endpoint for alerts, which writes the input body as an info log message.
-	engine.POST("/alerts-test", s.handleAlertsTest)
-	engine.POST("/alerts-test/:slackChannelId", s.handleAlertsTest)
+	alertsTest.POST("/alerts-test", s.handleAlertsTest)
+	alertsTest.POST("/alerts-test/:slackChannelId", s.handleAlertsTest)
 
 	// Route mappings (legacy format)
-	engine.GET("/mappings", s.handleMappings)
+	configRead.GET("/mappings", s.handleMappings)
 
 	// List channels managed by Slack Manager
-	engine.GET("/channels", s.handleChannels)
+	configRead.GET("/channels", s.handleChannels)
 
-	// Ping
+	// Ping (public)
 	engine.GET("/ping", s.ping)
 
-	// OpenAPI specification of this API (see openapi.yaml)
+	// OpenAPI specification of this API (see openapi.yaml) (public)
 	engine.GET("/openapi.yaml", s.handleOpenAPISpec)
 }
 
@@ -757,6 +773,10 @@ func (s *Server) jsonLogMiddleware() gin.HandlerFunc {
 
 		if errors != "" {
 			logger = logger.WithField("errors", errors)
+		}
+
+		if principal := principalFromContext(c); principal != nil {
+			logger = logger.WithField("principal", principal.ID)
 		}
 
 		if status >= 500 {

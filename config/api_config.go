@@ -172,6 +172,12 @@ type APIConfig struct {
 	//
 	// Default: nil, which means default values. Zero or negative fields are set to their defaults by Validate.
 	Insights *InsightsConfig `json:"insights" mapstructure:"insights" yaml:"insights"`
+
+	// Auth configures how authentication is enforced, when it is enabled with Server.WithAPIKeyAuth or
+	// Server.WithAuthenticator. See AuthConfig for details.
+	//
+	// Default: nil, which means default values (strict mode).
+	Auth *AuthConfig `json:"auth" mapstructure:"auth" yaml:"auth"`
 }
 
 // RateLimitConfig configures the token bucket rate limiter for alert processing.

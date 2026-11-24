@@ -204,6 +204,7 @@ Slack Events ──────────────────────�
   - `GET /mappings` returns the routing rules in the legacy format, extended with `alertType`: `{"rules":[{"teamName", "description", "alertType", "equals", "hasPrefix", "matchesRegex", "channel", "matchAll"}]}`. An empty description falls back to the rule name. Legacy clients ignore `alertType`, so they may match typed rules that the API would not apply to their (untyped) alerts
 - Channel names in `slackChannelId` and in escalation `moveToChannel` are mapped to channel IDs (for channels the Slack Manager is a member of)
 - Per-channel rate limiting (see [Alert Rate Limiting](#alert-rate-limiting))
+- Optional authentication and authorization with API keys or a custom authenticator (see [Authentication](#authentication))
 - Validates and enqueues alerts for the manager to process
 
 #### API specification
@@ -213,6 +214,47 @@ The REST API is described by an OpenAPI 3.1 document, [`restapi/openapi.yaml`](r
 - Rendered reference: [slackmgr.github.io/core](https://slackmgr.github.io/core/) (published by the `API docs` workflow on changes to the spec)
 - Served by the API at `GET /openapi.yaml` (`application/yaml`), and available in Go as `restapi.OpenAPISpec()`
 - Tests check that the spec documents exactly the registered routes, that the server and spec agree on which alert payloads are valid, and that the server's responses conform to the spec. CI lints the spec with Redocly CLI (`redocly.yaml`)
+
+### Authentication
+
+Authentication is optional and disabled by default: all endpoints are open. Enable it with the built-in API keys, a custom `types.Authenticator`, or both:
+
+```go
+server := restapi.New(alertQueue, logger, apiCfg).
+    WithSettings(apiSettings). // API keys are read from the settings
+    WithAPIKeyAuth().
+    WithAuthenticator(oidcAuthenticator). // optional, tried after the API keys
+    WithAuthorizer(policy)                // optional, defaults to checking the principal's scopes
+```
+
+When enabled, all endpoints except `GET /ping` and `GET /openapi.yaml` require credentials and a scope:
+
+| Scope | Endpoints |
+|---|---|
+| `alerts:write` | `POST /alerts`, `POST /prometheus-alert` (and the deprecated aliases) |
+| `alerts:test` | `POST /alerts-test` |
+| `config:read` | `GET /mappings`, `GET /channels` |
+| `*` | All of the above |
+
+Requests without valid credentials get HTTP 401 (with `WWW-Authenticate: Bearer realm="slackmgr"`), requests whose credentials lack the scope get HTTP 403, and a failing custom authenticator or authorizer gets HTTP 500 (fail closed). Authentication failures are logged (never with the credentials) and counted in `http_auth_requests_total{result}`, but not reported to `ErrorReportChannelID`. The principal ID of authenticated requests is added to the request log as `principal`. Authentication is decided at startup: it cannot be disabled by a settings update.
+
+**API keys** are configured in the API settings (`apiKeys`), and can be added, rotated and revoked at runtime with `Server.UpdateSettings`. Only the SHA-256 hash of each key is stored:
+
+```yaml
+apiKeys:
+  - id: alertmanager-prod            # principal ID, logged with each request
+    description: Prometheus Alertmanager in the prod cluster
+    keySha256: "<64 hex characters>"  # printf '%s' "$KEY" | sha256sum, or config.HashAPIKey
+    scopes: [alerts:write]
+```
+
+Generate keys with at least 32 random bytes, e.g. `openssl rand -hex 32`. Clients send a key as a bearer token (`Authorization: Bearer <key>`), or as the password of HTTP basic authentication (the username is ignored). Prometheus Alertmanager supports both (`http_config.authorization` or `http_config.basic_auth`).
+
+**Custom authenticators** implement `types.Authenticator` (e.g. to validate OIDC tokens) and return a `types.Principal` with an ID and scopes, `types.ErrNoCredentials` if the request has no credentials they handle, or `types.ErrInvalidCredentials`. Combine several with `types.ChainAuthenticators`. A custom `types.Authorizer` replaces the scope check, e.g. to delegate decisions to a policy engine.
+
+**Permissive mode** (`APIConfig.Auth.Permissive`) lets requests without credentials through anonymously, while requests with credentials are still checked. Use it to migrate existing clients without a hard cutover: enable authentication in permissive mode, move clients to credentials one by one, and switch to strict mode when `http_auth_requests_total{result="anonymous"}` stays at zero.
+
+Alerts read from raw alert queues (`Server.WithRawAlertConsumer`) bypass the HTTP API, and are not authenticated: secure those queues with the access control of the queue service.
 
 ### Alert Rate Limiting
 
@@ -348,7 +390,7 @@ Activity methods return `types.ErrInsightsNotSupported` when no reader is availa
 
 ## Metrics and Grafana Dashboard
 
-Both `restapi` and `manager` emit metrics through the injected `types.Metrics` implementation, with all names prefixed by `MetricsPrefix` (default `slackmgr_`). A ready-made Grafana dashboard for a Prometheus data source is available in [`dashboards/slackmgr.json`](dashboards/slackmgr.json). It covers every metric emitted by the library: alert and issue flow, open issues, Slack API health, Slack posts (including pending posts), queue processing, lock contention and DB cache, the REST API, alert intake and the insights recorder. If you use a custom prefix, set the dashboard's "Metrics prefix" variable (default `slackmgr_`) to match, either in the dashboard settings or with the `var-prefix` URL parameter.
+Both `restapi` and `manager` emit metrics through the injected `types.Metrics` implementation, with all names prefixed by `MetricsPrefix` (default `slackmgr_`). A ready-made Grafana dashboard for a Prometheus data source is available in [`dashboards/slackmgr.json`](dashboards/slackmgr.json). It covers every metric emitted by the library: alert and issue flow, open issues, Slack API health, Slack posts (including pending posts), queue processing, lock contention and DB cache, the REST API (including authentication results), alert intake and the insights recorder. If you use a custom prefix, set the dashboard's "Metrics prefix" variable (default `slackmgr_`) to match, either in the dashboard settings or with the `var-prefix` URL parameter.
 
 Fire-and-forget notifications (alerts with follow-up disabled, including every new info alert) are not issues: they are excluded from `channel_open_issues`, `issues_created_total` and `issues_archived_total`, and counted only in `fire_and_forget_alerts_total`.
 

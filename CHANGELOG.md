@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Optional authentication and authorization for the REST API, disabled by default (all endpoints stay open):
+  - `Server.WithAPIKeyAuth()` enables built-in API keys, configured as SHA-256 hashes with scopes in `APISettings.APIKeys` (`config.APIKey`, `config.HashAPIKey`). Keys can be rotated and revoked at runtime with `Server.UpdateSettings`. Clients send a key as a bearer token or as the password of HTTP basic authentication
+  - `Server.WithAuthenticator(types.Authenticator)` adds a custom authenticator (e.g. OIDC), tried after the API keys, and `Server.WithAuthorizer(types.Authorizer)` replaces the default scope check
+  - When enabled, all endpoints except `GET /ping` and `GET /openapi.yaml` require a scope: `alerts:write`, `alerts:test` or `config:read` (`*` grants all). Missing or invalid credentials get HTTP 401, missing scopes HTTP 403, and authenticator or authorizer failures HTTP 500
+  - `APIConfig.Auth.Permissive` (`config.AuthConfig`) lets requests without credentials through anonymously, for migrating clients without a hard cutover
+  - The request log includes the `principal` of authenticated requests
+- `http_auth_requests_total{result}` metric (`authenticated`, `anonymous`, `missing_credentials`, `invalid_credentials`, `forbidden`, `error`), registered when authentication is enabled. Dashboard: new "Authentication Results" and "Anonymous Requests (window total)" panels in the REST API row
+- OpenAPI spec: `bearerAuth` and `basicAuth` security schemes, the scope of each operation in its security requirements, an Authentication section, and 401/403 responses for the protected operations. A contract test checks the documented scopes against the server
+
+### Changed
+- Requires `github.com/slackmgr/types` with the authentication types (`types.Principal`, `types.Authenticator`, `types.Authorizer`, scopes)
+
 ## [0.30.0] - 2026-11-15
 
 ### Added

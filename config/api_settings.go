@@ -50,6 +50,13 @@ type APISettings struct {
 	// a catch-all rule (MatchAll: true) as the last rule to handle unmatched alerts.
 	RoutingRules []*RoutingRule `json:"routingRules" mapstructure:"routingRules" yaml:"routingRules"`
 
+	// APIKeys are the API keys accepted by the built-in API key authentication. They are only used when the
+	// server has API key authentication enabled (Server.WithAPIKeyAuth); otherwise they are ignored.
+	//
+	// Keys can be added, rotated and revoked at runtime by updating the settings. Removing all keys does not
+	// disable authentication: requests are then rejected (or let through anonymously in permissive mode).
+	APIKeys []*APIKey `json:"apiKeys" mapstructure:"apiKeys" yaml:"apiKeys"`
+
 	ruleMatchCache map[string]string
 	cacheLock      sync.RWMutex
 	initialized    bool
@@ -159,7 +166,7 @@ func (s *APISettings) Clone() (*APISettings, error) {
 	return clone, nil
 }
 
-// InitAndValidate initializes internal data structures and validates all routing rules.
+// InitAndValidate initializes internal data structures and validates all routing rules and API keys.
 //
 // This method performs the following operations:
 //  1. Normalizes all string values (trims whitespace, converts to lowercase for matching)
@@ -167,7 +174,8 @@ func (s *APISettings) Clone() (*APISettings, error) {
 //  3. Compiles regular expressions for MatchesRegex patterns
 //  4. Validates that each rule has at least one matching mechanism configured
 //  5. Validates that all channel IDs are valid Slack channel ID format
-//  6. Initializes the route match cache for performance
+//  6. Validates the API keys (see [APIKey])
+//  7. Initializes the route match cache for performance
 //
 // This method is idempotent - calling it multiple times on an already-initialized
 // APISettings has no effect. The API Server calls this internally when settings
@@ -256,10 +264,14 @@ func (s *APISettings) InitAndValidate(logger types.Logger) error {
 		}
 	}
 
+	if err := s.initAPIKeys(); err != nil {
+		return err
+	}
+
 	s.ruleMatchCache = make(map[string]string)
 	s.initialized = true
 
-	logger.Infof("API settings initialized with %d routing rules", len(s.RoutingRules))
+	logger.Infof("API settings initialized with %d routing rules and %d API keys", len(s.RoutingRules), len(s.APIKeys))
 
 	for i, rule := range s.RoutingRules {
 		logger.Debugf("Routing rule #%d name:%s channel:%s equals:%v hasPrefix:%v regex:%v matchAll:%v", i, rule.Name, rule.Channel, rule.Equals, rule.HasPrefix, rule.MatchesRegex, rule.MatchAll)

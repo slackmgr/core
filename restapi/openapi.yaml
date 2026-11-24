@@ -9,8 +9,24 @@ info:
     from monitoring systems and other clients, validates and routes them to a Slack channel, and queues them
     for the manager, which creates and updates issues in Slack.
 
-    The API is embedded in a host application, so the base URL, port and any authentication depend on the
-    deployment. The default port is 8080.
+    The API is embedded in a host application, so the base URL and port depend on the deployment. The
+    default port is 8080.
+
+    ## Authentication
+
+    Authentication is optional, and disabled by default: all endpoints are then open. When the deployment
+    enables it, all endpoints except `GET /ping` and `GET /openapi.yaml` require credentials:
+
+    - An API key, sent as a bearer token (`Authorization: Bearer <key>`), or as the password of HTTP basic
+      authentication (the username is ignored)
+    - A token accepted by a custom authenticator of the deployment (e.g. an OIDC access token), sent as a
+      bearer token
+
+    Each protected endpoint requires a scope, listed in its security requirements: `alerts:write` (send
+    alerts), `alerts:test` (test alerts) or `config:read` (read routing rules and channels). The scope `*`
+    grants all scopes. Requests without valid credentials are rejected with HTTP 401, and requests whose
+    credentials lack the scope with HTTP 403. In permissive mode (used while migrating clients), requests
+    without any credentials are let through.
 
     ## Routing
 
@@ -84,6 +100,10 @@ paths:
         alerts have been queued.
       requestBody:
         $ref: '#/components/requestBodies/AlertBatch'
+      security:
+        - bearerAuth: [alerts:write]
+        - basicAuth: [alerts:write]
+        - {}
       responses:
         '202':
           $ref: '#/components/responses/Accepted'
@@ -91,6 +111,10 @@ paths:
           $ref: '#/components/responses/AllIgnored'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -109,6 +133,10 @@ paths:
         - $ref: '#/components/parameters/SlackChannelID'
       requestBody:
         $ref: '#/components/requestBodies/AlertBatch'
+      security:
+        - bearerAuth: [alerts:write]
+        - basicAuth: [alerts:write]
+        - {}
       responses:
         '202':
           $ref: '#/components/responses/Accepted'
@@ -116,6 +144,10 @@ paths:
           $ref: '#/components/responses/AllIgnored'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -132,6 +164,10 @@ paths:
       deprecated: true
       requestBody:
         $ref: '#/components/requestBodies/Alerts'
+      security:
+        - bearerAuth: [alerts:write]
+        - basicAuth: [alerts:write]
+        - {}
       responses:
         '202':
           $ref: '#/components/responses/Accepted'
@@ -139,6 +175,10 @@ paths:
           $ref: '#/components/responses/AllIgnored'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -156,6 +196,10 @@ paths:
         - $ref: '#/components/parameters/SlackChannelID'
       requestBody:
         $ref: '#/components/requestBodies/Alerts'
+      security:
+        - bearerAuth: [alerts:write]
+        - basicAuth: [alerts:write]
+        - {}
       responses:
         '202':
           $ref: '#/components/responses/Accepted'
@@ -163,6 +207,10 @@ paths:
           $ref: '#/components/responses/AllIgnored'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -178,6 +226,10 @@ paths:
       deprecated: true
       requestBody:
         $ref: '#/components/requestBodies/Alerts'
+      security:
+        - bearerAuth: [alerts:write]
+        - basicAuth: [alerts:write]
+        - {}
       responses:
         '202':
           $ref: '#/components/responses/Accepted'
@@ -185,6 +237,10 @@ paths:
           $ref: '#/components/responses/AllIgnored'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -202,6 +258,10 @@ paths:
         - $ref: '#/components/parameters/SlackChannelID'
       requestBody:
         $ref: '#/components/requestBodies/Alerts'
+      security:
+        - bearerAuth: [alerts:write]
+        - basicAuth: [alerts:write]
+        - {}
       responses:
         '202':
           $ref: '#/components/responses/Accepted'
@@ -209,6 +269,10 @@ paths:
           $ref: '#/components/responses/AllIgnored'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -224,6 +288,10 @@ paths:
       deprecated: true
       requestBody:
         $ref: '#/components/requestBodies/Alerts'
+      security:
+        - bearerAuth: [alerts:write]
+        - basicAuth: [alerts:write]
+        - {}
       responses:
         '202':
           $ref: '#/components/responses/Accepted'
@@ -231,6 +299,10 @@ paths:
           $ref: '#/components/responses/AllIgnored'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -248,6 +320,10 @@ paths:
         - $ref: '#/components/parameters/SlackChannelID'
       requestBody:
         $ref: '#/components/requestBodies/Alerts'
+      security:
+        - bearerAuth: [alerts:write]
+        - basicAuth: [alerts:write]
+        - {}
       responses:
         '202':
           $ref: '#/components/responses/Accepted'
@@ -255,6 +331,10 @@ paths:
           $ref: '#/components/responses/AllIgnored'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -297,6 +377,10 @@ paths:
         If neither the header nor the text contains `:status:`, it is prepended to the header.
       requestBody:
         $ref: '#/components/requestBodies/PrometheusWebhook'
+      security:
+        - bearerAuth: [alerts:write]
+        - basicAuth: [alerts:write]
+        - {}
       responses:
         '202':
           $ref: '#/components/responses/Accepted'
@@ -304,6 +388,10 @@ paths:
           $ref: '#/components/responses/AllIgnored'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -322,6 +410,10 @@ paths:
         - $ref: '#/components/parameters/SlackChannelID'
       requestBody:
         $ref: '#/components/requestBodies/PrometheusWebhook'
+      security:
+        - bearerAuth: [alerts:write]
+        - basicAuth: [alerts:write]
+        - {}
       responses:
         '202':
           $ref: '#/components/responses/Accepted'
@@ -329,6 +421,10 @@ paths:
           $ref: '#/components/responses/AllIgnored'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -346,11 +442,19 @@ paths:
         not validated, rate limited or queued, and nothing is sent to Slack.
       requestBody:
         $ref: '#/components/requestBodies/Alerts'
+      security:
+        - bearerAuth: [alerts:test]
+        - basicAuth: [alerts:test]
+        - {}
       responses:
         '204':
           $ref: '#/components/responses/TestAccepted'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
         '503':
@@ -365,11 +469,19 @@ paths:
         - $ref: '#/components/parameters/SlackChannelID'
       requestBody:
         $ref: '#/components/requestBodies/Alerts'
+      security:
+        - bearerAuth: [alerts:test]
+        - basicAuth: [alerts:test]
+        - {}
       responses:
         '204':
           $ref: '#/components/responses/TestAccepted'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
         '503':
@@ -384,6 +496,10 @@ paths:
         Returns the routing rules in the legacy Slack Manager mappings format, extended with `alertType`.
         Legacy clients ignore `alertType`, so they may match typed rules that the API would not apply to
         their (untyped) alerts.
+      security:
+        - bearerAuth: [config:read]
+        - basicAuth: [config:read]
+        - {}
       responses:
         '200':
           description: The routing rules, in the order they are evaluated.
@@ -391,6 +507,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Mappings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
         '503':
@@ -402,6 +522,10 @@ paths:
       operationId: getChannels
       summary: List managed channels
       description: Returns the Slack channels that the Slack Manager integration is a member of.
+      security:
+        - bearerAuth: [config:read]
+        - basicAuth: [config:read]
+        - {}
       responses:
         '200':
           description: The managed channels.
@@ -411,6 +535,10 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ChannelSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
         '503':
@@ -582,7 +710,54 @@ components:
           schema:
             $ref: '#/components/schemas/PrometheusWebhook'
 
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        An API key, or a token accepted by a custom authenticator of the deployment (e.g. an OIDC access
+        token). Only checked when the deployment enables authentication.
+    basicAuth:
+      type: http
+      scheme: basic
+      description: |
+        An API key as the password (the username is ignored), for clients that only support basic
+        authentication. Only checked when the deployment enables authentication.
+
   responses:
+    Unauthorized:
+      description: |
+        Authentication is enabled, and the request has no valid credentials: they are missing, unknown,
+        expired or malformed.
+      headers:
+        WWW-Authenticate:
+          description: The authentication challenge.
+          schema:
+            type: string
+          example: Bearer realm="slackmgr"
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            missing:
+              summary: No credentials
+              value:
+                error: Authentication required
+            invalid:
+              summary: Invalid credentials
+              value:
+                error: Invalid credentials
+    Forbidden:
+      description: |
+        Authentication is enabled, and the credentials are valid, but lack the scope required by the
+        endpoint.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: 'Forbidden: the alerts:write scope is required'
     Accepted:
       description: |
         All alerts were queued, except any alerts dropped by `ignoreIfTextContains`. The `RateLimit-*`
@@ -633,8 +808,8 @@ components:
             error: rate limit exceeded for 5 alerts in channel C0123456789
     InternalError:
       description: |
-        An internal error, e.g. a failed Slack channel lookup or queue error. Alerts queued before a queue
-        error are not rolled back.
+        An internal error, e.g. a failed Slack channel lookup or queue error, or a failure of a custom
+        authenticator or authorizer. Alerts queued before a queue error are not rolled back.
       content:
         application/json:
           schema:

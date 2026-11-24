@@ -607,13 +607,19 @@ func TestOpenAPISpec_Responses(t *testing.T) {
 		`{"status":"firing","labels":{"alertname":"HighLatency","channel":"C123"},"annotations":{"summary":"Latency is high"},` +
 		`"startsAt":"2026-11-14T10:00:00Z","endsAt":"0001-01-01T00:00:00Z"}]}`
 
+	enableAuth := func(s *Server, _ *mockFifoQueueProducer, _ *mockChannelInfoProvider) {
+		s.WithAPIKeyAuth()
+		s.apiSettings.Store(testAPIKeySettings(t))
+	}
+
 	tests := []struct {
-		name       string
-		method     string
-		path       string
-		body       string
-		setup      func(s *Server, q *mockFifoQueueProducer, c *mockChannelInfoProvider)
-		wantStatus int
+		name          string
+		method        string
+		path          string
+		body          string
+		authorization string
+		setup         func(s *Server, q *mockFifoQueueProducer, c *mockChannelInfoProvider)
+		wantStatus    int
 	}{
 		{
 			name: "send alerts", method: http.MethodPost, path: "/alerts", body: validAlert, wantStatus: http.StatusAccepted,
@@ -683,6 +689,49 @@ func TestOpenAPISpec_Responses(t *testing.T) {
 		{
 			name: "get openapi spec", method: http.MethodGet, path: "/openapi.yaml", wantStatus: http.StatusOK,
 		},
+		{
+			name: "send alerts with api key", method: http.MethodPost, path: "/alerts", body: validAlert,
+			authorization: bearer(testKeyWriter), setup: enableAuth, wantStatus: http.StatusAccepted,
+		},
+		{
+			name: "send alerts without credentials", method: http.MethodPost, path: "/alerts", body: validAlert,
+			setup: enableAuth, wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "send alerts with invalid credentials", method: http.MethodPost, path: "/alerts", body: validAlert,
+			authorization: bearer("unknown"), setup: enableAuth, wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "send alerts without scope", method: http.MethodPost, path: "/alerts", body: validAlert,
+			authorization: bearer(testKeyReader), setup: enableAuth, wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "send prometheus webhook without scope", method: http.MethodPost, path: "/prometheus-alert", body: prometheusWebhook,
+			authorization: bearer(testKeyReader), setup: enableAuth, wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "test alerts without credentials", method: http.MethodPost, path: "/alerts-test", body: validAlert,
+			setup: enableAuth, wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "get channels without credentials", method: http.MethodGet, path: "/channels", setup: enableAuth, wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "get mappings without scope", method: http.MethodGet, path: "/mappings", authorization: basic("", testKeyWriter),
+			setup: enableAuth, wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "get channels with failing authenticator", method: http.MethodGet, path: "/channels", authorization: bearer("x"),
+			setup: func(s *Server, _ *mockFifoQueueProducer, _ *mockChannelInfoProvider) {
+				s.WithAuthenticator(types.AuthenticatorFunc(func(*http.Request) (*types.Principal, error) {
+					return nil, errors.New("identity provider unavailable")
+				}))
+			},
+			wantStatus: http.StatusInternalServerError,
+		},
+		{
+			name: "ping without credentials", method: http.MethodGet, path: "/ping", setup: enableAuth, wantStatus: http.StatusOK,
+		},
 	}
 
 	v := newOpenAPIValidator(t)
@@ -719,6 +768,10 @@ func TestOpenAPISpec_Responses(t *testing.T) {
 					req.Header.Set("Content-Type", "application/json")
 				}
 
+				if tt.authorization != "" {
+					req.Header.Set("Authorization", tt.authorization)
+				}
+
 				return req
 			}
 
@@ -729,6 +782,76 @@ func TestOpenAPISpec_Responses(t *testing.T) {
 
 			valid, errs := v.ValidateHttpResponse(newRequest(), w.Result())
 			assert.True(t, valid, formatValidationErrors(errs))
+		})
+	}
+}
+
+// TestOpenAPISpec_Security checks that the security requirements in the spec match the scopes that the server
+// requires: every operation lists the bearerAuth and basicAuth schemes with the scope of its route, plus an empty
+// requirement (authentication is optional), and public operations list none.
+func TestOpenAPISpec_Security(t *testing.T) {
+	t.Parallel()
+
+	publicOperations := []string{"GET /ping", "GET /openapi.yaml"}
+
+	for name, op := range specOperations(t) {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			method, path, _ := strings.Cut(name, " ")
+			path = strings.ReplaceAll(path, "{slackChannelId}", "C123")
+
+			// The server must agree on whether the operation is public.
+			server, _ := newAuthTestServer(t)
+			w := serve(t, server, method, path, "")
+
+			if slices.Contains(publicOperations, name) {
+				assert.Empty(t, op.Security, "public operation must have no security requirements")
+				assert.NotEqual(t, http.StatusUnauthorized, w.Code)
+
+				return
+			}
+
+			assert.Equal(t, http.StatusUnauthorized, w.Code, "protected operation must reject requests without credentials")
+			require.Len(t, op.Security, 3)
+
+			var scope string
+
+			for i, schemeName := range []string{"bearerAuth", "basicAuth"} {
+				scopes, ok := op.Security[i].Requirements.Get(schemeName)
+				require.True(t, ok, "security[%d] must be %s", i, schemeName)
+				require.Len(t, scopes, 1)
+				require.True(t, types.IsKnownScope(scopes[0]), scopes[0])
+
+				if scope == "" {
+					scope = scopes[0]
+				}
+
+				assert.Equal(t, scope, scopes[0], "both schemes must require the same scope")
+			}
+
+			assert.Zero(t, op.Security[2].Requirements.Len(), "security[2] must be empty (authentication is optional)")
+
+			_, has401 := op.Responses.Codes.Get("401")
+			_, has403 := op.Responses.Codes.Get("403")
+			assert.True(t, has401, "protected operation must document 401")
+			assert.True(t, has403, "protected operation must document 403")
+
+			// A principal with exactly the documented scope passes, and one with another scope is forbidden.
+			for _, other := range []string{types.ScopeAlertsWrite, types.ScopeAlertsTest, types.ScopeConfigRead} {
+				server := newTestServerWithChannels(t)
+				server.WithAuthenticator(types.AuthenticatorFunc(func(*http.Request) (*types.Principal, error) {
+					return &types.Principal{ID: "p", Scopes: []string{other}}, nil
+				}))
+
+				w := serve(t, server, method, path, bearer("x"))
+
+				if other == scope {
+					assert.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, w.Code, "scope %s must be allowed", other)
+				} else {
+					assert.Equal(t, http.StatusForbidden, w.Code, "scope %s must be forbidden", other)
+				}
+			}
 		})
 	}
 }
