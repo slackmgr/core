@@ -24,7 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README: the new `oidc` plugin (`github.com/slackmgr/plugins/oidc`) for OIDC/OAuth2 access token authentication
 
 ### Changed
+- Bumped direct dependencies: `github.com/slack-go/slack` v0.36.0, `github.com/gin-contrib/timeout` v1.2.5, `github.com/eko/gocache/store/rediscluster/v4` v4.2.10, `github.com/pb33f/libopenapi` v0.44.0 and `github.com/pb33f/libopenapi-validator` v0.16.5 (test only). The minimum Go version is now 1.26.10, required by `gin-contrib/timeout` v1.2.5
 - Bumped `github.com/slackmgr/types` to v0.15.0, which adds the authentication types (`types.Principal`, `types.Authenticator`, `types.Authorizer`, `types.ChannelAuthorizer`, scopes)
+
+### Fixed
+- Vulnerability GO-2026-6278 (weak random mask keys in `github.com/gorilla/websocket` v1.5.3, used by the Slack Socket Mode client): pinned `gorilla/websocket` to the fix commit `v1.5.4-0.20240701034025-d67f41855da4`, as no tagged release has it yet. Remove the pin when `slack-go` or `gorilla/websocket` releases a fixed version
 
 ## [0.30.0] - 2026-11-15
 
