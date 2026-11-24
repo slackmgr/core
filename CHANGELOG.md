@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `http_auth_requests_total{result}` metric (`authenticated`, `anonymous`, `missing_credentials`, `invalid_credentials`, `forbidden`, `error`), registered when authentication is enabled. Dashboard: new "Authentication Results" and "Anonymous Requests (window total)" panels in the REST API row
 - OpenAPI spec: `bearerAuth` and `basicAuth` security schemes, the scope of each operation in its security requirements, an Authentication section, and 401/403 responses for the protected operations. A contract test checks the documented scopes against the server
 
+- Channel access rules for authenticated principals in the API settings: `APISettings.AccessRules` (`config.AccessRule`, matching principal IDs exactly, by prefix or `*`, and channel IDs or `*`) and `APISettings.DefaultChannelAccess` (`allow`, the default, or `deny`), evaluated by `APISettings.ChannelAccessAllowed`. The channel of each alert after routing and every escalation `moveToChannel` must be allowed, otherwise the request is rejected as a whole with HTTP 403. A custom authorizer implementing `types.ChannelAuthorizer` replaces the rules. Applies to `POST /alerts` (and aliases), `POST /prometheus-alert` and `POST /alerts-test`
+- New `alerts_rejected_total` reasons `forbidden_channel` and `authorization_failed` (the dashboard panel description is updated)
+- `APIConfig.Auth.ClientBinding` (`fill`, the default, `override` or `off`): sets the client of alerts from authenticated requests to the principal ID
+- OpenAPI spec: channel restrictions and client binding are documented (Authentication section, 403 response, `client` field)
+
 ### Changed
 - Bumped `github.com/slackmgr/types` to v0.14.0, which adds the authentication types (`types.Principal`, `types.Authenticator`, `types.Authorizer`, scopes)
 

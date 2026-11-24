@@ -94,8 +94,16 @@ func (s *Server) processAlerts(c *gin.Context, alerts []*types.Alert, started ti
 		s.writeErrorResponse(c, err, statusCode, alert)
 	}
 
+	s.applyClientBinding(c, alerts)
+
 	if err := s.setSlackChannelID(c, alerts...); err != nil {
 		reject(rejectReasonOf(err, rejectReasonNoRoute), err, http.StatusBadRequest, nil)
+		return
+	}
+
+	// Check the channels of all alerts before validating them, so that a forbidden request learns nothing more.
+	if alert, err := s.authorizeAlertChannels(c, alerts); err != nil {
+		reject(rejectReasonOf(err, rejectReasonForbiddenChannel), err, channelAuthorizationStatus(err), alert)
 		return
 	}
 
@@ -341,8 +349,15 @@ func (s *Server) handleAlertsTest(c *gin.Context) {
 		return
 	}
 
+	s.applyClientBinding(c, alerts)
+
 	if err := s.setSlackChannelID(c, alerts...); err != nil {
 		s.writeErrorResponse(c, err, http.StatusBadRequest, nil)
+		return
+	}
+
+	if alert, err := s.authorizeAlertChannels(c, alerts); err != nil {
+		s.writeErrorResponse(c, err, channelAuthorizationStatus(err), alert)
 		return
 	}
 

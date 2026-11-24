@@ -290,6 +290,7 @@ func (c *APIConfig) ChannelInfoRefreshInterval() time.Duration {
 //   - ChannelInfoRefreshIntervalSeconds: zero (default) or between 10 and 3600 seconds, and not longer than the
 //     effective SlackClient channel info cache TTL
 //   - Insights: if non-nil, defaults are applied to unset fields and it must pass its own validation
+//   - Auth: if non-nil, it must pass its own validation
 func (c *APIConfig) Validate() error {
 	if err := c.validateRestPort(); err != nil {
 		return err
@@ -340,6 +341,12 @@ func (c *APIConfig) Validate() error {
 
 		if err := c.Insights.Validate(); err != nil {
 			return fmt.Errorf("insights config is invalid: %w", err)
+		}
+	}
+
+	if c.Auth != nil {
+		if err := c.Auth.Validate(); err != nil {
+			return fmt.Errorf("auth config is invalid: %w", err)
 		}
 	}
 

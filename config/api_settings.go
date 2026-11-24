@@ -57,6 +57,17 @@ type APISettings struct {
 	// disable authentication: requests are then rejected (or let through anonymously in permissive mode).
 	APIKeys []*APIKey `json:"apiKeys" mapstructure:"apiKeys" yaml:"apiKeys"`
 
+	// DefaultChannelAccess decides whether authenticated principals that no access rule applies to may send
+	// alerts to all channels ([ChannelAccessAllow], the default) or to none ([ChannelAccessDeny]). It is only
+	// used when authentication is enabled. Unauthenticated requests (authentication disabled, or anonymous in
+	// permissive mode) are never restricted.
+	DefaultChannelAccess string `json:"defaultChannelAccess" mapstructure:"defaultChannelAccess" yaml:"defaultChannelAccess"`
+
+	// AccessRules restrict the Slack channels that authenticated principals may send alerts to. See
+	// [AccessRule] and [APISettings.ChannelAccessAllowed]. They are only used when authentication is enabled,
+	// and are replaced by a custom types.ChannelAuthorizer if the server has one.
+	AccessRules []*AccessRule `json:"accessRules" mapstructure:"accessRules" yaml:"accessRules"`
+
 	ruleMatchCache map[string]string
 	cacheLock      sync.RWMutex
 	initialized    bool
@@ -174,7 +185,7 @@ func (s *APISettings) Clone() (*APISettings, error) {
 //  3. Compiles regular expressions for MatchesRegex patterns
 //  4. Validates that each rule has at least one matching mechanism configured
 //  5. Validates that all channel IDs are valid Slack channel ID format
-//  6. Validates the API keys (see [APIKey])
+//  6. Validates the API keys (see [APIKey]), the default channel access and the access rules (see [AccessRule])
 //  7. Initializes the route match cache for performance
 //
 // This method is idempotent - calling it multiple times on an already-initialized
@@ -268,10 +279,14 @@ func (s *APISettings) InitAndValidate(logger types.Logger) error {
 		return err
 	}
 
+	if err := s.initAccessRules(); err != nil {
+		return err
+	}
+
 	s.ruleMatchCache = make(map[string]string)
 	s.initialized = true
 
-	logger.Infof("API settings initialized with %d routing rules and %d API keys", len(s.RoutingRules), len(s.APIKeys))
+	logger.Infof("API settings initialized with %d routing rules, %d API keys and %d access rules (default channel access: %s)", len(s.RoutingRules), len(s.APIKeys), len(s.AccessRules), s.DefaultChannelAccess)
 
 	for i, rule := range s.RoutingRules {
 		logger.Debugf("Routing rule #%d name:%s channel:%s equals:%v hasPrefix:%v regex:%v matchAll:%v", i, rule.Name, rule.Channel, rule.Equals, rule.HasPrefix, rule.MatchesRegex, rule.MatchAll)

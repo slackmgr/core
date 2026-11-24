@@ -732,6 +732,24 @@ func TestOpenAPISpec_Responses(t *testing.T) {
 		{
 			name: "ping without credentials", method: http.MethodGet, path: "/ping", setup: enableAuth, wantStatus: http.StatusOK,
 		},
+		{
+			name: "send alerts to forbidden channel", method: http.MethodPost, path: "/alerts", body: validAlert,
+			authorization: bearer(testKeyWriter),
+			setup: func(s *Server, q *mockFifoQueueProducer, c *mockChannelInfoProvider) {
+				enableAuth(s, q, c)
+				s.WithAuthorizer(&channelAuthorizerStub{err: types.ErrForbidden})
+			},
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "test alerts to forbidden channel", method: http.MethodPost, path: "/alerts-test", body: validAlert,
+			authorization: bearer(testKeyAdmin),
+			setup: func(s *Server, q *mockFifoQueueProducer, c *mockChannelInfoProvider) {
+				enableAuth(s, q, c)
+				s.WithAuthorizer(&channelAuthorizerStub{err: types.ErrForbidden})
+			},
+			wantStatus: http.StatusForbidden,
+		},
 	}
 
 	v := newOpenAPIValidator(t)

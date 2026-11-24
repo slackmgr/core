@@ -28,6 +28,10 @@ info:
     credentials lack the scope with HTTP 403. In permissive mode (used while migrating clients), requests
     without any credentials are let through.
 
+    The deployment may also restrict the Slack channels an authenticated caller may send alerts to. The
+    channel of each alert (after routing) and every escalation `moveToChannel` must be allowed, otherwise the
+    whole request is rejected with HTTP 403 and no alert is queued.
+
     ## Routing
 
     The Slack channel of an alert is determined in this order:
@@ -751,13 +755,21 @@ components:
     Forbidden:
       description: |
         Authentication is enabled, and the credentials are valid, but lack the scope required by the
-        endpoint.
+        endpoint, or the caller may not send alerts to the channel of an alert (or an escalation
+        `moveToChannel`). No alert was queued.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
-          example:
-            error: 'Forbidden: the alerts:write scope is required'
+          examples:
+            scope:
+              summary: Missing scope
+              value:
+                error: 'Forbidden: the alerts:write scope is required'
+            channel:
+              summary: Forbidden channel
+              value:
+                error: Principal alertmanager-prod is not allowed to send alerts to channel C0123456789
     Accepted:
       description: |
         All alerts were queued, except any alerts dropped by `ignoreIfTextContains`. The `RateLimit-*`
@@ -960,7 +972,9 @@ components:
           type: string
           description: |
             The client that produced the alert, e.g. `prometheus`. Used for insights and reporting only.
-            Truncated at 100 characters. If empty, `username` is used.
+            Truncated at 100 characters. If empty, `username` is used. When the request is authenticated, the
+            API may set it to the caller's principal ID: by default only if it is empty, or always, depending
+            on the deployment.
         iconEmoji:
           type: string
           pattern: '^(:[^:]{1,50}:)?$'

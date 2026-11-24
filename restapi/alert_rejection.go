@@ -40,6 +40,7 @@ var allRejectReasons = []string{ //nolint:gochecknoglobals // Constant list
 	rejectReasonTooManyInRequest, rejectReasonChannelLookupFailed, rejectReasonChannelNotFound,
 	rejectReasonChannelArchived, rejectReasonChannelReadOnly, rejectReasonNotInChannel, rejectReasonTooManyUsers, rejectReasonRateLimited,
 	rejectReasonMissingEncryptionKey, rejectReasonEncryptionFailed, rejectReasonQueueError,
+	rejectReasonForbiddenChannel, rejectReasonAuthorizationFailed,
 }
 
 // alertRejectionError is an error that carries the reason an alert was rejected.

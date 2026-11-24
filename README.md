@@ -252,6 +252,20 @@ Generate keys with at least 32 random bytes, e.g. `openssl rand -hex 32`. Client
 
 **Custom authenticators** implement `types.Authenticator` (e.g. to validate OIDC tokens) and return a `types.Principal` with an ID and scopes, `types.ErrNoCredentials` if the request has no credentials they handle, or `types.ErrInvalidCredentials`. Combine several with `types.ChainAuthenticators`. A custom `types.Authorizer` replaces the scope check, e.g. to delegate decisions to a policy engine.
 
+**Channel access rules** restrict the Slack channels that authenticated principals may send alerts to. They are configured in the API settings (hot-reloaded), and apply to all principals, whatever authenticator produced them:
+
+```yaml
+defaultChannelAccess: allow   # or deny: principals without a matching rule may use no channel
+accessRules:
+  - name: alertmanager
+    principals: [alertmanager-prod, alertmanager-staging]   # exact IDs, a trailing * for a prefix, or *
+    channels: [C0123456789, C0234567890]                    # channel IDs (not names), or *
+```
+
+If rules match the principal, the channel must be listed in one of them. Otherwise, `defaultChannelAccess` decides (default `allow`, so restrictions are opt-in per principal). The check applies to the channel of each alert after routing (whether it came from the body, the path or a route key) and to every escalation `moveToChannel`, since an escalation could otherwise move an issue into a forbidden channel. If any alert is forbidden, the whole request is rejected with HTTP 403 before validation and rate limiting, and the alerts are counted as `alerts_rejected_total{reason="forbidden_channel"}`. A custom `Authorizer` that also implements `types.ChannelAuthorizer` replaces the rules (a failure gets HTTP 500, reason `authorization_failed`). Unauthenticated requests (authentication disabled, or anonymous in permissive mode) are not restricted.
+
+**Client binding** (`APIConfig.Auth.ClientBinding`) sets the `client` of alerts from authenticated requests to the principal ID, which makes insights attribution trustworthy: `fill` (default) only sets empty clients, `override` always replaces the client (so it cannot be spoofed), and `off` leaves it as sent.
+
 **Permissive mode** (`APIConfig.Auth.Permissive`) lets requests without credentials through anonymously, while requests with credentials are still checked. Use it to migrate existing clients without a hard cutover: enable authentication in permissive mode, move clients to credentials one by one, and switch to strict mode when `http_auth_requests_total{result="anonymous"}` stays at zero.
 
 Alerts read from raw alert queues (`Server.WithRawAlertConsumer`) bypass the HTTP API, and are not authenticated: secure those queues with the access control of the queue service.

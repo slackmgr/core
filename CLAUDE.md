@@ -132,7 +132,7 @@ The system runs as two main services that communicate via message queues:
 - REST server on port 8080 accepting alerts
 - Endpoints: `POST /alerts`, `POST /prometheus-alert`, `POST /alerts-test`, `GET /mappings`, `GET /channels`, `GET /ping`, `GET /openapi.yaml` (plus deprecated aliases of `POST /alerts`)
 - Applies rate limiting per Slack channel
-- Optional authentication (`WithAPIKeyAuth`, `WithAuthenticator`, `WithAuthorizer`; contract types in `github.com/slackmgr/types`): every route except `/ping` and `/openapi.yaml` requires a scope, set in `registerRoutes`. New routes must get a scope there and matching `security` in `openapi.yaml` (checked by `TestOpenAPISpec_Security`)
+- Optional authentication (`WithAPIKeyAuth`, `WithAuthenticator`, `WithAuthorizer`; contract types in `github.com/slackmgr/types`): every route except `/ping` and `/openapi.yaml` requires a scope, set in `registerRoutes`. New routes must get a scope there and matching `security` in `openapi.yaml` (checked by `TestOpenAPISpec_Security`). Client binding (`applyClientBinding`, before routing) and channel access (`authorizeAlertChannels`, right after routing) run in `processAlerts` and `handleAlertsTest`
 - Enqueues alerts for processing
 
 ### Manager (`manager/`)
